@@ -666,30 +666,12 @@ func TestSplitCoverage2_ExecuteInteriorSplitComposite_Ascending(t *testing.T) {
 		t.Fatalf("CreateWithoutRowidTable: %v", err)
 	}
 	cur := NewCursorWithOptions(bt, root, true)
-	payload := bytes.Repeat([]byte("a"), 15)
 	const n = 500
-	inserted := 0
-	for i := 0; i < n; i++ {
-		key := withoutrowid.EncodeCompositeKey([]interface{}{fmt.Sprintf("k%06d", i)})
-		if err := cur.InsertWithComposite(0, key, payload); err != nil {
-			t.Logf("stopped at i=%d: %v", i, err)
-			break
-		}
-		inserted++
-	}
+	inserted := insertCompositeRows(bt, cur, n, "k", 15)
 	if inserted < n/2 {
 		t.Errorf("only inserted %d, want at least %d", inserted, n/2)
 	}
-	scan := NewCursorWithOptions(bt, cur.RootPage, true)
-	count := 0
-	if err := scan.MoveToFirst(); err == nil {
-		for scan.IsValid() {
-			count++
-			if err := scan.Next(); err != nil {
-				break
-			}
-		}
-	}
+	count := scanCompositeForward(bt, cur.RootPage, n+10)
 	if count < inserted/2 {
 		t.Errorf("scan=%d rows, want at least %d", count, inserted/2)
 	}
@@ -962,6 +944,39 @@ func TestSplitCoverage2_UpdateParentAfterMerge_AlternatingDelete(t *testing.T) {
 
 // TestSplitCoverage2_MixedWorkload_RowidTable runs a multi-phase workload on a
 // rowid table exercising all target functions through normal operations.
+func sc2SeekSample(t *testing.T, bt *Btree, root uint32, keys []int64) {
+	t.Helper()
+	for _, i := range keys {
+		c := NewCursor(bt, root)
+		found, err := c.SeekRowid(i)
+		if err != nil {
+			t.Fatalf("SeekRowid(%d): %v", i, err)
+		}
+		if !found {
+			t.Errorf("SeekRowid(%d): not found", i)
+		}
+	}
+}
+
+func sc2DeleteEveryNth(bt *Btree, root uint32, step, max int64) {
+	for i := step; i <= max; i += step {
+		c := NewCursor(bt, root)
+		found, _ := c.SeekRowid(i)
+		if found {
+			c.Delete() //nolint:errcheck
+		}
+	}
+}
+
+func sc2ReinsertEveryNth(bt *Btree, root *uint32, step, max int64, payload []byte) {
+	for i := step; i <= max; i += step {
+		c := NewCursor(bt, *root)
+		if err := c.Insert(i, payload); err == nil {
+			*root = c.RootPage
+		}
+	}
+}
+
 func TestSplitCoverage2_MixedWorkload_RowidTable(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(512)
@@ -972,7 +987,6 @@ func TestSplitCoverage2_MixedWorkload_RowidTable(t *testing.T) {
 	cur := NewCursor(bt, root)
 	payload := bytes.Repeat([]byte("w"), 22)
 
-	// Phase 1: build a multi-level tree.
 	const n int64 = 400
 	sc2InsertRows(t, cur, 1, n, payload)
 	root = cur.RootPage
@@ -981,59 +995,19 @@ func TestSplitCoverage2_MixedWorkload_RowidTable(t *testing.T) {
 	if before != int(n) {
 		t.Fatalf("phase1: fwd=%d want %d", before, n)
 	}
-
-	// Phase 2: full backward scan exercises prevViaParent.
 	bwd := sc2BwdCount(t, bt, root)
 	if bwd != int(n) {
 		t.Errorf("backward scan: bwd=%d want %d", bwd, n)
 	}
 
-	// Phase 3: seek a sample of keys to exercise resolveChildPage (both branches).
-	// Seek several known-inserted keys spread across the key space.
-	for _, i := range []int64{1, 50, 100, 200} {
-		c := NewCursor(bt, root)
-		found, err := c.SeekRowid(i)
-		if err != nil {
-			t.Fatalf("SeekRowid(%d): %v", i, err)
-		}
-		if !found {
-			t.Errorf("SeekRowid(%d): not found", i)
-		}
-	}
-	// Also seek a key larger than all rows to exercise the right-child branch.
-	{
-		c := NewCursor(bt, root)
-		_, err := c.SeekRowid(99999)
-		if err != nil {
-			t.Fatalf("SeekRowid(99999): %v", err)
-		}
-	}
-
-	// Phase 4: delete every 4th row to force merges (updateParentAfterMerge).
-	for i := int64(4); i <= n; i += 4 {
-		c := NewCursor(bt, root)
-		found, _ := c.SeekRowid(i)
-		if found {
-			c.Delete()
-		}
-	}
-
-	after := sc2FwdCount(t, bt, root)
-	t.Logf("rows after delete-every-4th: %d", after)
-
-	// Phase 5: re-insert deleted rows to re-trigger splits.
-	for i := int64(4); i <= n; i += 4 {
-		c := NewCursor(bt, root)
-		if err := c.Insert(i, payload); err == nil {
-			root = c.RootPage
-		}
-	}
+	sc2SeekSample(t, bt, root, []int64{1, 50, 100, 200})
+	sc2DeleteEveryNth(bt, root, 4, n)
+	sc2ReinsertEveryNth(bt, &root, 4, n, payload)
 
 	final := sc2FwdCount(t, bt, root)
 	if final < 1 {
 		t.Error("expected rows after mixed workload")
 	}
-	t.Logf("final row count: %d", final)
 }
 
 // TestSplitCoverage2_MixedWorkload_CompositeTable runs a comparable workload
@@ -1050,30 +1024,12 @@ func TestSplitCoverage2_MixedWorkload_CompositeTable(t *testing.T) {
 	payload := bytes.Repeat([]byte("m"), 20)
 
 	const n = 300
-	inserted := 0
-	for i := 0; i < n; i++ {
-		key := withoutrowid.EncodeCompositeKey([]interface{}{fmt.Sprintf("row%06d", i)})
-		if err := cur.InsertWithComposite(0, key, payload); err != nil {
-			t.Logf("stopped at i=%d: %v", i, err)
-			break
-		}
-		inserted++
-	}
+	inserted := insertCompositeRows(bt, cur, n, "row", len(payload))
 	if inserted < n/2 {
 		t.Errorf("only inserted %d rows, want at least %d", inserted, n/2)
 	}
 
-	// Forward scan.
-	scan := NewCursorWithOptions(bt, cur.RootPage, true)
-	count := 0
-	if err := scan.MoveToFirst(); err == nil {
-		for scan.IsValid() {
-			count++
-			if err := scan.Next(); err != nil {
-				break
-			}
-		}
-	}
+	count := scanCompositeForward(bt, cur.RootPage, n+10)
 	if count < inserted/2 {
 		t.Errorf("scan=%d want at least %d", count, inserted/2)
 	}

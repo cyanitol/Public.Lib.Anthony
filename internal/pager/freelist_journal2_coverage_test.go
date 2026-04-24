@@ -239,19 +239,13 @@ func TestFreelistJournal2_ProcessTrunkPageFull(t *testing.T) {
 
 // TestFreelistJournal2_RestoreAllEntriesReadError exercises the non-EOF read
 // error branch in restoreAllEntries by closing the underlying file mid-read.
-func TestFreelistJournal2_RestoreAllEntriesReadError(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	dbFile := filepath.Join(dir, "err.db")
-	jPath := filepath.Join(dir, "err.db-journal")
-
-	// Open pager and commit a page so the db file has content.
+// fj2CreateDBWithPage creates a db file with one committed page and returns pageSize/dbSize.
+func fj2CreateDBWithPage(t *testing.T, dbFile string) (int, Pgno) {
+	t.Helper()
 	p, err := Open(dbFile, false)
 	if err != nil {
 		t.Fatalf("Open db: %v", err)
 	}
-
 	page, err := p.Get(1)
 	if err != nil {
 		t.Fatalf("Get(1): %v", err)
@@ -267,8 +261,13 @@ func TestFreelistJournal2_RestoreAllEntriesReadError(t *testing.T) {
 	pageSize := p.PageSize()
 	dbSize := Pgno(p.PageCount())
 	p.Close()
+	return pageSize, dbSize
+}
 
-	// Build a journal with a full valid entry followed by truncated data.
+// fj2WriteJournalWithPartialEntry creates a journal with one valid entry
+// followed by a truncated partial entry.
+func fj2WriteJournalWithPartialEntry(t *testing.T, jPath string, pageSize int, dbSize Pgno) {
+	t.Helper()
 	j := NewJournal(jPath, pageSize, dbSize)
 	if err := j.Open(); err != nil {
 		t.Fatalf("Journal.Open: %v", err)
@@ -278,11 +277,6 @@ func TestFreelistJournal2_RestoreAllEntriesReadError(t *testing.T) {
 	if err := j.WriteOriginal(1, origData); err != nil {
 		t.Fatalf("WriteOriginal: %v", err)
 	}
-
-	// Append a partial (truncated) entry — not enough bytes to form a full record.
-	// This hits the `n < entrySize` branch in restoreAllEntries.
-	partial := make([]byte, 3) // far less than 4+pageSize+4
-	// Write directly to the underlying file handle via the journal's file path.
 	if err := j.Close(); err != nil {
 		t.Fatalf("Close journal for append: %v", err)
 	}
@@ -290,34 +284,37 @@ func TestFreelistJournal2_RestoreAllEntriesReadError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open journal for append: %v", err)
 	}
-	if _, err := f.Write(partial); err != nil {
+	if _, err := f.Write(make([]byte, 3)); err != nil {
 		f.Close()
 		t.Fatalf("append partial entry: %v", err)
 	}
 	f.Close()
+}
 
-	// Re-open journal for rollback — we need a Journal whose file is open.
+func TestFreelistJournal2_RestoreAllEntriesReadError(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	dbFile := filepath.Join(dir, "err.db")
+	jPath := filepath.Join(dir, "err.db-journal")
+
+	pageSize, dbSize := fj2CreateDBWithPage(t, dbFile)
+	fj2WriteJournalWithPartialEntry(t, jPath, pageSize, dbSize)
+
 	j2 := NewJournal(jPath, pageSize, dbSize)
-	// Manually open it by re-reading — but Rollback needs j2.file open.
-	// We replicate the internal open: set file field directly is not possible from
-	// external package, so use the exported Open path. Open truncates, so instead
-	// we open the file manually and call restoreAllEntries via Rollback.
-	// Since we're in package pager (internal), we can set j2.file directly.
+	var err error
 	j2.file, err = os.OpenFile(jPath, os.O_RDWR, 0600)
 	if err != nil {
 		t.Fatalf("open journal file for rollback: %v", err)
 	}
 	j2.initialized = true
 
-	// Reopen db pager for rollback target.
 	p2, err := Open(dbFile, false)
 	if err != nil {
 		t.Fatalf("Open db2: %v", err)
 	}
 	defer p2.Close()
 
-	// Rollback should succeed: first entry is fully valid and gets applied;
-	// the partial trailing data triggers the n < entrySize break (not an error).
 	if err := j2.Rollback(p2); err != nil {
 		t.Errorf("Rollback with partial trailing entry: unexpected error: %v", err)
 	}
@@ -326,6 +323,27 @@ func TestFreelistJournal2_RestoreAllEntriesReadError(t *testing.T) {
 
 // TestFreelistJournal2_RestoreAllEntriesChecksumError exercises the checksum
 // mismatch error path inside restoreEntry (called from restoreAllEntries).
+// fj2WriteJournalWithCorruptChecksum creates a journal entry and corrupts its checksum.
+func fj2WriteJournalWithCorruptChecksum(t *testing.T, jPath string, pageSize int, dbSize Pgno) *Journal {
+	t.Helper()
+	j := NewJournal(jPath, pageSize, dbSize)
+	if err := j.Open(); err != nil {
+		t.Fatalf("Journal.Open: %v", err)
+	}
+	if err := j.WriteOriginal(1, make([]byte, pageSize)); err != nil {
+		t.Fatalf("WriteOriginal: %v", err)
+	}
+	entrySize := int64(4 + pageSize + 4)
+	corruptOffset := int64(JournalHeaderSize) + entrySize - 4
+	if _, err := j.file.WriteAt([]byte{0xDE, 0xAD, 0xBE, 0xEF}, corruptOffset); err != nil {
+		t.Fatalf("corrupt checksum in journal: %v", err)
+	}
+	if _, err := j.file.Seek(JournalHeaderSize, io.SeekStart); err != nil {
+		t.Fatalf("seek: %v", err)
+	}
+	return j
+}
+
 func TestFreelistJournal2_RestoreAllEntriesChecksumError(t *testing.T) {
 	t.Parallel()
 
@@ -333,56 +351,15 @@ func TestFreelistJournal2_RestoreAllEntriesChecksumError(t *testing.T) {
 	dbFile := filepath.Join(dir, "cksum.db")
 	jPath := filepath.Join(dir, "cksum.db-journal")
 
-	// Create a db file with at least one page.
-	p, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("Open db: %v", err)
-	}
-	page, err := p.Get(1)
-	if err != nil {
-		t.Fatalf("Get(1): %v", err)
-	}
-	if err := p.Write(page); err != nil {
-		t.Fatalf("Write(1): %v", err)
-	}
-	p.Put(page)
-	if err := p.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
-	pageSize := p.PageSize()
-	dbSize := Pgno(p.PageCount())
-	p.Close()
+	pageSize, dbSize := fj2CreateDBWithPage(t, dbFile)
+	j := fj2WriteJournalWithCorruptChecksum(t, jPath, pageSize, dbSize)
 
-	// Write a journal entry with a deliberately corrupted checksum.
-	j := NewJournal(jPath, pageSize, dbSize)
-	if err := j.Open(); err != nil {
-		t.Fatalf("Journal.Open: %v", err)
-	}
-	origData := make([]byte, pageSize)
-	if err := j.WriteOriginal(1, origData); err != nil {
-		t.Fatalf("WriteOriginal: %v", err)
-	}
-	// Corrupt the last 4 bytes (checksum) of the entry in the file.
-	entrySize := int64(4 + pageSize + 4)
-	corruptOffset := int64(JournalHeaderSize) + entrySize - 4
-	badChecksum := []byte{0xDE, 0xAD, 0xBE, 0xEF}
-	if _, err := j.file.WriteAt(badChecksum, corruptOffset); err != nil {
-		t.Fatalf("corrupt checksum in journal: %v", err)
-	}
-
-	// Keep file open — seek back to after header before Rollback.
-	if _, err := j.file.Seek(JournalHeaderSize, io.SeekStart); err != nil {
-		t.Fatalf("seek: %v", err)
-	}
-
-	// Reopen pager for rollback.
 	p2, err := Open(dbFile, false)
 	if err != nil {
 		t.Fatalf("Open db2: %v", err)
 	}
 	defer p2.Close()
 
-	// Rollback should fail with a checksum mismatch error.
 	err = j.Rollback(p2)
 	if err == nil {
 		t.Error("Rollback with corrupt checksum: expected error, got nil")

@@ -80,14 +80,23 @@ func TestWALRecoverReadOnly_WALIndexFails(t *testing.T) {
 // TestWALRecoverReadOnly_Success covers the success path of recoverWALReadOnly.
 // It creates a WAL with frames, then calls the function directly and verifies
 // that p.wal, p.walIndex, and p.journalMode are set correctly.
+// wrcCleanupPagerWAL closes WAL and WAL index if set.
+func wrcCleanupPagerWAL(p *Pager) {
+	if p.wal != nil {
+		p.wal.Close()
+	}
+	if p.walIndex != nil {
+		p.walIndex.Close()
+	}
+}
+
 func TestWALRecoverReadOnly_Success(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
 	dbFile := filepath.Join(dir, "rcv_ro_ok.db")
 
-	dbData := make([]byte, DefaultPageSize)
-	if err := os.WriteFile(dbFile, dbData, 0600); err != nil {
+	if err := os.WriteFile(dbFile, make([]byte, DefaultPageSize), 0600); err != nil {
 		t.Fatalf("create db file: %v", err)
 	}
 
@@ -97,10 +106,8 @@ func TestWALRecoverReadOnly_Success(t *testing.T) {
 		t.Fatalf("wal.Close: %v", err)
 	}
 
-	p := &Pager{
-		filename: dbFile,
-		pageSize: DefaultPageSize,
-	}
+	p := &Pager{filename: dbFile, pageSize: DefaultPageSize}
+	defer wrcCleanupPagerWAL(p)
 
 	if err := p.recoverWALReadOnly(); err != nil {
 		t.Fatalf("recoverWALReadOnly: unexpected error: %v", err)
@@ -113,13 +120,6 @@ func TestWALRecoverReadOnly_Success(t *testing.T) {
 	}
 	if p.journalMode != JournalModeWAL {
 		t.Errorf("journalMode = %d, want JournalModeWAL (%d)", p.journalMode, JournalModeWAL)
-	}
-	// Cleanup.
-	if p.wal != nil {
-		p.wal.Close()
-	}
-	if p.walIndex != nil {
-		p.walIndex.Close()
 	}
 }
 

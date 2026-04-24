@@ -282,35 +282,9 @@ func TestMCDC9_NavigateToComposite_InteriorDescent(t *testing.T) {
 func TestMCDC9_DescendToFirstComposite_MultiLevel(t *testing.T) {
 	t.Parallel()
 	_, c := mcdc9CompositeTree(t, 512, 150)
+	requireInteriorRoot(t, c.Btree, c.RootPage)
 
-	pageData, err := c.Btree.GetPage(c.RootPage)
-	if err != nil {
-		t.Fatalf("GetPage: %v", err)
-	}
-	hdr, err := ParsePageHeader(pageData, c.RootPage)
-	if err != nil {
-		t.Fatalf("ParsePageHeader: %v", err)
-	}
-	if !hdr.IsInterior {
-		t.Skip("root still a leaf — not enough rows for interior root")
-	}
-
-	// MoveToFirst on composite tree traverses descendToFirstComposite
-	if err := c.MoveToFirst(); err != nil {
-		t.Fatalf("MoveToFirst: %v", err)
-	}
-	if c.State != CursorValid {
-		t.Fatal("cursor not valid after MoveToFirst")
-	}
-
-	// Traverse all 150 entries
-	count := 1
-	for {
-		if err := c.Next(); err != nil {
-			break
-		}
-		count++
-	}
+	count := countForward(c)
 	if count < 100 {
 		t.Errorf("expected at least 100 entries, got %d", count)
 	}
@@ -731,30 +705,17 @@ func TestMCDC9_IndexCursor_PositionAtLastCell_EmptyPage(t *testing.T) {
 
 func TestMCDC9_Delete_CellWithOverflow(t *testing.T) {
 	t.Parallel()
-	// Small pages force overflow for large payloads.
 	bt := NewBtree(512)
 	root, err := bt.CreateTable()
 	if err != nil {
 		t.Fatalf("CreateTable: %v", err)
 	}
 	c := NewCursor(bt, root)
-
-	// Insert a large payload that will use overflow pages.
 	bigPayload := make([]byte, 400)
-	for i := range bigPayload {
-		bigPayload[i] = byte(i % 256)
-	}
-	if err := c.Insert(1, bigPayload); err != nil {
-		t.Fatalf("Insert with overflow payload: %v", err)
-	}
+	insertAndVerifyOverflow(t, c, 1, bigPayload, true)
 
-	// Seek and delete — freeOverflowPages must be called.
-	found, err := c.SeekRowid(1)
-	if err != nil || !found {
-		t.Fatalf("SeekRowid(1): found=%v err=%v", found, err)
-	}
 	if c.CurrentCell == nil || c.CurrentCell.OverflowPage == 0 {
-		t.Skip("cell has no overflow page — large payload fit locally")
+		t.Skip("cell has no overflow page")
 	}
 	if err := c.Delete(); err != nil {
 		t.Fatalf("Delete with overflow: %v", err)

@@ -58,30 +58,37 @@ func (m *mockDB) ExecDDL(sql string) error {
 	return nil
 }
 
+// stripAtChar strips s at the first occurrence of ch.
+func stripAtChar(s string, ch rune) string {
+	for i, c := range s {
+		if c == ch {
+			return s[:i]
+		}
+	}
+	return s
+}
+
+// trySscanf tries to Sscanf a single string from sql with the given format.
+func trySscanf(sql, format string) (string, bool) {
+	var name string
+	if n, err := fmt.Sscanf(sql, format, &name); n == 1 && err == nil {
+		return name, true
+	}
+	return "", false
+}
+
 // parseDDLStatement extracts the table name and operation from simple DDL.
-// Recognises: "CREATE TABLE IF NOT EXISTS name(...)" and "DROP TABLE IF EXISTS name".
 func parseDDLStatement(sql string) (string, string) {
 	if len(sql) == 0 {
 		return "", ""
 	}
-	// CREATE TABLE IF NOT EXISTS <name>
-	var name string
-	if n, err := fmt.Sscanf(sql, "CREATE TABLE IF NOT EXISTS %s", &name); n == 1 && err == nil {
-		// name may include "(…)" – strip at first '('
-		for i, c := range name {
-			if c == '(' {
-				name = name[:i]
-				break
-			}
-		}
-		return name, "create"
+	if name, ok := trySscanf(sql, "CREATE TABLE IF NOT EXISTS %s"); ok {
+		return stripAtChar(name, '('), "create"
 	}
-	// DROP TABLE IF EXISTS <name>
-	if n, err := fmt.Sscanf(sql, "DROP TABLE IF EXISTS %s", &name); n == 1 && err == nil {
+	if name, ok := trySscanf(sql, "DROP TABLE IF EXISTS %s"); ok {
 		return name, "drop"
 	}
-	// DELETE FROM <name>
-	if n, err := fmt.Sscanf(sql, "DELETE FROM %s", &name); n == 1 && err == nil {
+	if name, ok := trySscanf(sql, "DELETE FROM %s"); ok {
 		return name, "delete"
 	}
 	return "", ""
@@ -95,37 +102,28 @@ func (m *mockDB) ExecDML(sql string, args ...interface{}) (int64, error) {
 		return 0, m.execDMLErr
 	}
 
-	// INSERT OR REPLACE INTO <table>(…) VALUES(?,?)
-	var tableName string
-	if n, _ := fmt.Sscanf(sql, "INSERT OR REPLACE INTO %s", &tableName); n == 1 {
-		// strip trailing "(..." if present
-		for i, c := range tableName {
-			if c == '(' {
-				tableName = tableName[:i]
-				break
-			}
-		}
-		tbl := m.getOrCreateTable(tableName)
-		if len(args) >= 2 {
-			pk, ok := args[0].(int64)
-			if ok {
-				row := make([]interface{}, len(args))
-				copy(row, args)
-				tbl.rows[pk] = row
-			}
-		}
-		return 1, nil
+	if tableName, ok := trySscanf(sql, "INSERT OR REPLACE INTO %s"); ok {
+		return m.execInsert(stripAtChar(tableName, '('), args), nil
 	}
-
-	// DELETE FROM <table>
-	if n, _ := fmt.Sscanf(sql, "DELETE FROM %s", &tableName); n == 1 {
+	if tableName, ok := trySscanf(sql, "DELETE FROM %s"); ok {
 		if tbl, exists := m.tables[tableName]; exists {
 			tbl.rows = make(map[int64][]interface{})
 		}
 		return 0, nil
 	}
-
 	return 0, nil
+}
+
+func (m *mockDB) execInsert(tableName string, args []interface{}) int64 {
+	tbl := m.getOrCreateTable(tableName)
+	if len(args) >= 2 {
+		if pk, ok := args[0].(int64); ok {
+			row := make([]interface{}, len(args))
+			copy(row, args)
+			tbl.rows[pk] = row
+		}
+	}
+	return 1
 }
 
 func (m *mockDB) getOrCreateTable(name string) *mockTable {
@@ -142,46 +140,41 @@ func (m *mockDB) Query(sql string, args ...interface{}) ([][]interface{}, error)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// SELECT nodeno, data FROM <table>_node
-	var tableName string
-	if n, _ := fmt.Sscanf(sql, "SELECT nodeno, data FROM %s", &tableName); n == 1 {
-		tbl, exists := m.tables[tableName]
-		if !exists {
-			return nil, nil
-		}
-		var result [][]interface{}
-		for _, row := range tbl.rows {
-			result = append(result, row)
-		}
-		return result, nil
+	if tableName, ok := trySscanf(sql, "SELECT nodeno, data FROM %s"); ok {
+		return m.queryAllRows(tableName), nil
 	}
-
-	// SELECT parentnode FROM <table>_parent WHERE nodeno = ?
-	if n, _ := fmt.Sscanf(sql, "SELECT parentnode FROM %s", &tableName); n == 1 {
-		// strip " WHERE ..." suffix from tableName
-		for i, c := range tableName {
-			if c == ' ' {
-				tableName = tableName[:i]
-				break
-			}
-		}
-		tbl, exists := m.tables[tableName]
-		if !exists || len(args) == 0 {
-			return nil, nil
-		}
-		pk, ok := args[0].(int64)
-		if !ok {
-			return nil, nil
-		}
-		row, exists := tbl.rows[pk]
-		if !exists || len(row) < 2 {
-			return nil, nil
-		}
-		// row[1] is the parentnode value
-		return [][]interface{}{{row[1]}}, nil
+	if tableName, ok := trySscanf(sql, "SELECT parentnode FROM %s"); ok {
+		return m.queryParent(stripAtChar(tableName, ' '), args), nil
 	}
-
 	return nil, nil
+}
+
+func (m *mockDB) queryAllRows(tableName string) [][]interface{} {
+	tbl, exists := m.tables[tableName]
+	if !exists {
+		return nil
+	}
+	var result [][]interface{}
+	for _, row := range tbl.rows {
+		result = append(result, row)
+	}
+	return result
+}
+
+func (m *mockDB) queryParent(tableName string, args []interface{}) [][]interface{} {
+	tbl, exists := m.tables[tableName]
+	if !exists || len(args) == 0 {
+		return nil
+	}
+	pk, ok := args[0].(int64)
+	if !ok {
+		return nil
+	}
+	row, exists := tbl.rows[pk]
+	if !exists || len(row) < 2 {
+		return nil
+	}
+	return [][]interface{}{{row[1]}}
 }
 
 // ---------------------------------------------------------------------------
@@ -198,34 +191,31 @@ func TestNewShadowTableManager(t *testing.T) {
 	}
 }
 
+// assertNoErr checks that err is nil, logging the operation name.
+func assertNoErrRTree(t *testing.T, op string, err error) {
+	t.Helper()
+	if err != nil {
+		t.Errorf("%s with nil db: %v", op, err)
+	}
+}
+
 // TestShadowTableManagerNilDB verifies nil-db fast paths.
 func TestShadowTableManagerNilDB(t *testing.T) {
 	t.Parallel()
 	mgr := NewShadowTableManager("t", nil, 2)
 
-	if err := mgr.CreateShadowTables(); err != nil {
-		t.Errorf("CreateShadowTables with nil db: %v", err)
-	}
-	if err := mgr.DropShadowTables(); err != nil {
-		t.Errorf("DropShadowTables with nil db: %v", err)
-	}
-	if err := mgr.SaveEntries(map[int64]*Entry{}); err != nil {
-		t.Errorf("SaveEntries with nil db: %v", err)
-	}
-	if err := mgr.SaveNextID(42); err != nil {
-		t.Errorf("SaveNextID with nil db: %v", err)
-	}
+	assertNoErrRTree(t, "CreateShadowTables", mgr.CreateShadowTables())
+	assertNoErrRTree(t, "DropShadowTables", mgr.DropShadowTables())
+	assertNoErrRTree(t, "SaveEntries", mgr.SaveEntries(map[int64]*Entry{}))
+	assertNoErrRTree(t, "SaveNextID", mgr.SaveNextID(42))
+
 	entries, err := mgr.LoadEntries()
-	if err != nil {
-		t.Errorf("LoadEntries with nil db: %v", err)
-	}
+	assertNoErrRTree(t, "LoadEntries", err)
 	if len(entries) != 0 {
 		t.Errorf("expected 0 entries, got %d", len(entries))
 	}
 	nextID, err := mgr.LoadNextID()
-	if err != nil {
-		t.Errorf("LoadNextID with nil db: %v", err)
-	}
+	assertNoErrRTree(t, "LoadNextID", err)
 	if nextID != 1 {
 		t.Errorf("expected nextID=1, got %d", nextID)
 	}

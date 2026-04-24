@@ -53,6 +53,18 @@ func assertSingleMatchResult(t *testing.T, table vtab.VirtualTable, query, expec
 	if cursor.EOF() {
 		t.Fatal("Expected at least one result, got EOF")
 	}
+	assertFirstColumnValue(t, cursor, expected)
+	if err := cursor.Next(); err != nil {
+		t.Fatalf("Failed to move to next: %v", err)
+	}
+	if !cursor.EOF() {
+		t.Error("Expected EOF after first result")
+	}
+}
+
+// assertFirstColumnValue checks that cursor column 0 returns the expected string.
+func assertFirstColumnValue(t *testing.T, cursor vtab.VirtualCursor, expected string) {
+	t.Helper()
 	value, err := cursor.Column(0)
 	if err != nil {
 		t.Fatalf("Failed to get column value: %v", err)
@@ -63,12 +75,6 @@ func assertSingleMatchResult(t *testing.T, table vtab.VirtualTable, query, expec
 	}
 	if strValue != expected {
 		t.Errorf("Expected %q, got %q", expected, strValue)
-	}
-	if err := cursor.Next(); err != nil {
-		t.Fatalf("Failed to move to next: %v", err)
-	}
-	if !cursor.EOF() {
-		t.Error("Expected EOF after first result")
 	}
 }
 

@@ -79,39 +79,32 @@ func TestCreateRTreeTable(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			table, schema, err := module.Create(nil, "rtree", "main", "test_rtree", tt.args)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Create() expected error, got nil")
-				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("Create() unexpected error: %v", err)
-				return
-			}
-
-			if table == nil {
-				t.Error("Create() returned nil table")
-				return
-			}
-
-			if schema == "" {
-				t.Error("Create() returned empty schema")
-			}
-
-			rtree, ok := table.(*RTree)
-			if !ok {
-				t.Error("Create() did not return *RTree")
-				return
-			}
-
-			if rtree.dimensions != tt.wantDims {
-				t.Errorf("Create() dimensions = %d, want %d", rtree.dimensions, tt.wantDims)
-			}
+			assertRTreeCreate(t, module, tt.args, tt.wantErr, tt.wantDims)
 		})
+	}
+}
+
+func assertRTreeCreate(t *testing.T, module *RTreeModule, args []string, wantErr bool, wantDims int) {
+	t.Helper()
+	table, schema, err := module.Create(nil, "rtree", "main", "test_rtree", args)
+	if wantErr {
+		if err == nil {
+			t.Errorf("Create() expected error, got nil")
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("Create() unexpected error: %v", err)
+	}
+	if table == nil || schema == "" {
+		t.Fatal("Create() returned nil table or empty schema")
+	}
+	rtree, ok := table.(*RTree)
+	if !ok {
+		t.Fatal("Create() did not return *RTree")
+	}
+	if rtree.dimensions != wantDims {
+		t.Errorf("Create() dimensions = %d, want %d", rtree.dimensions, wantDims)
 	}
 }
 

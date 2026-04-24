@@ -10,118 +10,44 @@ import (
 // Tests for join optimization paths via public API
 
 // TestJoinOptimizerComprehensive tests join optimizer edge cases.
+// makeJoinTables creates test TableInfo entries by name and log-estimated row counts.
+func makeJoinTables(names []string, logEsts []int64) []*TableInfo {
+	tables := make([]*TableInfo, len(names))
+	for i, name := range names {
+		tables[i] = &TableInfo{Name: name, Cursor: i, RowLogEst: NewLogEst(logEsts[i]), Indexes: []*IndexInfo{}}
+	}
+	return tables
+}
+
+// assertJoinOrder calls DynamicProgrammingJoinOrder and checks the result.
+func assertJoinOrder(t *testing.T, tables []*TableInfo, wantCount int) {
+	t.Helper()
+	opt := NewJoinOptimizer(tables, &WhereInfo{Tables: tables}, NewCostModel())
+	order, err := opt.DynamicProgrammingJoinOrder()
+	if err != nil {
+		t.Fatalf("DynamicProgrammingJoinOrder failed: %v", err)
+	}
+	if order == nil || len(order.Tables) != wantCount {
+		t.Errorf("Expected %d tables in order, got %v", wantCount, order)
+	}
+}
+
 func TestJoinOptimizerComprehensive(t *testing.T) {
-	// Test case 1: Two tables join
 	t.Run("Two tables", func(t *testing.T) {
-		tables := []*TableInfo{
-			{
-				Name:      "users",
-				Cursor:    0,
-				RowLogEst: NewLogEst(1000),
-				Indexes:   []*IndexInfo{},
-			},
-			{
-				Name:      "orders",
-				Cursor:    1,
-				RowLogEst: NewLogEst(10000),
-				Indexes:   []*IndexInfo{},
-			},
-		}
-
-		whereInfo := &WhereInfo{
-			Tables: tables,
-		}
-		costModel := NewCostModel()
-
-		optimizer := NewJoinOptimizer(tables, whereInfo, costModel)
-		order, err := optimizer.DynamicProgrammingJoinOrder()
-
-		if err != nil {
-			t.Fatalf("DynamicProgrammingJoinOrder failed: %v", err)
-		}
-
-		if order == nil {
-			t.Fatal("Expected non-nil order")
-		}
-
-		if len(order.Tables) != 2 {
-			t.Errorf("Expected 2 tables in order, got %d", len(order.Tables))
-		}
+		assertJoinOrder(t, makeJoinTables([]string{"users", "orders"}, []int64{1000, 10000}), 2)
 	})
 
-	// Test case 2: Three tables join
 	t.Run("Three tables", func(t *testing.T) {
-		tables := []*TableInfo{
-			{
-				Name:      "users",
-				Cursor:    0,
-				RowLogEst: NewLogEst(1000),
-				Indexes:   []*IndexInfo{},
-			},
-			{
-				Name:      "orders",
-				Cursor:    1,
-				RowLogEst: NewLogEst(10000),
-				Indexes:   []*IndexInfo{},
-			},
-			{
-				Name:      "products",
-				Cursor:    2,
-				RowLogEst: NewLogEst(500),
-				Indexes:   []*IndexInfo{},
-			},
-		}
-
-		whereInfo := &WhereInfo{
-			Tables: tables,
-		}
-		costModel := NewCostModel()
-
-		optimizer := NewJoinOptimizer(tables, whereInfo, costModel)
-		order, err := optimizer.DynamicProgrammingJoinOrder()
-
-		if err != nil {
-			t.Fatalf("DynamicProgrammingJoinOrder failed: %v", err)
-		}
-
-		if order == nil {
-			t.Fatal("Expected non-nil order")
-		}
-
-		if len(order.Tables) != 3 {
-			t.Errorf("Expected 3 tables in order, got %d", len(order.Tables))
-		}
+		assertJoinOrder(t, makeJoinTables([]string{"users", "orders", "products"}, []int64{1000, 10000, 500}), 3)
 	})
 
-	// Test case 3: Greedy join order
 	t.Run("Greedy join order", func(t *testing.T) {
-		tables := []*TableInfo{
-			{
-				Name:      "users",
-				Cursor:    0,
-				RowLogEst: NewLogEst(1000),
-				Indexes:   []*IndexInfo{},
-			},
-			{
-				Name:      "orders",
-				Cursor:    1,
-				RowLogEst: NewLogEst(10000),
-				Indexes:   []*IndexInfo{},
-			},
-		}
-
-		whereInfo := &WhereInfo{
-			Tables: tables,
-		}
-		costModel := NewCostModel()
-
-		optimizer := NewJoinOptimizer(tables, whereInfo, costModel)
-		order, err := optimizer.GreedyJoinOrder()
-
+		tables := makeJoinTables([]string{"users", "orders"}, []int64{1000, 10000})
+		opt := NewJoinOptimizer(tables, &WhereInfo{Tables: tables}, NewCostModel())
+		order, err := opt.GreedyJoinOrder()
 		if err != nil {
 			t.Fatalf("GreedyJoinOrder failed: %v", err)
 		}
-
 		if order == nil {
 			t.Fatal("Expected non-nil order")
 		}

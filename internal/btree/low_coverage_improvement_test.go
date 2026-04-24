@@ -534,39 +534,15 @@ func seekLeafExactMatchVerify(t *testing.T, cursor *IndexCursor, testKeys []stri
 // TestIndexCursor_PrevInPage tests backward navigation within page (55.6% coverage)
 func TestIndexCursor_PrevInPage(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, err := createIndexPage(bt)
-	if err != nil {
-		t.Fatalf("createIndexPage() error = %v", err)
-	}
+	_, cursor := setupIndexCursor(t, 4096)
+	insertIndexEntriesN(cursor, 10, func(i int) []byte {
+		return []byte{byte('a' + i)}
+	})
 
-	cursor := NewIndexCursor(bt, rootPage)
-
-	// Insert entries on a single page
-	for i := 0; i < 10; i++ {
-		key := []byte{byte('a' + i)}
-		err := cursor.InsertIndex(key, int64(i))
-		if err != nil {
-			t.Fatalf("InsertIndex() error = %v", err)
-		}
-	}
-
-	// Move to last
-	err = cursor.MoveToLast()
-	if err != nil {
+	if err := cursor.MoveToLast(); err != nil {
 		t.Fatalf("MoveToLast() error = %v", err)
 	}
-
-	// Navigate backward within the same page
-	prevCount := 0
-	for i := 0; i < 9; i++ {
-		err := cursor.PrevIndex()
-		if err != nil || !cursor.IsValid() {
-			break
-		}
-		prevCount++
-	}
-
+	prevCount := navigateIndexBackward(cursor, 9)
 	if prevCount > 0 {
 		t.Logf("Navigated backward %d times within page (prevInPage)", prevCount)
 	}

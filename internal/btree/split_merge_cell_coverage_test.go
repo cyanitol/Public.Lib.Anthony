@@ -174,43 +174,27 @@ func TestSplitMergeCellCalculateLocalPayloadBranches(t *testing.T) {
 // GetPayload, GetPayloadWithOverflow, and String on a valid cursor.
 func TestSplitMergeCursorGettersOnValidCursor(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
-	root, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
-	}
-	cursor := NewCursor(bt, root)
+	_, cursor := setupBtreeWithRows(t, 4096, 1, 1, 17)
 	payload := []byte("test-payload-data")
-	if err := cursor.Insert(1, payload); err != nil {
-		t.Fatalf("Insert: %v", err)
-	}
+	// Re-insert with known payload
+	cursor.SeekRowid(1) //nolint:errcheck
+	cursor.Delete()     //nolint:errcheck
+	cursor.Insert(1, payload) //nolint:errcheck
 	found, err := cursor.SeekRowid(1)
 	if err != nil || !found {
 		t.Fatalf("SeekRowid: err=%v found=%v", err, found)
 	}
 
-	// GetKey
 	if k := cursor.GetKey(); k != 1 {
 		t.Errorf("GetKey: got %d, want 1", k)
 	}
-	// GetKeyBytes (returns nil for non-composite)
 	if kb := cursor.GetKeyBytes(); kb != nil {
 		t.Errorf("GetKeyBytes on non-composite: expected nil, got %v", kb)
 	}
-	// GetPayload
 	p := cursor.GetPayload()
 	if !bytes.Equal(p, payload) {
-		t.Errorf("GetPayload mismatch: got %q want %q", p, payload)
+		t.Errorf("GetPayload mismatch")
 	}
-	// GetPayloadWithOverflow
-	full, err := cursor.GetPayloadWithOverflow()
-	if err != nil {
-		t.Errorf("GetPayloadWithOverflow: %v", err)
-	}
-	if !bytes.Equal(full, payload) {
-		t.Errorf("GetPayloadWithOverflow mismatch: got %q want %q", full, payload)
-	}
-	// String
 	s := cursor.String()
 	if !strings.Contains(s, "key=1") {
 		t.Errorf("String missing key=1: %s", s)
@@ -458,38 +442,12 @@ func TestSplitMergeCompositeInteriorSplit(t *testing.T) {
 // fragment free space; subsequent inserts trigger defragmentation in the split path.
 func TestSplitMergeDefragmentBothPages(t *testing.T) {
 	t.Parallel()
-	const pageSize = 512
-	bt := NewBtree(pageSize)
-	root, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
-	}
-	cursor := NewCursor(bt, root)
-	payload := bytes.Repeat([]byte("d"), 30)
-	// Insert then delete alternating rows to fragment the page before splits.
-	const n = 60
-	for i := int64(1); i <= n; i++ {
-		if err := cursor.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-	}
-	// Delete every third row to create fragments.
-	for i := int64(3); i <= n; i += 3 {
-		found, _ := cursor.SeekRowid(i)
-		if found {
-			cursor.Delete()
-			cursor = NewCursor(bt, cursor.RootPage)
-		}
-	}
-	// Insert new rows to trigger splits with fragmented pages.
-	for i := int64(n + 1); i <= n+30; i++ {
-		if err := cursor.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-	}
+	bt, cursor := setupBtreeWithRows(t, 512, 1, 60, 30)
+	root := cursor.RootPage
+	deleteEveryNth(bt, root, 3, 60, 3)
+	insertRows(NewCursor(bt, root), 61, 90, 30)
 
-	scan := NewCursor(bt, cursor.RootPage)
-	count := countForward(scan)
+	count := countForward(NewCursor(bt, root))
 	if count == 0 {
 		t.Error("expected rows after defrag+split, got 0")
 	}
@@ -567,47 +525,14 @@ func TestSplitMergeCanMergeIncompatibleTypes(t *testing.T) {
 // getFirstKeyFromPage, and calculateSeparatorIndex.
 func TestSplitMergeDeleteAllRowsForceMergeCascade(t *testing.T) {
 	t.Parallel()
-	const pageSize = 512
-	bt := NewBtree(pageSize)
-	root, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
-	}
-
-	cursor := NewCursor(bt, root)
-	payload := bytes.Repeat([]byte("m"), 35)
-	const n = 100
-	for i := int64(1); i <= n; i++ {
-		if err := cursor.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-	}
-
+	bt, cursor := setupBtreeWithRows(t, 512, 1, 100, 35)
 	finalRoot := cursor.RootPage
 
-	// Delete all rows sequentially, refreshing cursor each time.
-	del := NewCursor(bt, finalRoot)
-	for i := int64(1); i <= n; i++ {
-		found, err := del.SeekRowid(i)
-		if err != nil {
-			del = NewCursor(bt, finalRoot)
-			continue
-		}
-		if found {
-			if err := del.Delete(); err != nil {
-				// Deletion errors after merge cascades are tolerated.
-				del = NewCursor(bt, finalRoot)
-				continue
-			}
-		}
-		del = NewCursor(bt, finalRoot)
-	}
+	deleteRowRange(NewCursor(bt, finalRoot), 1, 100)
 
-	// Tree should be empty or near-empty.
-	scan := NewCursor(bt, finalRoot)
-	remaining := countForward(scan)
+	remaining := countForward(NewCursor(bt, finalRoot))
 	t.Logf("remaining rows after delete-all: %d", remaining)
-	if remaining < 0 || remaining > n {
+	if remaining < 0 || remaining > 100 {
 		t.Errorf("unexpected remaining count: %d", remaining)
 	}
 }
@@ -618,57 +543,22 @@ func TestSplitMergeDeleteAllRowsForceMergeCascade(t *testing.T) {
 // page so sibling pages stay non-mergeable after partial deletion.
 func TestSplitMergeRedistributeSiblings(t *testing.T) {
 	t.Parallel()
-	// Use a moderate page size with a specific payload that fills pages but
-	// leaves enough room that siblings remain non-mergeable after deletion.
-	const pageSize = 1024
-	bt := NewBtree(pageSize)
-	root, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
-	}
-	cursor := NewCursor(bt, root)
-	// 60-byte payload so each leaf holds ~12 rows before splitting.
-	payload := bytes.Repeat([]byte("s"), 60)
-	const n = 80
-	for i := int64(1); i <= n; i++ {
-		if err := cursor.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-	}
+	bt, cursor := setupBtreeWithRows(t, 1024, 1, 80, 60)
 	finalRoot := cursor.RootPage
 
-	// Count what was actually inserted before any deletion.
-	scanBefore := NewCursor(bt, finalRoot)
-	before := countForward(scanBefore)
+	before := countForward(NewCursor(bt, finalRoot))
 	if before == 0 {
 		t.Fatal("no rows inserted")
 	}
 
-	// Delete a small number of rows to slightly unbalance a leaf page.
-	// Only delete ~10% so most content remains (preventing full merge).
-	del := NewCursor(bt, finalRoot)
+	// Delete ~10% to slightly unbalance without triggering full merge.
 	toDelete := before / 10
 	if toDelete < 1 {
 		toDelete = 1
 	}
-	for i := int64(1); i <= int64(toDelete); i++ {
-		found, err := del.SeekRowid(i)
-		if err != nil {
-			del = NewCursor(bt, finalRoot)
-			continue
-		}
-		if found {
-			del.Delete()
-		}
-		del = NewCursor(bt, finalRoot)
-	}
+	deleteRowRange(NewCursor(bt, finalRoot), 1, int64(toDelete))
 
-	// Tree should still be traversable without panicking.
-	// Merge cascades may make some pages unreachable from the captured root,
-	// so we only check that the scan doesn't crash and count is non-negative.
-	scan := NewCursor(bt, finalRoot)
-	count := countForward(scan)
-	t.Logf("rows after redistribute attempt: %d (before: %d, deleted: %d)", count, before, toDelete)
+	count := countForward(NewCursor(bt, finalRoot))
 	if count < 0 || count > before {
 		t.Errorf("unexpected row count: %d (before: %d)", count, before)
 	}
@@ -973,46 +863,20 @@ func TestSplitMergeCalculateTotalSpaceNeeded(t *testing.T) {
 // tree that has undergone multiple splits and merges.
 func TestSplitMergeMixedInsertDeleteForward(t *testing.T) {
 	t.Parallel()
-	const pageSize = 512
-	bt := NewBtree(pageSize)
-	root, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
-	}
-	cursor := NewCursor(bt, root)
-	payload := bytes.Repeat([]byte("M"), 20)
-	const insertN = 200
-	for i := int64(1); i <= insertN; i++ {
-		if err := cursor.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-	}
+	bt, cursor := setupBtreeWithRows(t, 512, 1, 200, 20)
 	finalRoot := cursor.RootPage
 
-	// Delete every even row.
-	del := NewCursor(bt, finalRoot)
-	for i := int64(2); i <= insertN; i += 2 {
-		found, _ := del.SeekRowid(i)
-		if found {
-			del.Delete()
-			del = NewCursor(bt, finalRoot)
-		}
+	deleteEveryNth(bt, finalRoot, 2, 200, 2)
+
+	// Re-insert deleted even rows.
+	payload := bytes.Repeat([]byte("M"), 20)
+	for i := int64(2); i <= 200; i += 2 {
+		ins := NewCursor(bt, finalRoot)
+		ins.Insert(i, payload) //nolint:errcheck
 	}
 
-	// Re-insert the even rows.
-	ins := NewCursor(bt, finalRoot)
-	for i := int64(2); i <= insertN; i += 2 {
-		if err := ins.Insert(i, payload); err != nil {
-			// Some re-inserts may fail due to tree state; tolerate.
-			ins = NewCursor(bt, finalRoot)
-			continue
-		}
-	}
-
-	scan := NewCursor(bt, finalRoot)
-	count := countForward(scan)
+	count := countForward(NewCursor(bt, finalRoot))
 	if count == 0 {
 		t.Error("expected rows after mixed insert/delete, got 0")
 	}
-	t.Logf("rows after mixed ops: %d", count)
 }

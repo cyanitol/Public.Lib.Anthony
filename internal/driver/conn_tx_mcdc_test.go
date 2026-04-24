@@ -444,113 +444,97 @@ func TestMCDC_Conn_RemoveCollation(t *testing.T) {
 // Tx.Commit — MC/DC branches
 // ---------------------------------------------------------------------------
 
-// TestMCDC_Conn_TxCommit covers the main branches of Tx.Commit.
-func TestMCDC_Conn_TxCommit(t *testing.T) {
-	cases := []struct {
-		// MC/DC: each sub-test toggles one independent condition.
-		name string
-		run  func(t *testing.T, db *sql.DB)
-	}{
-		{
-			// Branch A: tx.closed == true → ErrBadConn returned on second commit.
-			name: "double_commit_returns_error",
-			run: func(t *testing.T, db *sql.DB) {
-				tx, err := db.Begin()
-				if err != nil {
-					t.Fatalf("Begin: %v", err)
-				}
-				if err := tx.Commit(); err != nil {
-					t.Fatalf("first Commit: %v", err)
-				}
-				// MC/DC (closed==true): second commit must fail.
-				if err := tx.Commit(); err == nil {
-					t.Error("MC/DC Branch A: second Commit should return error")
-				}
-			},
-		},
-		{
-			// Branch B: readOnly == true → EndRead path executed.
-			name: "readonly_tx_commit",
-			run: func(t *testing.T, db *sql.DB) {
-				tx, err := db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
-				if err != nil {
-					t.Fatalf("BeginTx ReadOnly: %v", err)
-				}
-				var v int
-				if err := tx.QueryRow("SELECT 1").Scan(&v); err != nil {
-					tx.Rollback()
-					t.Fatalf("SELECT 1: %v", err)
-				}
-				// MC/DC (readOnly==true): EndRead branch is taken.
-				if err := tx.Commit(); err != nil {
-					t.Errorf("MC/DC Branch B: ReadOnly commit unexpected error: %v", err)
-				}
-			},
-		},
-		{
-			// Branch C: readOnly == false, no concurrent writer → normal commit.
-			name: "write_tx_commit_success",
-			run: func(t *testing.T, db *sql.DB) {
-				if _, err := db.Exec("CREATE TABLE IF NOT EXISTS mcdc_commit(n INTEGER)"); err != nil {
-					t.Fatalf("CREATE TABLE: %v", err)
-				}
-				tx, err := db.Begin()
-				if err != nil {
-					t.Fatalf("Begin: %v", err)
-				}
-				if _, err := tx.Exec("INSERT INTO mcdc_commit VALUES(99)"); err != nil {
-					tx.Rollback()
-					t.Fatalf("INSERT: %v", err)
-				}
-				// MC/DC (readOnly==false, no conflict): pager.Commit branch taken.
-				if err := tx.Commit(); err != nil {
-					t.Errorf("MC/DC Branch C: write Commit unexpected error: %v", err)
-				}
-				var cnt int
-				if err := db.QueryRow("SELECT COUNT(*) FROM mcdc_commit").Scan(&cnt); err != nil {
-					t.Fatalf("COUNT: %v", err)
-				}
-				if cnt == 0 {
-					t.Error("MC/DC Branch C: committed row not found")
-				}
-			},
-		},
-		{
-			// Branch C (rollback path): write tx rolled back → data absent.
-			name: "write_tx_rollback",
-			run: func(t *testing.T, db *sql.DB) {
-				if _, err := db.Exec("CREATE TABLE IF NOT EXISTS mcdc_rb(n INTEGER)"); err != nil {
-					t.Fatalf("CREATE TABLE: %v", err)
-				}
-				tx, err := db.Begin()
-				if err != nil {
-					t.Fatalf("Begin: %v", err)
-				}
-				if _, err := tx.Exec("INSERT INTO mcdc_rb VALUES(42)"); err != nil {
-					tx.Rollback()
-					t.Fatalf("INSERT: %v", err)
-				}
-				if err := tx.Rollback(); err != nil {
-					t.Fatalf("Rollback: %v", err)
-				}
-				var cnt int
-				if err := db.QueryRow("SELECT COUNT(*) FROM mcdc_rb").Scan(&cnt); err != nil {
-					t.Fatalf("COUNT after rollback: %v", err)
-				}
-				if cnt != 0 {
-					t.Errorf("MC/DC rollback path: want 0 rows, got %d", cnt)
-				}
-			},
-		},
-	}
+// TestMCDC_Conn_TxCommit_DoubleCommit covers Branch A: tx.closed == true.
+func TestMCDC_Conn_TxCommit_DoubleCommit(t *testing.T) {
+	db := mcdcOpenMem(t)
+	defer db.Close()
 
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			db := mcdcOpenMem(t)
-			defer db.Close()
-			tc.run(t, db)
-		})
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("first Commit: %v", err)
+	}
+	// MC/DC (closed==true): second commit must fail.
+	if err := tx.Commit(); err == nil {
+		t.Error("MC/DC Branch A: second Commit should return error")
+	}
+}
+
+// TestMCDC_Conn_TxCommit_ReadOnly covers Branch B: readOnly == true.
+func TestMCDC_Conn_TxCommit_ReadOnly(t *testing.T) {
+	db := mcdcOpenMem(t)
+	defer db.Close()
+
+	tx, err := db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("BeginTx ReadOnly: %v", err)
+	}
+	var v int
+	if err := tx.QueryRow("SELECT 1").Scan(&v); err != nil {
+		tx.Rollback()
+		t.Fatalf("SELECT 1: %v", err)
+	}
+	// MC/DC (readOnly==true): EndRead branch is taken.
+	if err := tx.Commit(); err != nil {
+		t.Errorf("MC/DC Branch B: ReadOnly commit unexpected error: %v", err)
+	}
+}
+
+// TestMCDC_Conn_TxCommit_WriteSuccess covers Branch C: write tx commit.
+func TestMCDC_Conn_TxCommit_WriteSuccess(t *testing.T) {
+	db := mcdcOpenMem(t)
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS mcdc_commit(n INTEGER)"); err != nil {
+		t.Fatalf("CREATE TABLE: %v", err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if _, err := tx.Exec("INSERT INTO mcdc_commit VALUES(99)"); err != nil {
+		tx.Rollback()
+		t.Fatalf("INSERT: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Errorf("MC/DC Branch C: write Commit unexpected error: %v", err)
+	}
+	var cnt int
+	if err := db.QueryRow("SELECT COUNT(*) FROM mcdc_commit").Scan(&cnt); err != nil {
+		t.Fatalf("COUNT: %v", err)
+	}
+	if cnt == 0 {
+		t.Error("MC/DC Branch C: committed row not found")
+	}
+}
+
+// TestMCDC_Conn_TxCommit_WriteRollback covers Branch C rollback path.
+func TestMCDC_Conn_TxCommit_WriteRollback(t *testing.T) {
+	db := mcdcOpenMem(t)
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS mcdc_rb(n INTEGER)"); err != nil {
+		t.Fatalf("CREATE TABLE: %v", err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if _, err := tx.Exec("INSERT INTO mcdc_rb VALUES(42)"); err != nil {
+		tx.Rollback()
+		t.Fatalf("INSERT: %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	var cnt int
+	if err := db.QueryRow("SELECT COUNT(*) FROM mcdc_rb").Scan(&cnt); err != nil {
+		t.Fatalf("COUNT after rollback: %v", err)
+	}
+	if cnt != 0 {
+		t.Errorf("MC/DC rollback path: want 0 rows, got %d", cnt)
 	}
 }
 

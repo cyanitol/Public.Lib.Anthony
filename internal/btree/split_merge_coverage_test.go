@@ -78,55 +78,19 @@ func TestSplitMerge_InteriorSplitSmallPage(t *testing.T) {
 // loadMergePages and updateParentAfterMerge).
 func TestSplitMerge_InsertThenDeleteForceMerge(t *testing.T) {
 	t.Parallel()
-	const pageSize = 512
-	bt := NewBtree(pageSize)
-	root, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
+	bt, insertCursor := setupBtreeWithRows(t, 512, 1, 80, 35)
+
+	before := countForward(NewCursor(bt, insertCursor.RootPage))
+	if before != 80 {
+		t.Fatalf("before delete: expected 80 rows, got %d", before)
 	}
 
-	// Insert enough rows to create multiple leaf pages.
-	insertCursor := NewCursor(bt, root)
-	payload := make([]byte, 35)
-	for i := range payload {
-		payload[i] = byte('c')
-	}
-	const insertN = 80
-	for i := int64(1); i <= insertN; i++ {
-		if err := insertCursor.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-	}
+	deleteRowRange(NewCursor(bt, insertCursor.RootPage), 1, 75)
 
-	// Verify all rows present before deletion.
-	scanBefore := NewCursor(bt, insertCursor.RootPage)
-	before := countForward(scanBefore)
-	if before != insertN {
-		t.Fatalf("before delete: expected %d rows, got %d", insertN, before)
-	}
-
-	// Delete most rows to trigger merges; keep the last 5 keys.
-	delCursor := NewCursor(bt, insertCursor.RootPage)
-	for i := int64(1); i <= insertN-5; i++ {
-		found, seekErr := delCursor.SeekRowid(i)
-		if seekErr != nil {
-			continue
-		}
-		if found {
-			delCursor.Delete()
-		}
-		// Re-create cursor so state is always valid.
-		delCursor = NewCursor(bt, insertCursor.RootPage)
-	}
-
-	// Verify the tree is still traversable (no panic, no error).
-	scanCursor := NewCursor(bt, insertCursor.RootPage)
-	remaining := countForward(scanCursor)
-	// Remaining should be ≥ 0; we just confirm no crash and some sanity.
-	if remaining < 0 || remaining > insertN {
+	remaining := countForward(NewCursor(bt, insertCursor.RootPage))
+	if remaining < 0 || remaining > 80 {
 		t.Errorf("unexpected remaining row count: %d", remaining)
 	}
-	t.Logf("remaining rows after bulk delete: %d", remaining)
 }
 
 // TestSplitMerge_MergeWithParentUpdate inserts rows and deletes alternating
@@ -134,44 +98,18 @@ func TestSplitMerge_InsertThenDeleteForceMerge(t *testing.T) {
 // exercising updateParentAfterMerge when the last cell of the parent is removed.
 func TestSplitMerge_MergeWithParentUpdate(t *testing.T) {
 	t.Parallel()
-	const pageSize = 512
-	bt := NewBtree(pageSize)
-	root, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
-	}
+	bt, ins := setupBtreeWithRows(t, 512, 1, 100, 30)
 
-	ins := NewCursor(bt, root)
-	payload := make([]byte, 30)
-	for i := range payload {
-		payload[i] = byte('d')
-	}
-
-	const n = 100
-	for i := int64(1); i <= n; i++ {
-		if err := ins.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-	}
-
-	// Delete even-numbered rows first (half), then odd rows (most of the rest).
+	// Delete even-numbered rows, then most odd rows.
 	del := NewCursor(bt, ins.RootPage)
-	for i := int64(2); i <= n; i += 2 {
-		found, err := del.SeekRowid(i)
-		if err == nil && found {
-			del.Delete()
-		}
+	for i := int64(2); i <= 100; i += 2 {
+		seekAndDelete(del, i) //nolint:errcheck
 	}
-	for i := int64(3); i <= n-10; i += 2 {
-		found, err := del.SeekRowid(i)
-		if err == nil && found {
-			del.Delete()
-		}
+	for i := int64(3); i <= 90; i += 2 {
+		seekAndDelete(del, i) //nolint:errcheck
 	}
 
-	// Just verify no panic and tree is readable.
-	scan := NewCursor(bt, ins.RootPage)
-	count := countForward(scan)
+	count := countForward(NewCursor(bt, ins.RootPage))
 	if count < 1 {
 		t.Error("expected at least one row to remain")
 	}

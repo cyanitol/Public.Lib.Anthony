@@ -255,39 +255,25 @@ func TestBackup_FinishSyncsHeader(t *testing.T) {
 
 // TestBackup_DataIntegrity verifies that the page content written by the backup
 // matches the source data byte-for-byte.
-func TestBackup_DataIntegrity(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	srcFile := filepath.Join(dir, "src_integrity.db")
-
-	src := openTestPagerAt(t, srcFile, false)
-	defer src.Close()
-
-	// Write known patterns into pages 1-3.
-	mustBeginWrite(t, src)
-	for i := Pgno(1); i <= 3; i++ {
-		pg := mustGetPage(t, src, i)
-		mustWritePage(t, src, pg)
+// bcWritePatternPages writes deterministic patterns into pages 1-n.
+func bcWritePatternPages(t *testing.T, p *Pager, n Pgno) {
+	t.Helper()
+	mustBeginWrite(t, p)
+	for i := Pgno(1); i <= n; i++ {
+		pg := mustGetPage(t, p, i)
+		mustWritePage(t, p, pg)
 		for j := range pg.Data {
 			pg.Data[j] = byte((int(i)*13 + j) % 256)
 		}
-		src.Put(pg)
+		p.Put(pg)
 	}
-	mustCommit(t, src)
+	mustCommit(t, p)
+}
 
-	dst := openTestPagerAt(t, filepath.Join(dir, "dst_integrity.db"), false)
-	defer dst.Close()
-
-	bk, err := NewBackup(src, dst)
-	if err != nil {
-		t.Fatalf("NewBackup: %v", err)
-	}
-	if _, err := bk.Step(-1); err != nil {
-		t.Fatalf("Step: %v", err)
-	}
-
-	// Compare page data.
-	for i := Pgno(1); i <= 3; i++ {
+// bcComparePages compares page data between src and dst for pages 1-n.
+func bcComparePages(t *testing.T, src, dst *Pager, n Pgno) {
+	t.Helper()
+	for i := Pgno(1); i <= n; i++ {
 		srcPg, err := src.Get(i)
 		if err != nil {
 			t.Fatalf("src.Get(%d): %v", i, err)
@@ -303,6 +289,30 @@ func TestBackup_DataIntegrity(t *testing.T) {
 		src.Put(srcPg)
 		dst.Put(dstPg)
 	}
+}
+
+func TestBackup_DataIntegrity(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	srcFile := filepath.Join(dir, "src_integrity.db")
+
+	src := openTestPagerAt(t, srcFile, false)
+	defer src.Close()
+
+	bcWritePatternPages(t, src, 3)
+
+	dst := openTestPagerAt(t, filepath.Join(dir, "dst_integrity.db"), false)
+	defer dst.Close()
+
+	bk, err := NewBackup(src, dst)
+	if err != nil {
+		t.Fatalf("NewBackup: %v", err)
+	}
+	if _, err := bk.Step(-1); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	bcComparePages(t, src, dst, 3)
 }
 
 // TestBackup_StepWhenAlreadyComplete exercises Step when nextPage > totalPages

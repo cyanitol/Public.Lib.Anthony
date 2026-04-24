@@ -15,14 +15,9 @@ func newSubquery2Stmt(t *testing.T) *Stmt {
 	return stmtFor(conn)
 }
 
-// TestCompileSubquery2Coverage covers dead-code and low-coverage functions in
-// compile_subquery.go that are not exercised by the normal integration tests.
-func TestCompileSubquery2Coverage(t *testing.T) {
-	// -------------------------------------------------------------------------
-	// hasFromSubqueries
-	// -------------------------------------------------------------------------
-
-	t.Run("hasFromSubqueries/NilFrom", func(t *testing.T) {
+// TestCompileSubquery2Coverage_HasFromSubqueries covers hasFromSubqueries branches.
+func TestCompileSubquery2Coverage_HasFromSubqueries(t *testing.T) {
+	t.Run("NilFrom", func(t *testing.T) {
 		t.Parallel()
 		s := newSubquery2Stmt(t)
 		stmt := &parser.SelectStmt{From: nil}
@@ -31,7 +26,7 @@ func TestCompileSubquery2Coverage(t *testing.T) {
 		}
 	})
 
-	t.Run("hasFromSubqueries/TableOnly", func(t *testing.T) {
+	t.Run("TableOnly", func(t *testing.T) {
 		t.Parallel()
 		s := newSubquery2Stmt(t)
 		stmt := &parser.SelectStmt{
@@ -46,7 +41,7 @@ func TestCompileSubquery2Coverage(t *testing.T) {
 		}
 	})
 
-	t.Run("hasFromSubqueries/FromSubquery", func(t *testing.T) {
+	t.Run("FromSubquery", func(t *testing.T) {
 		t.Parallel()
 		s := newSubquery2Stmt(t)
 		innerStmt := &parser.SelectStmt{}
@@ -62,7 +57,7 @@ func TestCompileSubquery2Coverage(t *testing.T) {
 		}
 	})
 
-	t.Run("hasFromSubqueries/JoinSubquery", func(t *testing.T) {
+	t.Run("JoinSubquery", func(t *testing.T) {
 		t.Parallel()
 		s := newSubquery2Stmt(t)
 		innerStmt := &parser.SelectStmt{}
@@ -81,7 +76,7 @@ func TestCompileSubquery2Coverage(t *testing.T) {
 		}
 	})
 
-	t.Run("hasFromSubqueries/JoinNoSubquery", func(t *testing.T) {
+	t.Run("JoinNoSubquery", func(t *testing.T) {
 		t.Parallel()
 		s := newSubquery2Stmt(t)
 		stmt := &parser.SelectStmt{
@@ -98,12 +93,11 @@ func TestCompileSubquery2Coverage(t *testing.T) {
 			t.Error("expected false for JOIN with plain table, got true")
 		}
 	})
+}
 
-	// -------------------------------------------------------------------------
-	// resolveAggColumnIndex
-	// -------------------------------------------------------------------------
-
-	t.Run("resolveAggColumnIndex/NoArgs", func(t *testing.T) {
+// TestCompileSubquery2Coverage_ResolveAggColumnIndex covers resolveAggColumnIndex branches.
+func TestCompileSubquery2Coverage_ResolveAggColumnIndex(t *testing.T) {
+	t.Run("NoArgs", func(t *testing.T) {
 		t.Parallel()
 		fn := &parser.FunctionExpr{Name: "SUM", Args: nil}
 		_, err := resolveAggColumnIndex(fn, []string{"a", "b"})
@@ -112,7 +106,7 @@ func TestCompileSubquery2Coverage(t *testing.T) {
 		}
 	})
 
-	t.Run("resolveAggColumnIndex/NonIdentArg", func(t *testing.T) {
+	t.Run("NonIdentArg", func(t *testing.T) {
 		t.Parallel()
 		fn := &parser.FunctionExpr{
 			Name: "SUM",
@@ -126,7 +120,7 @@ func TestCompileSubquery2Coverage(t *testing.T) {
 		}
 	})
 
-	t.Run("resolveAggColumnIndex/ColumnNotFound", func(t *testing.T) {
+	t.Run("ColumnNotFound", func(t *testing.T) {
 		t.Parallel()
 		fn := &parser.FunctionExpr{
 			Name: "SUM",
@@ -140,7 +134,7 @@ func TestCompileSubquery2Coverage(t *testing.T) {
 		}
 	})
 
-	t.Run("resolveAggColumnIndex/Found", func(t *testing.T) {
+	t.Run("Found", func(t *testing.T) {
 		t.Parallel()
 		fn := &parser.FunctionExpr{
 			Name: "SUM",
@@ -156,15 +150,13 @@ func TestCompileSubquery2Coverage(t *testing.T) {
 			t.Errorf("expected index 1, got %d", idx)
 		}
 	})
+}
 
-	// -------------------------------------------------------------------------
-	// evalWhereOnRow
-	// -------------------------------------------------------------------------
-
-	t.Run("evalWhereOnRow/UnhandledExpr", func(t *testing.T) {
+// TestCompileSubquery2Coverage_EvalWhereOnRow covers evalWhereOnRow branches.
+func TestCompileSubquery2Coverage_EvalWhereOnRow(t *testing.T) {
+	t.Run("UnhandledExpr", func(t *testing.T) {
 		t.Parallel()
 		s := newSubquery2Stmt(t)
-		// LiteralExpr is not *BinaryExpr — hits the default (conservative true) branch.
 		e := &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "0"}
 		row := []interface{}{int64(42)}
 		colNames := []string{"x"}
@@ -173,7 +165,7 @@ func TestCompileSubquery2Coverage(t *testing.T) {
 		}
 	})
 
-	t.Run("evalWhereOnRow/BinaryEqTrue", func(t *testing.T) {
+	t.Run("BinaryEqTrue", func(t *testing.T) {
 		t.Parallel()
 		s := newSubquery2Stmt(t)
 		e := &parser.BinaryExpr{
@@ -188,7 +180,7 @@ func TestCompileSubquery2Coverage(t *testing.T) {
 		}
 	})
 
-	t.Run("evalWhereOnRow/BinaryEqFalse", func(t *testing.T) {
+	t.Run("BinaryEqFalse", func(t *testing.T) {
 		t.Parallel()
 		s := newSubquery2Stmt(t)
 		e := &parser.BinaryExpr{
@@ -202,12 +194,11 @@ func TestCompileSubquery2Coverage(t *testing.T) {
 			t.Error("expected false for 42 = 99")
 		}
 	})
+}
 
-	// -------------------------------------------------------------------------
-	// findSubqueryColumn
-	// -------------------------------------------------------------------------
-
-	t.Run("findSubqueryColumn/Found", func(t *testing.T) {
+// TestCompileSubquery2Coverage_FindSubqueryColumn_Basic covers found/not-found branches.
+func TestCompileSubquery2Coverage_FindSubqueryColumn_Basic(t *testing.T) {
+	t.Run("Found", func(t *testing.T) {
 		t.Parallel()
 		s := newSubquery2Stmt(t)
 		subquery := &parser.SelectStmt{
@@ -227,7 +218,7 @@ func TestCompileSubquery2Coverage(t *testing.T) {
 		}
 	})
 
-	t.Run("findSubqueryColumn/NotFound", func(t *testing.T) {
+	t.Run("NotFound", func(t *testing.T) {
 		t.Parallel()
 		s := newSubquery2Stmt(t)
 		subquery := &parser.SelectStmt{
@@ -241,12 +232,13 @@ func TestCompileSubquery2Coverage(t *testing.T) {
 			t.Error("expected error for missing column, got nil")
 		}
 	})
+}
 
-	t.Run("findSubqueryColumn/SynthesizesMissingASTNode", func(t *testing.T) {
+// TestCompileSubquery2Coverage_FindSubqueryColumn_Synthesize covers synthesize and compound branches.
+func TestCompileSubquery2Coverage_FindSubqueryColumn_Synthesize(t *testing.T) {
+	t.Run("SynthesizesMissingASTNode", func(t *testing.T) {
 		t.Parallel()
 		s := newSubquery2Stmt(t)
-		// subqueryColumns has two entries but subquery.Columns has only one,
-		// so index 1 ("b") triggers the synthesize branch.
 		subquery := &parser.SelectStmt{
 			Columns: []parser.ResultColumn{
 				{Expr: &parser.IdentExpr{Name: "a"}},
@@ -263,11 +255,9 @@ func TestCompileSubquery2Coverage(t *testing.T) {
 		}
 	})
 
-	t.Run("findSubqueryColumn/CompoundFallback", func(t *testing.T) {
+	t.Run("CompoundFallback", func(t *testing.T) {
 		t.Parallel()
 		s := newSubquery2Stmt(t)
-		// subquery.Columns is empty but subquery.Compound is set — triggers
-		// compoundLeafColumns fallback.
 		leaf := &parser.SelectStmt{
 			Columns: []parser.ResultColumn{
 				{Expr: &parser.IdentExpr{Name: "v"}},

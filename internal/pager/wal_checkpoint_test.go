@@ -474,54 +474,49 @@ func TestCheckpointWithInfo_Truncate(t *testing.T) {
 
 // Test reopening after checkpoint
 
-func TestCheckpoint_ReopenAfterRestart(t *testing.T) {
-	t.Parallel()
-	tempDir := t.TempDir()
-	dbFile := filepath.Join(tempDir, "test.db")
-
-	// Create database file
+// ckptCreateDBFile creates a db file with numPages empty pages.
+func ckptCreateDBFile(t *testing.T, dbFile string, numPages int) {
+	t.Helper()
 	f, err := os.Create(dbFile)
 	if err != nil {
 		t.Fatalf("Failed to create database: %v", err)
 	}
 	emptyPage := make([]byte, DefaultPageSize)
-	for i := 0; i < 10; i++ {
+	for i := 0; i < numPages; i++ {
 		f.Write(emptyPage)
 	}
 	f.Close()
+}
 
-	// Create WAL and write frames
+func TestCheckpoint_ReopenAfterRestart(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	ckptCreateDBFile(t, dbFile, 10)
+
 	wal := NewWAL(dbFile, DefaultPageSize)
 	if err := wal.Open(); err != nil {
 		t.Fatalf("Failed to open WAL: %v", err)
 	}
-
 	for i := 1; i <= 3; i++ {
 		writeTestFrameToWAL(t, wal, Pgno(i), byte(i*50), uint32(i))
 	}
-
-	// Checkpoint and close
-	_, _, err = wal.CheckpointWithMode(CheckpointRestart)
-	if err != nil {
+	if _, _, err := wal.CheckpointWithMode(CheckpointRestart); err != nil {
 		t.Fatalf("Checkpoint failed: %v", err)
 	}
 	wal.Close()
 
-	// Reopen WAL
 	wal2 := NewWAL(dbFile, DefaultPageSize)
 	if err := wal2.Open(); err != nil {
 		t.Fatalf("Failed to reopen WAL: %v", err)
 	}
 	defer wal2.Close()
 
-	// WAL should be empty after restart
 	if wal2.FrameCount() != 0 {
 		t.Errorf("Reopened WAL should be empty, got %d frames", wal2.FrameCount())
 	}
-
-	// Should be able to write new frames
 	writeTestFrameToWAL(t, wal2, 5, 0xEE, 5)
-
 	if wal2.FrameCount() != 1 {
 		t.Errorf("Expected 1 frame in reopened WAL, got %d", wal2.FrameCount())
 	}

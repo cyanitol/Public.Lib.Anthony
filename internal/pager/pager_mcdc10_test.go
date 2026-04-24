@@ -747,6 +747,17 @@ func TestMCDC10_LockManager_Close_WithLockHeld(t *testing.T) {
 	}
 }
 
+// mcdc10EscalateToExclusive escalates the lock manager through all levels to exclusive.
+func mcdc10EscalateToExclusive(t *testing.T, lm *LockManager) {
+	t.Helper()
+	levels := []LockLevel{lockShared, lockReserved, lockPending, lockExclusive}
+	for _, level := range levels {
+		if err := lm.AcquireLock(level); err != nil {
+			t.Skipf("AcquireLock(%v): %v", level, err)
+		}
+	}
+}
+
 func TestMCDC10_LockManager_Close_WithExclusiveLockHeld(t *testing.T) {
 	t.Parallel()
 	tmp := filepath.Join(t.TempDir(), "close_excl.bin")
@@ -761,21 +772,8 @@ func TestMCDC10_LockManager_Close_WithExclusiveLockHeld(t *testing.T) {
 		t.Fatalf("NewLockManager: %v", err)
 	}
 
-	// Escalate to EXCLUSIVE.
-	if err := lm.AcquireLock(lockShared); err != nil {
-		t.Skipf("AcquireLock(lockShared): %v", err)
-	}
-	if err := lm.AcquireLock(lockReserved); err != nil {
-		t.Skipf("AcquireLock(lockReserved): %v", err)
-	}
-	if err := lm.AcquireLock(lockPending); err != nil {
-		t.Skipf("AcquireLock(lockPending): %v", err)
-	}
-	if err := lm.AcquireLock(lockExclusive); err != nil {
-		t.Skipf("AcquireLock(lockExclusive): %v", err)
-	}
+	mcdc10EscalateToExclusive(t, lm)
 
-	// Close must release all locks.
 	if err := lm.Close(); err != nil {
 		t.Errorf("Close() with lockExclusive held: %v", err)
 	}

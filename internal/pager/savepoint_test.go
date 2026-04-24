@@ -197,100 +197,83 @@ func TestSavepointMultiplePages(t *testing.T) {
 	pager.Commit()
 }
 
-func TestSavepointClearOnCommit(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_savepoint_clear.db"
-
+// spOpenPagerWithSavepoints opens a pager, begins write, creates sp1 and sp2.
+func spOpenPagerWithSavepoints(t *testing.T, dbFile string) *Pager {
+	t.Helper()
 	pager, err := Open(dbFile, false)
 	if err != nil {
 		t.Fatalf("failed to open pager: %v", err)
 	}
-	defer pager.Close()
-
-	// Begin write transaction
 	if err := pager.BeginWrite(); err != nil {
 		t.Fatalf("failed to begin write: %v", err)
 	}
-
-	// Create savepoints
 	if err := pager.Savepoint("sp1"); err != nil {
 		t.Fatalf("failed to create sp1: %v", err)
 	}
 	if err := pager.Savepoint("sp2"); err != nil {
 		t.Fatalf("failed to create sp2: %v", err)
 	}
+	return pager
+}
 
-	// Commit
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Begin new transaction
+// spVerifyNoSavepoints begins a new write transaction and verifies sp1 and sp2 are gone.
+func spVerifyNoSavepoints(t *testing.T, pager *Pager) {
+	t.Helper()
 	if err := pager.BeginWrite(); err != nil {
 		t.Fatalf("failed to begin write: %v", err)
 	}
-
-	// Old savepoints should not exist
 	if pager.HasSavepoint("sp1") {
-		t.Error("sp1 should not exist after commit")
+		t.Error("sp1 should not exist")
 	}
 	if pager.HasSavepoint("sp2") {
-		t.Error("sp2 should not exist after commit")
+		t.Error("sp2 should not exist")
 	}
-
 	pager.Commit()
+}
+
+func TestSavepointClearOnCommit(t *testing.T) {
+	t.Parallel()
+	dbFile := t.TempDir() + "/" + "test_savepoint_clear.db"
+
+	pager := spOpenPagerWithSavepoints(t, dbFile)
+	defer pager.Close()
+
+	if err := pager.Commit(); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+	spVerifyNoSavepoints(t, pager)
 }
 
 func TestSavepointClearOnRollback(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_savepoint_rollback_clear.db"
+	dbFile := t.TempDir() + "/" + "test_savepoint_rollback_clear.db"
 
-	pager, err := Open(dbFile, false)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
+	pager := spOpenPagerWithSavepoints(t, dbFile)
 	defer pager.Close()
 
-	// Begin write transaction
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
-	}
-
-	// Create savepoints
-	if err := pager.Savepoint("sp1"); err != nil {
-		t.Fatalf("failed to create sp1: %v", err)
-	}
-	if err := pager.Savepoint("sp2"); err != nil {
-		t.Fatalf("failed to create sp2: %v", err)
-	}
-
-	// Rollback entire transaction
 	if err := pager.Rollback(); err != nil {
 		t.Fatalf("failed to rollback: %v", err)
 	}
+	spVerifyNoSavepoints(t, pager)
+}
 
-	// Begin new transaction
-	if err := pager.BeginWrite(); err != nil {
-		t.Fatalf("failed to begin write: %v", err)
+// spVerifyAllNamesPresent checks that all expected names appear in got.
+func spVerifyAllNamesPresent(t *testing.T, got, expected []string) {
+	t.Helper()
+	nameMap := make(map[string]bool)
+	for _, name := range got {
+		nameMap[name] = true
 	}
-
-	// Old savepoints should not exist
-	if pager.HasSavepoint("sp1") {
-		t.Error("sp1 should not exist after rollback")
+	for _, name := range expected {
+		if !nameMap[name] {
+			t.Errorf("savepoint %s not in names list", name)
+		}
 	}
-	if pager.HasSavepoint("sp2") {
-		t.Error("sp2 should not exist after rollback")
-	}
-
-	pager.Commit()
 }
 
 func TestSavepointNames(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_savepoint_names.db"
+	dbFile := t.TempDir() + "/" + "test_savepoint_names.db"
 
 	pager, err := Open(dbFile, false)
 	if err != nil {
@@ -298,12 +281,10 @@ func TestSavepointNames(t *testing.T) {
 	}
 	defer pager.Close()
 
-	// Begin write transaction
 	if err := pager.BeginWrite(); err != nil {
 		t.Fatalf("failed to begin write: %v", err)
 	}
 
-	// Create savepoints
 	names := []string{"sp1", "sp2", "sp3"}
 	for _, name := range names {
 		if err := pager.Savepoint(name); err != nil {
@@ -311,26 +292,11 @@ func TestSavepointNames(t *testing.T) {
 		}
 	}
 
-	// Get savepoint names
 	spNames := pager.GetSavepointNames()
-
-	// Should have all savepoints (may be in reverse order due to stack)
 	if len(spNames) != len(names) {
 		t.Errorf("expected %d savepoint names, got %d", len(names), len(spNames))
 	}
-
-	// All names should be present
-	nameMap := make(map[string]bool)
-	for _, name := range spNames {
-		nameMap[name] = true
-	}
-
-	for _, name := range names {
-		if !nameMap[name] {
-			t.Errorf("savepoint %s not in names list", name)
-		}
-	}
-
+	spVerifyAllNamesPresent(t, spNames, names)
 	pager.Commit()
 }
 

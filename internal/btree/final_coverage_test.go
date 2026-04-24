@@ -323,32 +323,11 @@ func TestComplexSiblingScenarios(t *testing.T) {
 	}, 44)
 	bt.SetPage(1, interior)
 
-	// Navigate and test various positions
 	cursor := NewCursor(bt, 1)
-	cursor.MoveToFirst()
-
-	count := 0
-	for cursor.IsValid() && count < 100 {
-		count++
-		err := cursor.Next()
-		if err != nil {
-			break
-		}
-	}
-
+	count := countForward(cursor)
 	t.Logf("Navigated through %d entries across multiple siblings", count)
 
-	// Test backward navigation
-	cursor.MoveToLast()
-	backCount := 0
-	for cursor.IsValid() && backCount < 100 {
-		backCount++
-		err := cursor.Previous()
-		if err != nil {
-			break
-		}
-	}
-
+	backCount := countBackward(NewCursor(bt, 1))
 	t.Logf("Backward navigation: %d entries", backCount)
 }
 

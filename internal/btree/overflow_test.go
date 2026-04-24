@@ -72,6 +72,29 @@ func TestCalculateLocalPayload(t *testing.T) {
 }
 
 // TestWriteOverflowChain tests writing data to overflow pages
+func verifyOverflowChainWrite(t *testing.T, bt *Btree, data []byte, wantErr bool, numPages int) {
+	t.Helper()
+	for i := range data {
+		data[i] = byte(i % 256)
+	}
+	firstPage, err := writeOverflowChain(bt, data, bt.UsableSize)
+	if (err != nil) != wantErr {
+		t.Errorf("writeOverflowChain() error = %v, wantErr %v", err, wantErr)
+		return
+	}
+	if wantErr || len(data) == 0 {
+		return
+	}
+	if firstPage == 0 {
+		t.Errorf("writeOverflowChain() returned page 0 for non-empty data")
+		return
+	}
+	pageCount := countOverflowPages(bt, firstPage)
+	if pageCount != numPages {
+		t.Errorf("overflow chain has %d pages, want %d", pageCount, numPages)
+	}
+}
+
 func TestWriteOverflowChain(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(4096)
@@ -82,80 +105,40 @@ func TestWriteOverflowChain(t *testing.T) {
 		wantErr  bool
 		numPages int
 	}{
-		{
-			name:     "empty data",
-			data:     []byte{},
-			wantErr:  false,
-			numPages: 0,
-		},
-		{
-			name:     "small data - single page",
-			data:     make([]byte, 1000),
-			wantErr:  false,
-			numPages: 1,
-		},
-		{
-			name:     "data fitting exactly one page",
-			data:     make([]byte, 4096-OverflowHeaderSize),
-			wantErr:  false,
-			numPages: 1,
-		},
-		{
-			name:     "data requiring two pages",
-			data:     make([]byte, 5000),
-			wantErr:  false,
-			numPages: 2,
-		},
-		{
-			name:     "large data requiring multiple pages",
-			data:     make([]byte, 15000),
-			wantErr:  false,
-			numPages: 4,
-		},
+		{"empty data", []byte{}, false, 0},
+		{"small data - single page", make([]byte, 1000), false, 1},
+		{"data fitting exactly one page", make([]byte, 4096-OverflowHeaderSize), false, 1},
+		{"data requiring two pages", make([]byte, 5000), false, 2},
+		{"large data requiring multiple pages", make([]byte, 15000), false, 4},
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			// Fill test data with pattern
-			for i := range tt.data {
-				tt.data[i] = byte(i % 256)
-			}
-
-			firstPage, err := writeOverflowChain(bt, tt.data, bt.UsableSize)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("writeOverflowChain() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if tt.wantErr {
-				return
-			}
-
-			if len(tt.data) == 0 {
-				if firstPage != 0 {
-					t.Errorf("writeOverflowChain() returned page %d for empty data, want 0", firstPage)
-				}
-				return
-			}
-
-			// Verify the chain was created correctly
-			if firstPage == 0 {
-				t.Errorf("writeOverflowChain() returned page 0 for non-empty data")
-				return
-			}
-
-			// Count pages in chain
-			pageCount := countOverflowPages(bt, firstPage)
-			if pageCount != tt.numPages {
-				t.Errorf("overflow chain has %d pages, want %d", pageCount, tt.numPages)
-			}
+			verifyOverflowChainWrite(t, bt, tt.data, tt.wantErr, tt.numPages)
 		})
 	}
 }
 
 // TestReadOverflowChain tests reading data from overflow pages
+func verifyOverflowRoundtrip(t *testing.T, bt *Btree, data []byte) {
+	t.Helper()
+	for i := range data {
+		data[i] = byte(i % 256)
+	}
+	firstPage, err := writeOverflowChain(bt, data, bt.UsableSize)
+	if err != nil {
+		t.Fatalf("writeOverflowChain() error = %v", err)
+	}
+	readData, err := readOverflowChain(bt, firstPage, len(data), bt.UsableSize)
+	if err != nil {
+		t.Fatalf("readOverflowChain() error = %v", err)
+	}
+	if !bytes.Equal(readData, data) {
+		t.Errorf("readOverflowChain() returned different data")
+	}
+}
+
 func TestReadOverflowChain(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(4096)
@@ -164,52 +147,15 @@ func TestReadOverflowChain(t *testing.T) {
 		name string
 		data []byte
 	}{
-		{
-			name: "small data",
-			data: []byte("Hello, World!"),
-		},
-		{
-			name: "medium data",
-			data: make([]byte, 5000),
-		},
-		{
-			name: "large data",
-			data: make([]byte, 20000),
-		},
+		{"small data", []byte("Hello, World!")},
+		{"medium data", make([]byte, 5000)},
+		{"large data", make([]byte, 20000)},
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			// Fill test data with pattern
-			for i := range tt.data {
-				tt.data[i] = byte(i % 256)
-			}
-
-			// Write the overflow chain
-			firstPage, err := writeOverflowChain(bt, tt.data, bt.UsableSize)
-			if err != nil {
-				t.Fatalf("writeOverflowChain() error = %v", err)
-			}
-
-			// Read it back
-			readData, err := readOverflowChain(bt, firstPage, len(tt.data), bt.UsableSize)
-			if err != nil {
-				t.Fatalf("readOverflowChain() error = %v", err)
-			}
-
-			// Verify data matches
-			if !bytes.Equal(readData, tt.data) {
-				t.Errorf("readOverflowChain() returned different data")
-				t.Logf("Expected %d bytes, got %d bytes", len(tt.data), len(readData))
-				// Show first difference
-				for i := 0; i < len(tt.data) && i < len(readData); i++ {
-					if tt.data[i] != readData[i] {
-						t.Logf("First difference at byte %d: expected %d, got %d", i, tt.data[i], readData[i])
-						break
-					}
-				}
-			}
+			verifyOverflowRoundtrip(t, bt, tt.data)
 		})
 	}
 }
@@ -431,81 +377,55 @@ func TestOverflowWithDifferentPageSizes(t *testing.T) {
 }
 
 // TestGetCompletePayload tests the convenience function
-func TestGetCompletePayload(t *testing.T) {
+func TestGetCompletePayload_Small(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(4096)
-
-	// Create a table with some test data
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
-
-	// Test data
+	rootPage, _ := bt.CreateTable()
+	cursor := NewCursor(bt, rootPage)
 	smallPayload := []byte("Small payload without overflow")
-	largePayload := make([]byte, 10000)
-	for i := range largePayload {
-		largePayload[i] = byte(i % 256)
+	cursor.CurrentCell = &CellInfo{Payload: smallPayload, PayloadSize: uint32(len(smallPayload)), OverflowPage: 0}
+	cursor.State = CursorValid
+	payload, err := cursor.GetCompletePayload()
+	if err != nil {
+		t.Fatalf("GetCompletePayload() error = %v", err)
 	}
+	if !bytes.Equal(payload, smallPayload) {
+		t.Error("GetCompletePayload() returned incorrect data")
+	}
+}
 
-	t.Run("small payload without overflow", func(t *testing.T) {
-		cursor := NewCursor(bt, rootPage)
+func TestGetCompletePayload_Large(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(4096)
+	rootPage, _ := bt.CreateTable()
+	largePayload := makeSequentialPayload(10000)
+	localSize := CalculateLocalPayload(uint32(len(largePayload)), bt.PageSize, true)
+	firstOverflowPage, err := writeOverflowChain(bt, largePayload[localSize:], bt.UsableSize)
+	if err != nil {
+		t.Fatalf("writeOverflowChain() error = %v", err)
+	}
+	cursor := NewCursor(bt, rootPage)
+	cursor.CurrentCell = &CellInfo{Payload: largePayload[:localSize], PayloadSize: uint32(len(largePayload)), OverflowPage: firstOverflowPage}
+	cursor.State = CursorValid
+	payload, err := cursor.GetCompletePayload()
+	if err != nil {
+		t.Fatalf("GetCompletePayload() error = %v", err)
+	}
+	if !bytes.Equal(payload, largePayload) {
+		t.Error("GetCompletePayload() returned incorrect data")
+	}
+}
 
-		// Simulate a cell with no overflow
-		cursor.CurrentCell = &CellInfo{
-			Payload:      smallPayload,
-			PayloadSize:  uint32(len(smallPayload)),
-			OverflowPage: 0,
-		}
-		cursor.State = CursorValid
-
-		payload, err := cursor.GetCompletePayload()
-		if err != nil {
-			t.Fatalf("GetCompletePayload() error = %v", err)
-		}
-
-		if !bytes.Equal(payload, smallPayload) {
-			t.Error("GetCompletePayload() returned incorrect data")
-		}
-	})
-
-	t.Run("large payload with overflow", func(t *testing.T) {
-		cursor := NewCursor(bt, rootPage)
-
-		// Write overflow data
-		localSize := CalculateLocalPayload(uint32(len(largePayload)), bt.PageSize, true)
-		firstOverflowPage, err := writeOverflowChain(bt, largePayload[localSize:], bt.UsableSize)
-		if err != nil {
-			t.Fatalf("writeOverflowChain() error = %v", err)
-		}
-
-		// Simulate a cell with overflow
-		cursor.CurrentCell = &CellInfo{
-			Payload:      largePayload[:localSize],
-			PayloadSize:  uint32(len(largePayload)),
-			OverflowPage: firstOverflowPage,
-		}
-		cursor.State = CursorValid
-
-		payload, err := cursor.GetCompletePayload()
-		if err != nil {
-			t.Fatalf("GetCompletePayload() error = %v", err)
-		}
-
-		if !bytes.Equal(payload, largePayload) {
-			t.Error("GetCompletePayload() returned incorrect data")
-		}
-	})
-
-	t.Run("invalid cursor state", func(t *testing.T) {
-		cursor := NewCursor(bt, rootPage)
-		cursor.State = CursorInvalid
-
-		_, err := cursor.GetCompletePayload()
-		if err == nil {
-			t.Error("GetCompletePayload() should fail for invalid cursor")
-		}
-	})
+func TestGetCompletePayload_InvalidState(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(4096)
+	rootPage, _ := bt.CreateTable()
+	cursor := NewCursor(bt, rootPage)
+	cursor.State = CursorInvalid
+	_, err := cursor.GetCompletePayload()
+	if err == nil {
+		t.Error("GetCompletePayload() should fail for invalid cursor")
+	}
 }
 
 // Helper function to count pages in an overflow chain

@@ -206,6 +206,14 @@ func TestReadSingleOverflowPage_BoundsError(t *testing.T) {
 
 // TestWriteAndReadOverflow_SmallPageSize uses a 512-byte page (smallest valid size)
 // so overflow pages are triggered sooner, exercising write/read paths with small pages.
+func makeSequentialPayload(size int) []byte {
+	payload := make([]byte, size)
+	for i := range payload {
+		payload[i] = byte(i % 251)
+	}
+	return payload
+}
+
 func TestWriteAndReadOverflow_SmallPageSize(t *testing.T) {
 	t.Parallel()
 
@@ -215,48 +223,15 @@ func TestWriteAndReadOverflow_SmallPageSize(t *testing.T) {
 		t.Fatalf("CreateTable() error = %v", err)
 	}
 	cursor := NewCursor(bt, rootPage)
+	payload := makeSequentialPayload(3000)
 
-	// 3000 bytes far exceeds the 512-byte page threshold.
-	payload := make([]byte, 3000)
-	for i := range payload {
-		payload[i] = byte(i % 251)
-	}
+	insertAndVerifyOverflow(t, cursor, 1, payload, true)
+	verifyPayloadRoundtrip(t, cursor, 1, payload)
 
-	if err := cursor.Insert(1, payload); err != nil {
-		t.Fatalf("Insert() error = %v", err)
-	}
-
-	found, err := cursor.SeekRowid(1)
-	if err != nil {
-		t.Fatalf("SeekRowid() error = %v", err)
-	}
-	if !found {
-		t.Fatal("Row not found after insert")
-	}
-
-	if cursor.CurrentCell.OverflowPage == 0 {
-		t.Fatal("Expected overflow pages for 3000-byte payload on 512-byte pages")
-	}
-
-	retrieved, err := cursor.GetCompletePayload()
-	if err != nil {
-		t.Fatalf("GetCompletePayload() error = %v", err)
-	}
-	if len(retrieved) != len(payload) {
-		t.Fatalf("Payload size mismatch: got %d, want %d", len(retrieved), len(payload))
-	}
-	for i := range payload {
-		if retrieved[i] != payload[i] {
-			t.Fatalf("Payload byte %d mismatch: got %d, want %d", i, retrieved[i], payload[i])
-		}
-	}
-
-	// Delete to exercise FreeOverflowChain.
 	if err := cursor.Delete(); err != nil {
 		t.Fatalf("Delete() error = %v", err)
 	}
-
-	found, _ = cursor.SeekRowid(1)
+	found, _ := cursor.SeekRowid(1)
 	if found {
 		t.Error("Row should be gone after delete")
 	}

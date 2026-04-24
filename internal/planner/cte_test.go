@@ -499,34 +499,18 @@ func TestRecursiveCTEStructure(t *testing.T) {
 
 // TestMaterializeCTE tests CTE materialization.
 func TestMaterializeCTE(t *testing.T) {
-	sql := "WITH cte AS (SELECT * FROM users) SELECT * FROM cte"
+	ctx := parseCTEContext(t, "WITH cte AS (SELECT * FROM users) SELECT * FROM cte")
 
-	p := parser.NewParser(sql)
-	stmts, err := p.Parse()
-	if err != nil {
-		t.Fatalf("Parse failed: %v", err)
-	}
-
-	selectStmt := stmts[0].(*parser.SelectStmt)
-	ctx, err := NewCTEContext(selectStmt.With)
-	if err != nil {
-		t.Fatalf("NewCTEContext failed: %v", err)
-	}
-
-	// Materialize the CTE
 	mat, err := ctx.MaterializeCTE("cte")
 	if err != nil {
 		t.Fatalf("MaterializeCTE failed: %v", err)
 	}
-
 	if mat == nil {
 		t.Fatal("expected MaterializedCTE, got nil")
 	}
-
 	if mat.Name != "cte" {
 		t.Errorf("expected Name = 'cte', got '%s'", mat.Name)
 	}
-
 	if mat.TempTable == "" {
 		t.Error("expected non-empty TempTable")
 	}
@@ -536,7 +520,6 @@ func TestMaterializeCTE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second MaterializeCTE failed: %v", err)
 	}
-
 	if mat != mat2 {
 		t.Error("expected same MaterializedCTE instance")
 	}

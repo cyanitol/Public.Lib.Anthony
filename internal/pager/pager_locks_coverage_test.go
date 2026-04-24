@@ -127,15 +127,14 @@ func TestAcquirePendingLock_AlreadyReserved(t *testing.T) {
 // commitPhase0FlushFreeList.  We add pending pages to the freelist but close
 // the underlying database file first so that Flush → getLocked fails, causing
 // setErrorState to be called.
-func TestCommitPhase0FlushFreeList_ErrorPath(t *testing.T) {
-	dir := t.TempDir()
-	p, err := Open(filepath.Join(dir, "flush_err.db"), false)
+// plcSetupPagerWithFreePage allocates a page, commits, then begins a new write
+// transaction and frees the page. Returns the pager.
+func plcSetupPagerWithFreePage(t *testing.T, dbFile string) *Pager {
+	t.Helper()
+	p, err := Open(dbFile, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	// Do not defer p.Close() — we close the file manually below.
-
-	// Allocate a page so dbSize > 1, giving us a valid page to free.
 	if err := p.BeginWrite(); err != nil {
 		t.Fatalf("BeginWrite: %v", err)
 	}
@@ -146,23 +145,23 @@ func TestCommitPhase0FlushFreeList_ErrorPath(t *testing.T) {
 	if err := p.Commit(); err != nil {
 		t.Fatalf("Commit (setup): %v", err)
 	}
-
-	// Begin another write transaction and free the page so there are
-	// pending pages in the freelist.
 	if err := p.BeginWrite(); err != nil {
 		t.Fatalf("BeginWrite (free): %v", err)
 	}
 	if err := p.FreePage(pgno); err != nil {
 		t.Fatalf("FreePage: %v", err)
 	}
+	return p
+}
 
-	// Close the underlying file so that Flush's getLocked call will fail.
+func TestCommitPhase0FlushFreeList_ErrorPath(t *testing.T) {
+	dir := t.TempDir()
+	p := plcSetupPagerWithFreePage(t, filepath.Join(dir, "flush_err.db"))
+
 	p.mu.Lock()
 	p.file.Close()
 	p.mu.Unlock()
 
-	// Now call commitPhase0FlushFreeList directly (lock already conceptually
-	// held since we hold p.mu above; call without lock to match test pattern).
 	p.mu.Lock()
 	flushErr := p.commitPhase0FlushFreeList()
 	p.mu.Unlock()
@@ -170,8 +169,6 @@ func TestCommitPhase0FlushFreeList_ErrorPath(t *testing.T) {
 	if flushErr == nil {
 		t.Error("expected error from commitPhase0FlushFreeList with closed file, got nil")
 	}
-
-	// Verify pager entered error state.
 	if p.state != PagerStateError {
 		t.Errorf("expected PagerStateError after flush failure, got state=%d", p.state)
 	}

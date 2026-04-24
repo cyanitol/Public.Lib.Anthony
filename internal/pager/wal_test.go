@@ -84,47 +84,45 @@ func TestWALHeader(t *testing.T) {
 }
 
 // TestWALWriteFrame tests writing frames to the WAL
-func TestWALWriteFrame(t *testing.T) {
-	t.Parallel()
+// walTestCreateAndOpen creates an empty db file and opens a WAL on it.
+func walTestCreateAndOpen(t *testing.T) *WAL {
+	t.Helper()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
-
 	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
 		t.Fatalf("Failed to create test database: %v", err)
 	}
-
 	wal := NewWAL(dbFile, DefaultPageSize)
 	if err := wal.Open(); err != nil {
 		t.Fatalf("Failed to create WAL: %v", err)
 	}
+	return wal
+}
+
+func TestWALWriteFrame(t *testing.T) {
+	t.Parallel()
+	wal := walTestCreateAndOpen(t)
 	defer wal.Close()
 
-	// Create test page data
 	pageData := make([]byte, DefaultPageSize)
 	for i := range pageData {
 		pageData[i] = byte(i % 256)
 	}
 
-	// Write frame
 	if err := wal.WriteFrame(1, pageData, 1); err != nil {
 		t.Fatalf("Failed to write frame: %v", err)
 	}
-
-	// Verify frame count
 	if wal.frameCount != 1 {
 		t.Errorf("Expected frameCount=1, got %d", wal.frameCount)
 	}
 
-	// Write another frame
 	pageData2 := make([]byte, DefaultPageSize)
 	for i := range pageData2 {
 		pageData2[i] = byte((i + 100) % 256)
 	}
-
 	if err := wal.WriteFrame(2, pageData2, 2); err != nil {
 		t.Fatalf("Failed to write second frame: %v", err)
 	}
-
 	if wal.frameCount != 2 {
 		t.Errorf("Expected frameCount=2, got %d", wal.frameCount)
 	}
@@ -133,20 +131,9 @@ func TestWALWriteFrame(t *testing.T) {
 // TestWALReadFrame tests reading frames from the WAL
 func TestWALReadFrame(t *testing.T) {
 	t.Parallel()
-	tempDir := t.TempDir()
-	dbFile := filepath.Join(tempDir, "test.db")
-
-	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
-
-	wal := NewWAL(dbFile, DefaultPageSize)
-	if err := wal.Open(); err != nil {
-		t.Fatalf("Failed to create WAL: %v", err)
-	}
+	wal := walTestCreateAndOpen(t)
 	defer wal.Close()
 
-	// Create and write test pages
 	testPages := []struct {
 		pgno Pgno
 		data []byte
@@ -162,17 +149,14 @@ func TestWALReadFrame(t *testing.T) {
 		}
 	}
 
-	// Read frames back
 	for i, tp := range testPages {
 		frame, err := wal.ReadFrame(uint32(i))
 		if err != nil {
 			t.Fatalf("Failed to read frame %d: %v", i, err)
 		}
-
 		if frame.PageNumber != uint32(tp.pgno) {
 			t.Errorf("Frame %d: wrong page number, expected %d, got %d", i, tp.pgno, frame.PageNumber)
 		}
-
 		if !bytesEqual(frame.Data, tp.data) {
 			t.Errorf("Frame %d: data mismatch", i)
 		}
@@ -265,52 +249,53 @@ func TestWALCheckpoint(t *testing.T) {
 }
 
 // TestWALCheckpointOverwrite tests that checkpoint handles multiple versions correctly
-func TestWALCheckpointOverwrite(t *testing.T) {
-	t.Parallel()
+// walTestCreateDBAndOpen creates a db file with numPages pages and opens a WAL on it.
+func walTestCreateDBAndOpen(t *testing.T, numPages int) (*WAL, string) {
+	t.Helper()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
-
-	// Create database file
-	dbData := make([]byte, DefaultPageSize*2)
-	if err := os.WriteFile(dbFile, dbData, 0600); err != nil {
+	if err := os.WriteFile(dbFile, make([]byte, DefaultPageSize*numPages), 0600); err != nil {
 		t.Fatalf("Failed to create test database: %v", err)
 	}
-
 	wal := NewWAL(dbFile, DefaultPageSize)
 	if err := wal.Open(); err != nil {
 		t.Fatalf("Failed to create WAL: %v", err)
 	}
-	defer wal.Close()
+	return wal, dbFile
+}
 
-	// Write multiple versions of page 1
-	page1v1 := makeTestPage(1, DefaultPageSize)
-	page1v2 := makeTestPage(100, DefaultPageSize)
-
-	if err := wal.WriteFrame(1, page1v1, 1); err != nil {
-		t.Fatalf("Failed to write frame: %v", err)
-	}
-
-	if err := wal.WriteFrame(1, page1v2, 1); err != nil {
-		t.Fatalf("Failed to write frame: %v", err)
-	}
-
-	// Checkpoint
-	if err := wal.Checkpoint(); err != nil {
-		t.Fatalf("Failed to checkpoint: %v", err)
-	}
-
-	// Verify only the latest version was written
+// walTestReadPageFromDB reads a page from the db file and returns its data.
+func walTestReadPageFromDB(t *testing.T, dbFile string, offset int64) []byte {
+	t.Helper()
 	dbFileHandle, err := os.Open(dbFile)
 	if err != nil {
 		t.Fatalf("Failed to open database file: %v", err)
 	}
 	defer dbFileHandle.Close()
-
-	actualData := make([]byte, DefaultPageSize)
-	if _, err := dbFileHandle.ReadAt(actualData, 0); err != nil {
+	data := make([]byte, DefaultPageSize)
+	if _, err := dbFileHandle.ReadAt(data, offset); err != nil {
 		t.Fatalf("Failed to read page from database: %v", err)
 	}
+	return data
+}
 
+func TestWALCheckpointOverwrite(t *testing.T) {
+	t.Parallel()
+	wal, dbFile := walTestCreateDBAndOpen(t, 2)
+	defer wal.Close()
+
+	page1v2 := makeTestPage(100, DefaultPageSize)
+	if err := wal.WriteFrame(1, makeTestPage(1, DefaultPageSize), 1); err != nil {
+		t.Fatalf("Failed to write frame: %v", err)
+	}
+	if err := wal.WriteFrame(1, page1v2, 1); err != nil {
+		t.Fatalf("Failed to write frame: %v", err)
+	}
+	if err := wal.Checkpoint(); err != nil {
+		t.Fatalf("Failed to checkpoint: %v", err)
+	}
+
+	actualData := walTestReadPageFromDB(t, dbFile, 0)
 	if !bytesEqual(actualData, page1v2) {
 		t.Errorf("Expected latest version of page after checkpoint")
 	}
@@ -579,16 +564,9 @@ func TestWALFrameFormat(t *testing.T) {
 
 // TestWALLargeBlobRoundTrip tests writing and reading back 10 large blob frames,
 // then closing/reopening the WAL to exercise the recovery path.
-func TestWALLargeBlobRoundTrip(t *testing.T) {
-	t.Parallel()
-
-	const pageSize = 4096
-	const numFrames = 10
-
-	dbFile := createTestDBFile(t)
-	wal := mustOpenWAL(t, dbFile, pageSize)
-
-	// Build deterministic frame data and write all frames
+// walWriteAndVerifyFrames writes numFrames deterministic frames and reads them back.
+func walWriteAndVerifyFrames(t *testing.T, w *WAL, numFrames int, pageSize int) [][]byte {
+	t.Helper()
 	frames := make([][]byte, numFrames)
 	for frameIdx := 0; frameIdx < numFrames; frameIdx++ {
 		data := make([]byte, pageSize)
@@ -596,33 +574,25 @@ func TestWALLargeBlobRoundTrip(t *testing.T) {
 			data[i] = byte(i * (frameIdx + 1) % 251)
 		}
 		frames[frameIdx] = data
-		mustWriteFrame(t, wal, Pgno(frameIdx+1), data, uint32(frameIdx+1))
+		mustWriteFrame(t, w, Pgno(frameIdx+1), data, uint32(frameIdx+1))
 	}
-
-	// Read back all frames immediately and verify data
 	for frameIdx := 0; frameIdx < numFrames; frameIdx++ {
-		frame, err := wal.ReadFrame(uint32(frameIdx))
+		frame, err := w.ReadFrame(uint32(frameIdx))
 		if err != nil {
 			t.Fatalf("ReadFrame(%d) error = %v", frameIdx, err)
 		}
 		if !bytesEqual(frame.Data, frames[frameIdx]) {
-			t.Errorf("Frame %d: data mismatch before reopen", frameIdx)
+			t.Errorf("Frame %d: data mismatch", frameIdx)
 		}
 	}
+	return frames
+}
 
-	wal.Close()
-
-	// Reopen to exercise the recovery path
-	wal2 := mustOpenWAL(t, dbFile, pageSize)
-	defer wal2.Close()
-
-	if wal2.frameCount != numFrames {
-		t.Fatalf("Expected %d frames after reopen, got %d", numFrames, wal2.frameCount)
-	}
-
-	// Read all frames again: verify checksums and data
-	for frameIdx := 0; frameIdx < numFrames; frameIdx++ {
-		frame, err := wal2.ReadFrame(uint32(frameIdx))
+// walVerifyFramesAfterReopen reads all frames from a reopened WAL and verifies data.
+func walVerifyFramesAfterReopen(t *testing.T, w *WAL, frames [][]byte) {
+	t.Helper()
+	for frameIdx := 0; frameIdx < len(frames); frameIdx++ {
+		frame, err := w.ReadFrame(uint32(frameIdx))
 		if err != nil {
 			t.Fatalf("ReadFrame(%d) after reopen error = %v", frameIdx, err)
 		}
@@ -633,6 +603,27 @@ func TestWALLargeBlobRoundTrip(t *testing.T) {
 			t.Errorf("Frame %d: wrong page number %d", frameIdx, frame.PageNumber)
 		}
 	}
+}
+
+func TestWALLargeBlobRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	const pageSize = 4096
+	const numFrames = 10
+
+	dbFile := createTestDBFile(t)
+	wal := mustOpenWAL(t, dbFile, pageSize)
+
+	frames := walWriteAndVerifyFrames(t, wal, numFrames, pageSize)
+	wal.Close()
+
+	wal2 := mustOpenWAL(t, dbFile, pageSize)
+	defer wal2.Close()
+
+	if wal2.frameCount != numFrames {
+		t.Fatalf("Expected %d frames after reopen, got %d", numFrames, wal2.frameCount)
+	}
+	walVerifyFramesAfterReopen(t, wal2, frames)
 }
 
 // Helper functions
@@ -788,38 +779,23 @@ func TestWALHeaderChecksumValidation(t *testing.T) {
 // TestWALCumulativeChecksums tests that checksums are properly cumulative
 func TestWALCumulativeChecksums(t *testing.T) {
 	t.Parallel()
-	tempDir := t.TempDir()
-	dbFile := filepath.Join(tempDir, "test.db")
-
-	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
-
-	wal := NewWAL(dbFile, DefaultPageSize)
-	if err := wal.Open(); err != nil {
-		t.Fatalf("Failed to create WAL: %v", err)
-	}
+	wal := walTestCreateAndOpen(t)
 	defer wal.Close()
 
-	// Write multiple frames
-	var checksums []struct{ c1, c2 uint32 }
+	type cksum struct{ c1, c2 uint32 }
+	var checksums []cksum
 
 	for i := 1; i <= 5; i++ {
-		pageData := makeTestPage(i*50, DefaultPageSize)
-		if err := wal.WriteFrame(Pgno(i), pageData, uint32(i)); err != nil {
+		if err := wal.WriteFrame(Pgno(i), makeTestPage(i*50, DefaultPageSize), uint32(i)); err != nil {
 			t.Fatalf("Failed to write frame %d: %v", i, err)
 		}
-
-		// Read back to get checksum
 		frame, err := wal.ReadFrame(uint32(i - 1))
 		if err != nil {
 			t.Fatalf("Failed to read frame %d: %v", i-1, err)
 		}
-
-		checksums = append(checksums, struct{ c1, c2 uint32 }{frame.Checksum1, frame.Checksum2})
+		checksums = append(checksums, cksum{frame.Checksum1, frame.Checksum2})
 	}
 
-	// Verify checksums are different (cumulative)
 	for i := 1; i < len(checksums); i++ {
 		if checksums[i].c1 == checksums[i-1].c1 && checksums[i].c2 == checksums[i-1].c2 {
 			t.Errorf("Frame %d has same checksum as frame %d - checksums should be cumulative", i, i-1)
@@ -830,41 +806,25 @@ func TestWALCumulativeChecksums(t *testing.T) {
 // TestWALChecksumCache tests that the checksum cache works correctly
 func TestWALChecksumCache(t *testing.T) {
 	t.Parallel()
-	tempDir := t.TempDir()
-	dbFile := filepath.Join(tempDir, "test.db")
+	wal := walTestCreateAndOpen(t)
+	dbFile := wal.dbFilename
 
-	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
-
-	wal := NewWAL(dbFile, DefaultPageSize)
-	if err := wal.Open(); err != nil {
-		t.Fatalf("Failed to create WAL: %v", err)
-	}
-
-	// Write frames
 	for i := 1; i <= 10; i++ {
-		pageData := makeTestPage(i*10, DefaultPageSize)
-		if err := wal.WriteFrame(Pgno(i), pageData, uint32(i)); err != nil {
+		if err := wal.WriteFrame(Pgno(i), makeTestPage(i*10, DefaultPageSize), uint32(i)); err != nil {
 			t.Fatalf("Failed to write frame %d: %v", i, err)
 		}
 	}
-
 	wal.Close()
 
-	// Reopen - should build cache
 	wal2 := NewWAL(dbFile, DefaultPageSize)
 	if err := wal2.Open(); err != nil {
 		t.Fatalf("Failed to reopen WAL: %v", err)
 	}
 	defer wal2.Close()
 
-	// Verify cache was built
 	if len(wal2.checksumCache) != 10 {
 		t.Errorf("Expected 10 cached checksums, got %d", len(wal2.checksumCache))
 	}
-
-	// Read frames should use cache
 	for i := uint32(0); i < 10; i++ {
 		if _, err := wal2.ReadFrame(i); err != nil {
 			t.Errorf("Failed to read frame %d: %v", i, err)

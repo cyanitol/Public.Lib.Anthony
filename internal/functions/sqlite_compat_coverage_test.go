@@ -152,97 +152,77 @@ func TestLogVariadicFunc(t *testing.T) {
 	}
 }
 
+// callLogOneArg calls logOneArg and fails on error.
+func callLogOneArg(t *testing.T, v Value) Value {
+	t.Helper()
+	res, err := logOneArg(v)
+	if err != nil {
+		t.Fatalf("logOneArg() error: %v", err)
+	}
+	return res
+}
+
 // TestLogOneArg tests the logOneArg helper directly.
 func TestLogOneArg(t *testing.T) {
 	// NULL input
-	res, err := logOneArg(NewNullValue())
-	if err != nil {
-		t.Fatalf("logOneArg(null) error: %v", err)
-	}
-	if !res.IsNull() {
+	if res := callLogOneArg(t, NewNullValue()); !res.IsNull() {
 		t.Error("logOneArg(null) should return null")
 	}
 
 	// Positive value
-	res, err = logOneArg(NewFloatValue(1.0))
-	if err != nil {
-		t.Fatalf("logOneArg(1) error: %v", err)
-	}
-	if math.Abs(res.AsFloat64()-0.0) > 1e-9 {
+	if res := callLogOneArg(t, NewFloatValue(1.0)); math.Abs(res.AsFloat64()-0.0) > 1e-9 {
 		t.Errorf("logOneArg(1) = %v, want 0", res.AsFloat64())
 	}
 
 	// Non-positive value returns NaN
-	res, err = logOneArg(NewFloatValue(0.0))
-	if err != nil {
-		t.Fatalf("logOneArg(0) error: %v", err)
-	}
-	if !math.IsNaN(res.AsFloat64()) {
+	if res := callLogOneArg(t, NewFloatValue(0.0)); !math.IsNaN(res.AsFloat64()) {
 		t.Errorf("logOneArg(0) = %v, want NaN", res.AsFloat64())
 	}
 
-	res, err = logOneArg(NewFloatValue(-5.0))
-	if err != nil {
-		t.Fatalf("logOneArg(-5) error: %v", err)
-	}
-	if !math.IsNaN(res.AsFloat64()) {
+	if res := callLogOneArg(t, NewFloatValue(-5.0)); !math.IsNaN(res.AsFloat64()) {
 		t.Errorf("logOneArg(-5) = %v, want NaN", res.AsFloat64())
 	}
+}
+
+// callLogTwoArgs calls logTwoArgs and fails on error.
+func callLogTwoArgs(t *testing.T, base, x Value) Value {
+	t.Helper()
+	res, err := logTwoArgs(base, x)
+	if err != nil {
+		t.Fatalf("logTwoArgs() error: %v", err)
+	}
+	return res
 }
 
 // TestLogTwoArgs tests the logTwoArgs helper directly.
 func TestLogTwoArgs(t *testing.T) {
 	// NULL base
-	res, err := logTwoArgs(NewNullValue(), NewFloatValue(100.0))
-	if err != nil {
-		t.Fatalf("logTwoArgs(null, 100) error: %v", err)
-	}
-	if !res.IsNull() {
+	if res := callLogTwoArgs(t, NewNullValue(), NewFloatValue(100.0)); !res.IsNull() {
 		t.Error("logTwoArgs(null, 100) should return null")
 	}
 
 	// NULL x
-	res, err = logTwoArgs(NewFloatValue(10.0), NewNullValue())
-	if err != nil {
-		t.Fatalf("logTwoArgs(10, null) error: %v", err)
-	}
-	if !res.IsNull() {
+	if res := callLogTwoArgs(t, NewFloatValue(10.0), NewNullValue()); !res.IsNull() {
 		t.Error("logTwoArgs(10, null) should return null")
 	}
 
 	// log(10, 1000) = 3
-	res, err = logTwoArgs(NewFloatValue(10.0), NewFloatValue(1000.0))
-	if err != nil {
-		t.Fatalf("logTwoArgs(10,1000) error: %v", err)
-	}
-	if math.Abs(res.AsFloat64()-3.0) > 1e-9 {
+	if res := callLogTwoArgs(t, NewFloatValue(10.0), NewFloatValue(1000.0)); math.Abs(res.AsFloat64()-3.0) > 1e-9 {
 		t.Errorf("logTwoArgs(10,1000) = %v, want ~3.0", res.AsFloat64())
 	}
 
 	// Invalid: base == 1
-	res, err = logTwoArgs(NewFloatValue(1.0), NewFloatValue(100.0))
-	if err != nil {
-		t.Fatalf("logTwoArgs(1,100) error: %v", err)
-	}
-	if !math.IsNaN(res.AsFloat64()) {
+	if res := callLogTwoArgs(t, NewFloatValue(1.0), NewFloatValue(100.0)); !math.IsNaN(res.AsFloat64()) {
 		t.Errorf("logTwoArgs(1,100) = %v, want NaN", res.AsFloat64())
 	}
 
 	// Invalid: base <= 0
-	res, err = logTwoArgs(NewFloatValue(0.0), NewFloatValue(100.0))
-	if err != nil {
-		t.Fatalf("logTwoArgs(0,100) error: %v", err)
-	}
-	if !math.IsNaN(res.AsFloat64()) {
+	if res := callLogTwoArgs(t, NewFloatValue(0.0), NewFloatValue(100.0)); !math.IsNaN(res.AsFloat64()) {
 		t.Errorf("logTwoArgs(0,100) = %v, want NaN", res.AsFloat64())
 	}
 
 	// Invalid: x <= 0
-	res, err = logTwoArgs(NewFloatValue(10.0), NewFloatValue(0.0))
-	if err != nil {
-		t.Fatalf("logTwoArgs(10,0) error: %v", err)
-	}
-	if !math.IsNaN(res.AsFloat64()) {
+	if res := callLogTwoArgs(t, NewFloatValue(10.0), NewFloatValue(0.0)); !math.IsNaN(res.AsFloat64()) {
 		t.Errorf("logTwoArgs(10,0) = %v, want NaN", res.AsFloat64())
 	}
 }

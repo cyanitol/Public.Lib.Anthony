@@ -13,13 +13,31 @@ import (
 // TestWALRemaining_MultipleCheckpoints writes frames, checkpoints, writes more frames,
 // then checkpoints again. Exercises the checkpoint sequence increment path in
 // restartWAL and verifies the WAL remains functional across checkpoints.
+// walRemainingCheckpointCycle writes two frames to the WAL, checkpoints, and
+// verifies the checkpoint sequence incremented and frame count is zero.
+func walRemainingCheckpointCycle(t *testing.T, w *WAL, dbF *os.File, seed1, seed2 int, prevSeq uint32) uint32 {
+	t.Helper()
+	mustWriteFrame(t, w, 1, makeTestPage(seed1, DefaultPageSize), 2)
+	mustWriteFrame(t, w, 2, makeTestPage(seed2, DefaultPageSize), 2)
+	w.dbFile = dbF
+	if err := w.Checkpoint(); err != nil {
+		t.Fatalf("Checkpoint: %v", err)
+	}
+	if w.FrameCount() != 0 {
+		t.Errorf("expected 0 frames after checkpoint, got %d", w.FrameCount())
+	}
+	if w.checkpointSeq <= prevSeq {
+		t.Errorf("checkpointSeq should have incremented: was %d, now %d", prevSeq, w.checkpointSeq)
+	}
+	return w.checkpointSeq
+}
+
 func TestWALRemaining_MultipleCheckpoints(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
 	dbFile := filepath.Join(dir, "multi_ckpt.db")
 
-	// Create backing db file large enough for two pages.
 	dbData := make([]byte, DefaultPageSize*2)
 	if err := os.WriteFile(dbFile, dbData, 0600); err != nil {
 		t.Fatalf("create db file: %v", err)
@@ -28,53 +46,14 @@ func TestWALRemaining_MultipleCheckpoints(t *testing.T) {
 	wal := mustOpenWAL(t, dbFile, DefaultPageSize)
 	defer wal.Close()
 
-	initialSeq := wal.checkpointSeq
-
-	// Write frames for two pages.
-	mustWriteFrame(t, wal, 1, makeTestPage(11, DefaultPageSize), 2)
-	mustWriteFrame(t, wal, 2, makeTestPage(22, DefaultPageSize), 2)
-
-	if wal.FrameCount() != 2 {
-		t.Fatalf("expected 2 frames before first checkpoint, got %d", wal.FrameCount())
-	}
-
-	// Open the db file handle so checkpoint can write to it.
 	dbF, err := os.OpenFile(dbFile, os.O_RDWR, 0600)
 	if err != nil {
 		t.Fatalf("open db file: %v", err)
 	}
 	defer dbF.Close()
-	wal.dbFile = dbF
 
-	// First checkpoint.
-	if err := wal.Checkpoint(); err != nil {
-		t.Fatalf("first Checkpoint: %v", err)
-	}
-
-	if wal.FrameCount() != 0 {
-		t.Errorf("expected 0 frames after first checkpoint, got %d", wal.FrameCount())
-	}
-	if wal.checkpointSeq <= initialSeq {
-		t.Errorf("checkpointSeq should have incremented: was %d, now %d", initialSeq, wal.checkpointSeq)
-	}
-
-	seqAfterFirst := wal.checkpointSeq
-
-	// Write more frames for a second checkpoint cycle.
-	mustWriteFrame(t, wal, 1, makeTestPage(33, DefaultPageSize), 2)
-	mustWriteFrame(t, wal, 2, makeTestPage(44, DefaultPageSize), 2)
-
-	wal.dbFile = dbF
-	if err := wal.Checkpoint(); err != nil {
-		t.Fatalf("second Checkpoint: %v", err)
-	}
-
-	if wal.FrameCount() != 0 {
-		t.Errorf("expected 0 frames after second checkpoint, got %d", wal.FrameCount())
-	}
-	if wal.checkpointSeq <= seqAfterFirst {
-		t.Errorf("checkpointSeq should have incremented again: was %d, now %d", seqAfterFirst, wal.checkpointSeq)
-	}
+	seq := walRemainingCheckpointCycle(t, wal, dbF, 11, 22, wal.checkpointSeq)
+	walRemainingCheckpointCycle(t, wal, dbF, 33, 44, seq)
 }
 
 // --- WAL: recovery after simulated crash ---
@@ -82,28 +61,17 @@ func TestWALRemaining_MultipleCheckpoints(t *testing.T) {
 // TestWALRemaining_RecoveryAfterCrash creates a WAL file with committed frames
 // on disk, then opens the database (simulating recovery after a crash). The
 // recoverWALReadWrite path checkpoints the leftover WAL into the database.
-func TestWALRemaining_RecoveryAfterCrash(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	dbFile := filepath.Join(dir, "crash.db")
-
-	// Open pager and switch to WAL mode.
-	p := openTestPager(t)
-	// We need a file-backed pager for WAL recovery to work.
-	p.Close()
-
-	// Use a fresh file-backed pager.
+// walRemainingOpenWALPager opens a file-backed pager in WAL mode, writes 0xBE
+// to page 1 at DatabaseHeaderSize, commits, and returns the pager and dbFile path.
+func walRemainingOpenWALPager(t *testing.T, dbFile string) *Pager {
+	t.Helper()
 	p2, err := Open(dbFile, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-
 	if err := p2.SetJournalMode(JournalModeWAL); err != nil {
 		t.Fatalf("SetJournalMode(WAL): %v", err)
 	}
-
-	// Write and commit a page.
 	if err := p2.BeginWrite(); err != nil {
 		t.Fatalf("BeginWrite: %v", err)
 	}
@@ -119,8 +87,12 @@ func TestWALRemaining_RecoveryAfterCrash(t *testing.T) {
 	if err := p2.Commit(); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
+	return p2
+}
 
-	// Close WITHOUT checkpointing to leave WAL frames on disk.
+// walRemainingSimulateCrashClose closes the WAL pager without checkpointing.
+func walRemainingSimulateCrashClose(t *testing.T, p2 *Pager) {
+	t.Helper()
 	if err := p2.wal.Close(); err != nil {
 		t.Fatalf("wal.Close: %v", err)
 	}
@@ -130,15 +102,27 @@ func TestWALRemaining_RecoveryAfterCrash(t *testing.T) {
 		p2.walIndex = nil
 	}
 	p2.file.Close()
+}
 
-	// Now reopen the database — this triggers recoverWALIfExists → recoverWALReadWrite.
+func TestWALRemaining_RecoveryAfterCrash(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	dbFile := filepath.Join(dir, "crash.db")
+
+	p := openTestPager(t)
+	p.Close()
+
+	p2 := walRemainingOpenWALPager(t, dbFile)
+	walRemainingSimulateCrashClose(t, p2)
+
+	// Reopen — triggers recoverWALIfExists -> recoverWALReadWrite.
 	p3, err := Open(dbFile, false)
 	if err != nil {
 		t.Fatalf("reopen after crash: %v", err)
 	}
 	defer p3.Close()
 
-	// After recovery the data written before the "crash" must be visible.
 	if err := p3.BeginRead(); err != nil {
 		t.Fatalf("BeginRead: %v", err)
 	}
@@ -151,7 +135,6 @@ func TestWALRemaining_RecoveryAfterCrash(t *testing.T) {
 	if err := p3.EndRead(); err != nil {
 		t.Fatalf("EndRead: %v", err)
 	}
-
 	if got != 0xBE {
 		t.Errorf("recovery: expected byte 0xBE at DatabaseHeaderSize, got 0x%02X", got)
 	}
@@ -806,14 +789,13 @@ func TestWALRemaining_JournalRestoreEntryValid(t *testing.T) {
 // TestWALRemaining_JournalRestoreEntryChecksumMismatch injects a corrupted journal
 // entry (bad checksum) and calls Rollback, exercising the checksum mismatch error
 // branch in restoreEntry.
-func TestWALRemaining_JournalRestoreEntryChecksumMismatch(t *testing.T) {
-	t.Parallel()
+// walRemainingCreateJournalWithCorruptChecksum writes a journal entry and
+// corrupts its checksum, returning the journal and db file paths.
+func walRemainingCreateJournalWithCorruptChecksum(t *testing.T, dir string) (jPath, dbFile string) {
+	t.Helper()
+	jPath = filepath.Join(dir, "badcksum.db-journal")
+	dbFile = filepath.Join(dir, "badcksum.db")
 
-	dir := t.TempDir()
-	jPath := filepath.Join(dir, "badcksum.db-journal")
-	dbFile := filepath.Join(dir, "badcksum.db")
-
-	// Create a database file to write to.
 	dbF, err := os.Create(dbFile)
 	if err != nil {
 		t.Fatalf("create db file: %v", err)
@@ -824,39 +806,39 @@ func TestWALRemaining_JournalRestoreEntryChecksumMismatch(t *testing.T) {
 	}
 	dbF.Close()
 
-	// Write a journal with a valid header and one entry, then corrupt the checksum.
 	j := NewJournal(jPath, DefaultPageSize, 1)
 	if err := j.Open(); err != nil {
 		t.Fatalf("Open journal: %v", err)
 	}
-	pageData := makeTestPage(42, DefaultPageSize)
-	if err := j.WriteOriginal(1, pageData); err != nil {
+	if err := j.WriteOriginal(1, makeTestPage(42, DefaultPageSize)); err != nil {
 		t.Fatalf("WriteOriginal: %v", err)
 	}
 	j.file.Close()
 	j.file = nil
 
-	// Corrupt the checksum at the end of the first entry.
-	// Entry layout: [4: pageNum][pageSize: data][4: checksum]
 	checksumOffset := int64(JournalHeaderSize) + int64(4) + int64(DefaultPageSize)
 	jf, err := os.OpenFile(jPath, os.O_RDWR, 0600)
 	if err != nil {
 		t.Fatalf("open journal for corruption: %v", err)
 	}
-	badCksum := []byte{0xDE, 0xAD, 0xBE, 0xEF}
-	if _, err := jf.WriteAt(badCksum, checksumOffset); err != nil {
+	if _, err := jf.WriteAt([]byte{0xDE, 0xAD, 0xBE, 0xEF}, checksumOffset); err != nil {
 		jf.Close()
 		t.Fatalf("corrupt checksum: %v", err)
 	}
 	jf.Close()
+	return jPath, dbFile
+}
 
-	// Now build a minimal pager so Rollback can call restoreEntry.
+func TestWALRemaining_JournalRestoreEntryChecksumMismatch(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	jPath, dbFile := walRemainingCreateJournalWithCorruptChecksum(t, dir)
+
 	dbF2, err := os.OpenFile(dbFile, os.O_RDWR, 0600)
 	if err != nil {
 		t.Fatalf("open db file for pager: %v", err)
 	}
-
-	// Re-open the journal file for reading.
 	jf2, err := os.Open(jPath)
 	if err != nil {
 		dbF2.Close()
@@ -865,12 +847,7 @@ func TestWALRemaining_JournalRestoreEntryChecksumMismatch(t *testing.T) {
 
 	j2 := NewJournal(jPath, DefaultPageSize, 1)
 	j2.file = jf2
-
-	// Build a minimal Pager struct with enough fields set for restoreEntry.
-	p := &Pager{
-		file:     dbF2,
-		pageSize: DefaultPageSize,
-	}
+	p := &Pager{file: dbF2, pageSize: DefaultPageSize}
 
 	err = j2.Rollback(p)
 	dbF2.Close()

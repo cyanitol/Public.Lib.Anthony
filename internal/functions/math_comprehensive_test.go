@@ -918,37 +918,17 @@ func TestLnFuncText(t *testing.T) {
 
 // TestTrigFuncText tests trig functions with text
 func TestTrigFuncText(t *testing.T) {
-	result, err := asinFunc([]Value{NewTextValue("0.5")})
-	if err != nil {
-		t.Errorf("asinFunc() with text error: %v", err)
-	}
-	if result.Type() != TypeFloat {
-		t.Error("asinFunc('0.5') should return float")
-	}
+	r1, e1 := asinFunc([]Value{NewTextValue("0.5")})
+	assertTrigResult(t, "asinFunc", r1, e1)
 
-	result, err = acosFunc([]Value{NewTextValue("0.5")})
-	if err != nil {
-		t.Errorf("acosFunc() with text error: %v", err)
-	}
-	if result.Type() != TypeFloat {
-		t.Error("acosFunc('0.5') should return float")
-	}
+	r2, e2 := acosFunc([]Value{NewTextValue("0.5")})
+	assertTrigResult(t, "acosFunc", r2, e2)
 
-	result, err = acoshFunc([]Value{NewTextValue("2")})
-	if err != nil {
-		t.Errorf("acoshFunc() with text error: %v", err)
-	}
-	if result.Type() != TypeFloat {
-		t.Error("acoshFunc('2') should return float")
-	}
+	r3, e3 := acoshFunc([]Value{NewTextValue("2")})
+	assertTrigResult(t, "acoshFunc", r3, e3)
 
-	result, err = atanhFunc([]Value{NewTextValue("0.5")})
-	if err != nil {
-		t.Errorf("atanhFunc() with text error: %v", err)
-	}
-	if result.Type() != TypeFloat {
-		t.Error("atanhFunc('0.5') should return float")
-	}
+	r4, e4 := atanhFunc([]Value{NewTextValue("0.5")})
+	assertTrigResult(t, "atanhFunc", r4, e4)
 }
 
 // TestRandomBlobFuncZero tests randomblob with zero (becomes 1)

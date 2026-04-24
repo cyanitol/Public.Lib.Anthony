@@ -69,27 +69,28 @@ func TestFreeListInitialize(t *testing.T) {
 	}
 }
 
+// flFreeRange frees pages from start to end inclusive.
+func flFreeRange(t *testing.T, fl *FreeList, start, end Pgno) {
+	t.Helper()
+	for i := start; i <= end; i++ {
+		if err := fl.Free(i); err != nil {
+			t.Errorf("unexpected error freeing page %d: %v", i, err)
+		}
+	}
+}
+
 func TestFreeListPendingPages(t *testing.T) {
 	t.Parallel()
 	pager, cleanup := createTestPagerForFreeList(t)
 	defer cleanup()
 
 	fl := NewFreeList(pager)
+	flFreeRange(t, fl, 10, 15)
 
-	// Free some pages (they go to pending list first)
-	for i := Pgno(10); i <= 15; i++ {
-		err := fl.Free(i)
-		if err != nil {
-			t.Errorf("unexpected error freeing page %d: %v", i, err)
-		}
-	}
-
-	// Count should include pending pages
 	if fl.Count() != 6 {
 		t.Errorf("expected count 6, got %d", fl.Count())
 	}
 
-	// Allocate from pending
 	for i := 0; i < 6; i++ {
 		pgno, err := fl.Allocate()
 		if err != nil {
@@ -100,7 +101,6 @@ func TestFreeListPendingPages(t *testing.T) {
 		}
 	}
 
-	// Should be empty now
 	if !fl.IsEmpty() {
 		t.Error("expected free list to be empty after allocation")
 	}

@@ -641,97 +641,78 @@ func TestMCDC_JoinAggPhase1_OuterJoinBranch(t *testing.T) {
 //   Flip B: A=T B=F → function but not aggregate (e.g., ABS) gets NULL
 // ============================================================================
 
-func TestMCDC_EmitDefaultAggregateRow_AggCheck(t *testing.T) {
+// emitDefaultAggHelper sets up tables, runs the query, and returns the scanned value.
+func emitDefaultAggHelper(t *testing.T, setup, query string) interface{} {
+	t.Helper()
+	db := openMCDCDB(t)
+	for _, s := range splitSemicolon(setup) {
+		mustExec(t, db, s)
+	}
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("expected one row, got none")
+	}
+	var got interface{}
+	if err := rows.Scan(&got); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return got
+}
+
+// TestMCDC_EmitDefaultAggregateRow_AggCheck_Count tests COUNT(*) default on empty join.
+func TestMCDC_EmitDefaultAggregateRow_AggCheck_Count(t *testing.T) {
 	t.Parallel()
-
-	type tc struct {
-		name    string
-		setup   string
-		query   string
-		wantVal interface{}
+	got := emitDefaultAggHelper(t,
+		`CREATE TABLE da_a1(id INTEGER); CREATE TABLE da_b1(id INTEGER)`,
+		"SELECT COUNT(*) FROM da_a1 JOIN da_b1 ON da_a1.id = da_b1.id",
+	)
+	switch gv := got.(type) {
+	case int64:
+		if gv != 0 {
+			t.Errorf("got %d, want 0", gv)
+		}
+	case []byte:
+		// acceptable representation
+	default:
+		t.Errorf("got type %T value %v, want int64(0)", got, got)
 	}
-	tests := []tc{
-		{
-			// A=T B=T: COUNT(*) with no input rows → default 0
-			name: "A=T B=T: COUNT(*) default on empty join",
-			setup: `CREATE TABLE da_a1(id INTEGER);
-                    CREATE TABLE da_b1(id INTEGER)`,
-			query:   "SELECT COUNT(*) FROM da_a1 JOIN da_b1 ON da_a1.id = da_b1.id",
-			wantVal: int64(0),
-		},
-		{
-			// A=T B=T: SUM with no input rows → default NULL
-			name: "A=T B=T: SUM default NULL on empty join",
-			setup: `CREATE TABLE da_a2(id INTEGER);
-                    CREATE TABLE da_b2(id INTEGER, v INTEGER)`,
-			query:   "SELECT SUM(da_b2.v) FROM da_a2 JOIN da_b2 ON da_a2.id = da_b2.id",
-			wantVal: nil,
-		},
-		{
-			// A=T B=T: TOTAL with no input rows → default 0.0
-			name: "A=T B=T: TOTAL default 0.0 on empty join",
-			setup: `CREATE TABLE da_a3(id INTEGER);
-                    CREATE TABLE da_b3(id INTEGER, v REAL)`,
-			query:   "SELECT TOTAL(da_b3.v) FROM da_a3 JOIN da_b3 ON da_a3.id = da_b3.id",
-			wantVal: float64(0),
-		},
-	}
+}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			db := openMCDCDB(t)
-			for _, s := range splitSemicolon(tt.setup) {
-				mustExec(t, db, s)
-			}
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-			if !rows.Next() {
-				t.Fatal("expected one row, got none")
-			}
-			var got interface{}
-			if err := rows.Scan(&got); err != nil {
-				t.Fatalf("scan: %v", err)
-			}
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows.Err: %v", err)
-			}
-			if tt.wantVal == nil {
-				if got != nil {
-					t.Errorf("got %v, want nil", got)
-				}
-			} else {
-				switch want := tt.wantVal.(type) {
-				case int64:
-					// got is []byte or int64 depending on driver; convert
-					switch gv := got.(type) {
-					case int64:
-						if gv != want {
-							t.Errorf("got %d, want %d", gv, want)
-						}
-					case []byte:
-						// acceptable representation
-					default:
-						t.Errorf("got type %T value %v, want int64(%d)", got, got, want)
-					}
-				case float64:
-					switch gv := got.(type) {
-					case float64:
-						if gv != want {
-							t.Errorf("got %f, want %f", gv, want)
-						}
-					case []byte:
-						// acceptable representation
-					default:
-						t.Errorf("got type %T value %v, want float64(%f)", got, got, want)
-					}
-				}
-			}
-		})
+// TestMCDC_EmitDefaultAggregateRow_AggCheck_Sum tests SUM default NULL on empty join.
+func TestMCDC_EmitDefaultAggregateRow_AggCheck_Sum(t *testing.T) {
+	t.Parallel()
+	got := emitDefaultAggHelper(t,
+		`CREATE TABLE da_a2(id INTEGER); CREATE TABLE da_b2(id INTEGER, v INTEGER)`,
+		"SELECT SUM(da_b2.v) FROM da_a2 JOIN da_b2 ON da_a2.id = da_b2.id",
+	)
+	if got != nil {
+		t.Errorf("got %v, want nil", got)
+	}
+}
+
+// TestMCDC_EmitDefaultAggregateRow_AggCheck_Total tests TOTAL default 0.0 on empty join.
+func TestMCDC_EmitDefaultAggregateRow_AggCheck_Total(t *testing.T) {
+	t.Parallel()
+	got := emitDefaultAggHelper(t,
+		`CREATE TABLE da_a3(id INTEGER); CREATE TABLE da_b3(id INTEGER, v REAL)`,
+		"SELECT TOTAL(da_b3.v) FROM da_a3 JOIN da_b3 ON da_a3.id = da_b3.id",
+	)
+	switch gv := got.(type) {
+	case float64:
+		if gv != 0 {
+			t.Errorf("got %f, want 0.0", gv)
+		}
+	case []byte:
+		// acceptable representation
+	default:
+		t.Errorf("got type %T value %v, want float64(0)", got, got)
 	}
 }
 

@@ -80,25 +80,9 @@ func TestJSONFunc(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := jsonFunc([]Value{tt.input})
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error for invalid JSON, got result: %v", result)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if tt.isNull {
-				if !result.IsNull() {
-					t.Errorf("expected NULL, got %v", result.AsString())
-				}
-			} else {
-				if result.IsNull() {
-					t.Errorf("expected %s, got NULL", tt.expected)
-				} else if result.AsString() != tt.expected {
-					t.Errorf("expected %s, got %s", tt.expected, result.AsString())
+			if r, ok := assertFuncResult(t, "jsonFunc", result, err, tt.wantErr, tt.isNull); ok {
+				if r.AsString() != tt.expected {
+					t.Errorf("expected %s, got %s", tt.expected, r.AsString())
 				}
 			}
 		})

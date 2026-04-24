@@ -127,6 +127,26 @@ func Example_rollback() {
 }
 
 // Example_multiplePages demonstrates working with multiple pages.
+// exampleWritePage writes data to one page in the pager.
+func exampleWritePage(p *pager.Pager, i int) {
+	page, err := p.Get(pager.Pgno(i))
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := p.Write(page); err != nil {
+		log.Fatal(err)
+	}
+	offset := pager.DatabaseHeaderSize
+	if i > 1 {
+		offset = 0
+	}
+	data := []byte(fmt.Sprintf("Page %d", i))
+	if err := page.Write(offset, data); err != nil {
+		log.Fatal(err)
+	}
+	p.Put(page)
+}
+
 func Example_multiplePages() {
 	tmpDir, err := os.MkdirTemp("", "pager-example")
 	if err != nil {
@@ -142,31 +162,10 @@ func Example_multiplePages() {
 	}
 	defer p.Close()
 
-	// Write to multiple pages
 	for i := 1; i <= 5; i++ {
-		page, err := p.Get(pager.Pgno(i))
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		if err := p.Write(page); err != nil {
-			log.Fatal(err)
-		}
-
-		offset := pager.DatabaseHeaderSize
-		if i > 1 {
-			offset = 0
-		}
-
-		data := []byte(fmt.Sprintf("Page %d", i))
-		if err := page.Write(offset, data); err != nil {
-			log.Fatal(err)
-		}
-
-		p.Put(page)
+		exampleWritePage(p, i)
 	}
 
-	// Commit all changes
 	if err := p.Commit(); err != nil {
 		log.Fatal(err)
 	}

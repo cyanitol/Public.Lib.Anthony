@@ -103,44 +103,25 @@ func TestDateAggregate_WeekdayAllDays(t *testing.T) {
 
 // TestDateAggregate_HandleDateArithmeticMultipleModifiers covers
 // handleDateArithmetic with consecutive modifiers of different unit types.
+// assertDateQueryResult checks that sqlStr returns the expected non-NULL string value.
+func assertDateQueryResult(t *testing.T, db *sql.DB, sqlStr, want string) {
+	t.Helper()
+	got, isNull := queryOneString(t, db, sqlStr)
+	if isNull {
+		t.Fatalf("%s returned NULL", sqlStr)
+	}
+	if got != want {
+		t.Errorf("%s = %q, want %q", sqlStr, got, want)
+	}
+}
+
 func TestDateAggregate_HandleDateArithmeticMultipleModifiers(t *testing.T) {
 	db := openTestDB(t)
 
-	// +1 month then -3 days from 2024-01-01 → 2024-01-29
-	got, isNull := queryOneString(t, db, `SELECT date('2024-01-01', '+1 month', '-3 days')`)
-	if isNull {
-		t.Fatal("date with multiple arithmetic modifiers returned NULL")
-	}
-	if got != "2024-01-29" {
-		t.Errorf("date('+1 month', '-3 days') = %q, want 2024-01-29", got)
-	}
-
-	// +2 years from 2022-03-15 → 2024-03-15
-	got2, isNull2 := queryOneString(t, db, `SELECT date('2022-03-15', '+2 years')`)
-	if isNull2 {
-		t.Fatal("date('+2 years') returned NULL")
-	}
-	if got2 != "2024-03-15" {
-		t.Errorf("date('+2 years') = %q, want 2024-03-15", got2)
-	}
-
-	// -3 months from 2024-03-01 → 2023-12-01
-	got3, isNull3 := queryOneString(t, db, `SELECT date('2024-03-01', '-3 months')`)
-	if isNull3 {
-		t.Fatal("date('-3 months') returned NULL")
-	}
-	if got3 != "2023-12-01" {
-		t.Errorf("date('-3 months') = %q, want 2023-12-01", got3)
-	}
-
-	// +48 hours from 2024-01-01 → 2024-01-03
-	got4, isNull4 := queryOneString(t, db, `SELECT date('2024-01-01', '+48 hours')`)
-	if isNull4 {
-		t.Fatal("date('+48 hours') returned NULL")
-	}
-	if got4 != "2024-01-03" {
-		t.Errorf("date('+48 hours') = %q, want 2024-01-03", got4)
-	}
+	assertDateQueryResult(t, db, `SELECT date('2024-01-01', '+1 month', '-3 days')`, "2024-01-29")
+	assertDateQueryResult(t, db, `SELECT date('2022-03-15', '+2 years')`, "2024-03-15")
+	assertDateQueryResult(t, db, `SELECT date('2024-03-01', '-3 months')`, "2023-12-01")
+	assertDateQueryResult(t, db, `SELECT date('2024-01-01', '+48 hours')`, "2024-01-03")
 }
 
 // TestDateAggregate_HandleDateArithmeticMinutes covers the 'minutes' unit.

@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// TestPagerConfigDefault verifies DefaultPagerConfig returns expected defaults.
-func TestPagerConfigDefault(t *testing.T) {
+// TestPagerConfigDefault_NumericFields verifies DefaultPagerConfig numeric defaults.
+func TestPagerConfigDefault_NumericFields(t *testing.T) {
 	t.Parallel()
 	c := DefaultPagerConfig()
 	if c == nil {
@@ -19,6 +19,21 @@ func TestPagerConfigDefault(t *testing.T) {
 	if c.CacheSize != -2000 {
 		t.Errorf("CacheSize = %d, want -2000", c.CacheSize)
 	}
+	if c.BusyTimeout != 5*time.Second {
+		t.Errorf("BusyTimeout = %v, want 5s", c.BusyTimeout)
+	}
+	if c.WALAutocheckpoint != 1000 {
+		t.Errorf("WALAutocheckpoint = %d, want 1000", c.WALAutocheckpoint)
+	}
+	if c.MaxPageCount != 0 {
+		t.Errorf("MaxPageCount = %d, want 0", c.MaxPageCount)
+	}
+}
+
+// TestPagerConfigDefault_StringFields verifies DefaultPagerConfig string defaults.
+func TestPagerConfigDefault_StringFields(t *testing.T) {
+	t.Parallel()
+	c := DefaultPagerConfig()
 	if c.JournalMode != "delete" {
 		t.Errorf("JournalMode = %q, want \"delete\"", c.JournalMode)
 	}
@@ -31,15 +46,12 @@ func TestPagerConfigDefault(t *testing.T) {
 	if c.TempStore != "default" {
 		t.Errorf("TempStore = %q, want \"default\"", c.TempStore)
 	}
-	if c.BusyTimeout != 5*time.Second {
-		t.Errorf("BusyTimeout = %v, want 5s", c.BusyTimeout)
-	}
-	if c.WALAutocheckpoint != 1000 {
-		t.Errorf("WALAutocheckpoint = %d, want 1000", c.WALAutocheckpoint)
-	}
-	if c.MaxPageCount != 0 {
-		t.Errorf("MaxPageCount = %d, want 0", c.MaxPageCount)
-	}
+}
+
+// TestPagerConfigDefault_BoolFields verifies DefaultPagerConfig bool defaults.
+func TestPagerConfigDefault_BoolFields(t *testing.T) {
+	t.Parallel()
+	c := DefaultPagerConfig()
 	if c.ReadOnly {
 		t.Error("ReadOnly should be false by default")
 	}
@@ -248,8 +260,8 @@ func TestPagerConfigClone(t *testing.T) {
 	}
 }
 
-// TestMemoryPagerInTransaction tests InTransaction before and after a read transaction.
-func TestMemoryPagerInTransaction(t *testing.T) {
+// TestMemoryPagerInTransaction_ReadCycle tests InTransaction around a read cycle.
+func TestMemoryPagerInTransaction_ReadCycle(t *testing.T) {
 	t.Parallel()
 	mp, err := OpenMemory(DefaultPageSize)
 	if err != nil {
@@ -257,36 +269,38 @@ func TestMemoryPagerInTransaction(t *testing.T) {
 	}
 	defer mp.Close()
 
-	// No transaction initially
 	if mp.InTransaction() {
 		t.Error("InTransaction() should be false before any transaction")
 	}
-
-	// Begin a read transaction
 	if err := mp.BeginRead(); err != nil {
 		t.Fatalf("BeginRead: %v", err)
 	}
 	if !mp.InTransaction() {
 		t.Error("InTransaction() should be true during read transaction")
 	}
-
-	// End read transaction
 	if err := mp.EndRead(); err != nil {
 		t.Fatalf("EndRead: %v", err)
 	}
 	if mp.InTransaction() {
 		t.Error("InTransaction() should be false after EndRead")
 	}
+}
 
-	// Begin write transaction
+// TestMemoryPagerInTransaction_WriteCycle tests InTransaction around a write+rollback cycle.
+func TestMemoryPagerInTransaction_WriteCycle(t *testing.T) {
+	t.Parallel()
+	mp, err := OpenMemory(DefaultPageSize)
+	if err != nil {
+		t.Fatalf("OpenMemory: %v", err)
+	}
+	defer mp.Close()
+
 	if err := mp.BeginWrite(); err != nil {
 		t.Fatalf("BeginWrite: %v", err)
 	}
 	if !mp.InTransaction() {
 		t.Error("InTransaction() should be true during write transaction")
 	}
-
-	// Rollback
 	if err := mp.Rollback(); err != nil {
 		t.Fatalf("Rollback: %v", err)
 	}

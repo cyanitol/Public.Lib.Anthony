@@ -325,11 +325,10 @@ func TestDebugFunctionsMemCaptureRegisterSnapshotNilDebug(t *testing.T) {
 // TestDebugFunctionsMemValueToMemAllTypes exercises all type branches of
 // valueToMem through ExecuteFunction calls on built-in scalar functions,
 // and also exercises storeResult (via opFunction's internal storeResult call).
-func TestDebugFunctionsMemValueToMemAllTypes(t *testing.T) {
+func TestDebugFunctionsMemValueToMemAllTypes_IntAndReal(t *testing.T) {
 	t.Parallel()
 	db := openMemDB(t)
 
-	// Integer result.
 	var intVal int64
 	if err := db.QueryRow("SELECT length('hello')").Scan(&intVal); err != nil {
 		t.Fatalf("length: %v", err)
@@ -338,7 +337,6 @@ func TestDebugFunctionsMemValueToMemAllTypes(t *testing.T) {
 		t.Errorf("length('hello') = %d, want 5", intVal)
 	}
 
-	// Real result: AVG returns a float.
 	execSQL(t, db, "CREATE TABLE nums (v REAL)")
 	execSQL(t, db, "INSERT INTO nums VALUES (1.5)")
 	execSQL(t, db, "INSERT INTO nums VALUES (2.5)")
@@ -349,8 +347,12 @@ func TestDebugFunctionsMemValueToMemAllTypes(t *testing.T) {
 	if math.Abs(realVal-2.0) > 1e-9 {
 		t.Errorf("AVG = %v, want 2.0", realVal)
 	}
+}
 
-	// Text result: upper returns text.
+func TestDebugFunctionsMemValueToMemAllTypes_TextAndNull(t *testing.T) {
+	t.Parallel()
+	db := openMemDB(t)
+
 	var textVal string
 	if err := db.QueryRow("SELECT upper('abc')").Scan(&textVal); err != nil {
 		t.Fatalf("upper: %v", err)
@@ -359,7 +361,6 @@ func TestDebugFunctionsMemValueToMemAllTypes(t *testing.T) {
 		t.Errorf("upper('abc') = %q, want 'ABC'", textVal)
 	}
 
-	// Null result: abs(NULL) returns NULL.
 	var nullVal interface{}
 	if err := db.QueryRow("SELECT abs(NULL)").Scan(&nullVal); err != nil {
 		t.Fatalf("abs(NULL): %v", err)
@@ -405,6 +406,20 @@ func TestDebugFunctionsMemStoreResultError(t *testing.T) {
 
 // TestDebugFunctionsMemCreateAggregateInstanceFreshState verifies that each
 // use of an aggregate function in a query gets a fresh instance (createAggregateInstance).
+// debugFuncCheckAggResult checks a single aggregate group result.
+func debugFuncCheckAggResult(t *testing.T, grp string, sum, count, max, min int64, want map[string][4]int64) {
+	t.Helper()
+	w, ok := want[grp]
+	if !ok {
+		t.Errorf("unexpected group %q", grp)
+		return
+	}
+	if sum != w[0] || count != w[1] || max != w[2] || min != w[3] {
+		t.Errorf("grp=%q: got sum=%d count=%d max=%d min=%d; want sum=%d count=%d max=%d min=%d",
+			grp, sum, count, max, min, w[0], w[1], w[2], w[3])
+	}
+}
+
 func TestDebugFunctionsMemCreateAggregateInstanceFreshState(t *testing.T) {
 	t.Parallel()
 	db := openMemDB(t)
@@ -426,33 +441,14 @@ func TestDebugFunctionsMemCreateAggregateInstanceFreshState(t *testing.T) {
 	}
 	defer rows.Close()
 
-	type result struct {
-		grp   string
-		sum   int64
-		count int64
-		max   int64
-		min   int64
-	}
-	want := map[string]result{
-		"a": {"a", 60, 3, 30, 10},
-		"b": {"b", 3, 2, 2, 1},
-	}
-
+	want := map[string][4]int64{"a": {60, 3, 30, 10}, "b": {3, 2, 2, 1}}
 	for rows.Next() {
-		var r result
-		if err := rows.Scan(&r.grp, &r.sum, &r.count, &r.max, &r.min); err != nil {
+		var grp string
+		var sum, count, max, min int64
+		if err := rows.Scan(&grp, &sum, &count, &max, &min); err != nil {
 			t.Fatalf("scan: %v", err)
 		}
-		w, ok := want[r.grp]
-		if !ok {
-			t.Errorf("unexpected group %q", r.grp)
-			continue
-		}
-		if r.sum != w.sum || r.count != w.count || r.max != w.max || r.min != w.min {
-			t.Errorf("grp=%q: got sum=%d count=%d max=%d min=%d; want sum=%d count=%d max=%d min=%d",
-				r.grp, r.sum, r.count, r.max, r.min,
-				w.sum, w.count, w.max, w.min)
-		}
+		debugFuncCheckAggResult(t, grp, sum, count, max, min, want)
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows.Err: %v", err)
@@ -635,73 +631,61 @@ func TestDebugFunctionsMemBlobValueBranches(t *testing.T) {
 
 // TestDebugFunctionsMemStringifyBranches exercises each branch of Stringify:
 // already-string (no-op), int, real, blob, null, and undefined-error.
-func TestDebugFunctionsMemStringifyBranches(t *testing.T) {
+func TestDebugFunctionsMemStringifyBranches_TypeConversions(t *testing.T) {
 	t.Parallel()
 
-	t.Run("already_string_noop", func(t *testing.T) {
-		t.Parallel()
-		m := vdbe.NewMemStr("already")
-		if err := m.Stringify(); err != nil {
-			t.Fatalf("Stringify on MemStr: %v", err)
-		}
-		if !m.IsStr() {
-			t.Error("expected IsStr true after Stringify no-op")
-		}
-	})
+	// already_string_noop
+	m := vdbe.NewMemStr("already")
+	if err := m.Stringify(); err != nil {
+		t.Fatalf("Stringify on MemStr: %v", err)
+	}
+	if !m.IsStr() {
+		t.Error("expected IsStr true after Stringify no-op")
+	}
 
-	t.Run("int_to_string", func(t *testing.T) {
-		t.Parallel()
-		m := vdbe.NewMemInt(12345)
-		if err := m.Stringify(); err != nil {
-			t.Fatalf("Stringify on MemInt: %v", err)
-		}
-		if m.StrValue() != "12345" {
-			t.Errorf("Stringify(MemInt) = %q, want '12345'", m.StrValue())
-		}
-	})
+	// int_to_string
+	m = vdbe.NewMemInt(12345)
+	if err := m.Stringify(); err != nil {
+		t.Fatalf("Stringify on MemInt: %v", err)
+	}
+	if m.StrValue() != "12345" {
+		t.Errorf("Stringify(MemInt) = %q, want '12345'", m.StrValue())
+	}
 
-	t.Run("real_to_string", func(t *testing.T) {
-		t.Parallel()
-		m := vdbe.NewMemReal(9.9)
-		if err := m.Stringify(); err != nil {
-			t.Fatalf("Stringify on MemReal: %v", err)
-		}
-		got := m.StrValue()
-		if !strings.Contains(got, "9.9") {
-			t.Errorf("Stringify(MemReal) = %q, want string containing '9.9'", got)
-		}
-	})
+	// real_to_string
+	m = vdbe.NewMemReal(9.9)
+	if err := m.Stringify(); err != nil {
+		t.Fatalf("Stringify on MemReal: %v", err)
+	}
+	if !strings.Contains(m.StrValue(), "9.9") {
+		t.Errorf("Stringify(MemReal) = %q, want string containing '9.9'", m.StrValue())
+	}
 
-	t.Run("blob_to_string", func(t *testing.T) {
-		t.Parallel()
-		m := vdbe.NewMemBlob([]byte("blobdata"))
-		if err := m.Stringify(); err != nil {
-			t.Fatalf("Stringify on MemBlob: %v", err)
-		}
-		if m.StrValue() != "blobdata" {
-			t.Errorf("Stringify(MemBlob) = %q, want 'blobdata'", m.StrValue())
-		}
-	})
+	// blob_to_string
+	m = vdbe.NewMemBlob([]byte("blobdata"))
+	if err := m.Stringify(); err != nil {
+		t.Fatalf("Stringify on MemBlob: %v", err)
+	}
+	if m.StrValue() != "blobdata" {
+		t.Errorf("Stringify(MemBlob) = %q, want 'blobdata'", m.StrValue())
+	}
+}
 
-	t.Run("null_to_string", func(t *testing.T) {
-		t.Parallel()
-		m := vdbe.NewMemNull()
-		if err := m.Stringify(); err != nil {
-			t.Fatalf("Stringify on MemNull: %v", err)
-		}
-		if m.StrValue() != "" {
-			t.Errorf("Stringify(MemNull) = %q, want empty string", m.StrValue())
-		}
-	})
+func TestDebugFunctionsMemStringifyBranches_NullAndUndefined(t *testing.T) {
+	t.Parallel()
 
-	t.Run("undefined_returns_error", func(t *testing.T) {
-		t.Parallel()
-		m := vdbe.NewMem() // MemUndefined
-		err := m.Stringify()
-		if err == nil {
-			t.Error("Stringify on undefined Mem should return error")
-		}
-	})
+	m := vdbe.NewMemNull()
+	if err := m.Stringify(); err != nil {
+		t.Fatalf("Stringify on MemNull: %v", err)
+	}
+	if m.StrValue() != "" {
+		t.Errorf("Stringify(MemNull) = %q, want empty string", m.StrValue())
+	}
+
+	m = vdbe.NewMem()
+	if err := m.Stringify(); err == nil {
+		t.Error("Stringify on undefined Mem should return error")
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -711,62 +695,59 @@ func TestDebugFunctionsMemStringifyBranches(t *testing.T) {
 // TestDebugFunctionsMemDecodeFloat64 exercises decodeFloat64 via
 // DecodeRecord/EncodeSimpleRecord, covering the happy path (enough bytes)
 // and the truncated error path.
-func TestDebugFunctionsMemDecodeFloat64(t *testing.T) {
+// debugFuncCheckFloat64Roundtrip verifies a single float64 round-trip through encode/decode.
+func debugFuncCheckFloat64Roundtrip(t *testing.T, f float64) {
+	t.Helper()
+	if math.IsNaN(f) {
+		return
+	}
+	encoded := vdbe.EncodeSimpleRecord([]interface{}{f})
+	decoded, err := vdbe.DecodeRecord(encoded)
+	if err != nil {
+		t.Fatalf("DecodeRecord(%v): %v", f, err)
+	}
+	if len(decoded) != 1 {
+		t.Fatalf("expected 1 value, got %d", len(decoded))
+	}
+	got, ok := decoded[0].(float64)
+	if !ok {
+		t.Fatalf("expected float64, got %T (%v)", decoded[0], decoded[0])
+	}
+	if math.IsInf(f, 0) {
+		if got != f {
+			t.Errorf("float64 inf round-trip: got %v, want %v", got, f)
+		}
+	} else if math.Abs(got-f) > 1e-15 && got != f {
+		t.Errorf("float64 round-trip: got %v, want %v", got, f)
+	}
+}
+
+func TestDebugFunctionsMemDecodeFloat64_Roundtrip(t *testing.T) {
 	t.Parallel()
+	for _, f := range []float64{
+		0.0, 1.0, -1.0, 3.14159265358979,
+		math.MaxFloat64, -math.MaxFloat64,
+		math.SmallestNonzeroFloat64,
+		math.Inf(1), math.Inf(-1),
+	} {
+		debugFuncCheckFloat64Roundtrip(t, f)
+	}
+}
 
-	t.Run("roundtrip_float64", func(t *testing.T) {
-		t.Parallel()
-		floats := []float64{
-			0.0, 1.0, -1.0, 3.14159265358979,
-			math.MaxFloat64, -math.MaxFloat64,
-			math.SmallestNonzeroFloat64,
-			math.Inf(1), math.Inf(-1),
-		}
-		for _, f := range floats {
-			f := f
-			t.Run("", func(t *testing.T) {
-				t.Parallel()
-				if math.IsNaN(f) {
-					return // NaN != NaN; skip
-				}
-				encoded := vdbe.EncodeSimpleRecord([]interface{}{f})
-				decoded, err := vdbe.DecodeRecord(encoded)
-				if err != nil {
-					t.Fatalf("DecodeRecord(%v): %v", f, err)
-				}
-				if len(decoded) != 1 {
-					t.Fatalf("expected 1 value, got %d", len(decoded))
-				}
-				got, ok := decoded[0].(float64)
-				if !ok {
-					t.Fatalf("expected float64, got %T (%v)", decoded[0], decoded[0])
-				}
-				if math.IsInf(f, 0) {
-					if got != f {
-						t.Errorf("float64 inf round-trip: got %v, want %v", got, f)
-					}
-				} else if math.Abs(got-f) > 1e-15 && got != f {
-					t.Errorf("float64 round-trip: got %v, want %v", got, f)
-				}
-			})
-		}
-	})
-
-	t.Run("float64_in_mixed_record", func(t *testing.T) {
-		t.Parallel()
-		values := []interface{}{int64(42), 2.71828, "text", nil}
-		encoded := vdbe.EncodeSimpleRecord(values)
-		decoded, err := vdbe.DecodeRecord(encoded)
-		if err != nil {
-			t.Fatalf("DecodeRecord mixed: %v", err)
-		}
-		if len(decoded) != 4 {
-			t.Fatalf("expected 4 values, got %d", len(decoded))
-		}
-		if got, ok := decoded[1].(float64); !ok || math.Abs(got-2.71828) > 1e-10 {
-			t.Errorf("decoded[1] = %v (%T), want ~2.71828", decoded[1], decoded[1])
-		}
-	})
+func TestDebugFunctionsMemDecodeFloat64_MixedRecord(t *testing.T) {
+	t.Parallel()
+	values := []interface{}{int64(42), 2.71828, "text", nil}
+	encoded := vdbe.EncodeSimpleRecord(values)
+	decoded, err := vdbe.DecodeRecord(encoded)
+	if err != nil {
+		t.Fatalf("DecodeRecord mixed: %v", err)
+	}
+	if len(decoded) != 4 {
+		t.Fatalf("expected 4 values, got %d", len(decoded))
+	}
+	if got, ok := decoded[1].(float64); !ok || math.Abs(got-2.71828) > 1e-10 {
+		t.Errorf("decoded[1] = %v (%T), want ~2.71828", decoded[1], decoded[1])
+	}
 }
 
 // TestDebugFunctionsMemRealValuesViaSQL exercises the REAL type path through
@@ -807,6 +788,21 @@ func TestDebugFunctionsMemRealValuesViaSQL(t *testing.T) {
 
 // TestDebugFunctionsMemBlobValuesViaSQL exercises the BLOB type path by storing
 // and retrieving binary data through SQL.
+// debugFuncCheckBlobData validates blob data matches expected bytes.
+func debugFuncCheckBlobData(t *testing.T, rowIdx int, data, expected []byte) {
+	t.Helper()
+	if len(data) != len(expected) {
+		t.Errorf("row %d: blob len = %d, want %d", rowIdx, len(data), len(expected))
+		return
+	}
+	for j := range expected {
+		if data[j] != expected[j] {
+			t.Errorf("row %d byte %d: got %x, want %x", rowIdx, j, data[j], expected[j])
+			return
+		}
+	}
+}
+
 func TestDebugFunctionsMemBlobValuesViaSQL(t *testing.T) {
 	t.Parallel()
 	db := openMemDB(t)
@@ -836,14 +832,7 @@ func TestDebugFunctionsMemBlobValuesViaSQL(t *testing.T) {
 		if i >= len(expected) {
 			t.Fatalf("too many rows")
 		}
-		if len(data) != len(expected[i]) {
-			t.Errorf("row %d: blob len = %d, want %d", i, len(data), len(expected[i]))
-		}
-		for j := range expected[i] {
-			if data[j] != expected[i][j] {
-				t.Errorf("row %d byte %d: got %x, want %x", i, j, data[j], expected[i][j])
-			}
-		}
+		debugFuncCheckBlobData(t, i, data, expected[i])
 		i++
 	}
 	if err := rows.Err(); err != nil {

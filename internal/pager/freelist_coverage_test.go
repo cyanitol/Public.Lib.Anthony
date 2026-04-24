@@ -170,15 +170,9 @@ func TestFreelistCoverage_NewTrunkPage(t *testing.T) {
 
 // TestFreelistCoverage_IntegrityCheck runs PRAGMA integrity_check after
 // freelist operations to exercise Verify / verifyTrunkPage / verifyLeafPage.
-func TestFreelistCoverage_IntegrityCheck(t *testing.T) {
-	db, _ := openCoverageDB(t, "integrity.db")
-
-	execCoverage(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)")
-	insertManyRows(t, db, "t", 400)
-	execCoverage(t, db, "DELETE FROM t WHERE id % 2 = 0")
-	insertManyRows(t, db, "t", 100)
-	execCoverage(t, db, "DELETE FROM t WHERE id > 200")
-
+// fcCollectIntegrityResults runs PRAGMA integrity_check and returns all result strings.
+func fcCollectIntegrityResults(t *testing.T, db *sql.DB) []string {
+	t.Helper()
 	rows, err := db.Query("PRAGMA integrity_check")
 	if err != nil {
 		t.Fatalf("PRAGMA integrity_check error: %v", err)
@@ -196,17 +190,24 @@ func TestFreelistCoverage_IntegrityCheck(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("integrity_check rows error: %v", err)
 	}
+	return results
+}
 
+func TestFreelistCoverage_IntegrityCheck(t *testing.T) {
+	db, _ := openCoverageDB(t, "integrity.db")
+
+	execCoverage(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)")
+	insertManyRows(t, db, "t", 400)
+	execCoverage(t, db, "DELETE FROM t WHERE id % 2 = 0")
+	insertManyRows(t, db, "t", 100)
+	execCoverage(t, db, "DELETE FROM t WHERE id > 200")
+
+	results := fcCollectIntegrityResults(t, db)
 	t.Logf("integrity_check results: %v", results)
-	// "ok" is the expected result for a clean database.
-	if len(results) == 1 && results[0] == "ok" {
+
+	if len(results) == 0 || (len(results) == 1 && results[0] == "ok") {
 		return
 	}
-	// Some implementations return no rows for "ok"; that is also acceptable.
-	if len(results) == 0 {
-		return
-	}
-	// Non-ok results that are not errors are informational.
 	for _, r := range results {
 		if !strings.EqualFold(r, "ok") {
 			t.Logf("integrity_check non-ok result: %q", r)

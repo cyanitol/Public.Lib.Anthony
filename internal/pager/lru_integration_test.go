@@ -7,40 +7,19 @@ import (
 )
 
 // TestPagerWithLRUCache tests the pager using the LRU cache
-func TestPagerWithLRUCache(t *testing.T) {
-	t.Parallel()
-	tmpFile := "/tmp/test_lru_pager.db"
-	defer os.Remove(tmpFile)
-	defer os.Remove(tmpFile + "-journal")
-
-	// Create pager with LRU cache
-	cacheConfig := LRUCacheConfig{
-		PageSize: 4096,
-		MaxPages: 5,
-		Mode:     WriteBackMode,
-	}
-
-	pager, err := OpenWithLRUCache(tmpFile, false, 4096, cacheConfig)
-	if err != nil {
-		t.Fatalf("failed to open pager: %v", err)
-	}
-	defer pager.Close()
-
-	// Get page 1 (header page)
+// lruWriteAndGetPages modifies page 1 and gets pages 2-6.
+func lruWriteAndGetPages(t *testing.T, pager *Pager) {
+	t.Helper()
 	page1, err := pager.Get(1)
 	if err != nil {
 		t.Fatalf("failed to get page 1: %v", err)
 	}
-
-	// Modify the page
 	if err := pager.Write(page1); err != nil {
 		t.Fatalf("failed to write page 1: %v", err)
 	}
-
 	page1.Data[100] = 0xAB
 	pager.Put(page1)
 
-	// Get a few more pages to test LRU
 	for i := Pgno(2); i <= 6; i++ {
 		page, err := pager.Get(i)
 		if err != nil {
@@ -48,19 +27,31 @@ func TestPagerWithLRUCache(t *testing.T) {
 		}
 		pager.Put(page)
 	}
+}
 
-	// Check cache statistics
+func TestPagerWithLRUCache(t *testing.T) {
+	t.Parallel()
+	tmpFile := "/tmp/test_lru_pager.db"
+	defer os.Remove(tmpFile)
+	defer os.Remove(tmpFile + "-journal")
+
+	cacheConfig := LRUCacheConfig{PageSize: 4096, MaxPages: 5, Mode: WriteBackMode}
+	pager, err := OpenWithLRUCache(tmpFile, false, 4096, cacheConfig)
+	if err != nil {
+		t.Fatalf("failed to open pager: %v", err)
+	}
+	defer pager.Close()
+
+	lruWriteAndGetPages(t, pager)
+
 	if lruCache, ok := pager.cache.(*LRUCache); ok {
 		hits, misses := lruCache.Stats()
 		t.Logf("Cache stats: hits=%d, misses=%d, hit rate=%.2f%%", hits, misses, lruCache.HitRate())
-
-		// Verify cache size is at or below max
 		if lruCache.Size() > cacheConfig.MaxPages {
 			t.Errorf("cache size %d exceeds max %d", lruCache.Size(), cacheConfig.MaxPages)
 		}
 	}
 
-	// Commit the transaction
 	if err := pager.Commit(); err != nil {
 		t.Fatalf("failed to commit: %v", err)
 	}

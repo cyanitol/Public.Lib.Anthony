@@ -116,47 +116,35 @@ func TestLRUCacheBasicOperations(t *testing.T) {
 	verifyCacheContains(t, cache, 1, false)
 }
 
+// ctAssertLRUOrder checks that the cache LRU order matches expected.
+func ctAssertLRUOrder(t *testing.T, cache *LRUCache, expected []Pgno, label string) {
+	t.Helper()
+	order := cache.LRUOrder()
+	if len(order) != len(expected) {
+		t.Fatalf("%s: expected %d pages, got %d", label, len(expected), len(order))
+	}
+	for i, pgno := range expected {
+		if order[i] != pgno {
+			t.Errorf("%s position %d: expected %d, got %d", label, i, pgno, order[i])
+		}
+	}
+}
+
 func TestLRUCacheLRUOrder(t *testing.T) {
 	t.Parallel()
 	cache := NewLRUCacheSimple(4096, 10)
 
-	// Add pages 1, 2, 3
 	for i := Pgno(1); i <= 3; i++ {
-		page := NewDbPage(i, 4096)
-		cache.Put(page)
+		cache.Put(NewDbPage(i, 4096))
 	}
 
-	// Order should be 3, 2, 1 (most to least recently used)
-	order := cache.LRUOrder()
-	expected := []Pgno{3, 2, 1}
-	if len(order) != len(expected) {
-		t.Fatalf("expected %d pages, got %d", len(expected), len(order))
-	}
-	for i, pgno := range expected {
-		if order[i] != pgno {
-			t.Errorf("position %d: expected %d, got %d", i, pgno, order[i])
-		}
-	}
+	ctAssertLRUOrder(t, cache, []Pgno{3, 2, 1}, "initial")
 
-	// Access page 1 - should move to front
 	cache.Get(1)
-	order = cache.LRUOrder()
-	expected = []Pgno{1, 3, 2}
-	for i, pgno := range expected {
-		if order[i] != pgno {
-			t.Errorf("after Get(1) position %d: expected %d, got %d", i, pgno, order[i])
-		}
-	}
+	ctAssertLRUOrder(t, cache, []Pgno{1, 3, 2}, "after Get(1)")
 
-	// Touch page 2 - should move to front
 	cache.Touch(2)
-	order = cache.LRUOrder()
-	expected = []Pgno{2, 1, 3}
-	for i, pgno := range expected {
-		if order[i] != pgno {
-			t.Errorf("after Touch(2) position %d: expected %d, got %d", i, pgno, order[i])
-		}
-	}
+	ctAssertLRUOrder(t, cache, []Pgno{2, 1, 3}, "after Touch(2)")
 }
 
 func TestLRUCacheEviction(t *testing.T) {
@@ -418,25 +406,29 @@ func TestLRUCacheShrink(t *testing.T) {
 	}
 }
 
-func TestLRUCacheEvictClean(t *testing.T) {
-	t.Parallel()
-	cache := NewLRUCacheSimple(4096, 10)
-
-	// Add 5 pages - make 2 of them dirty
-	for i := Pgno(1); i <= 5; i++ {
+// ctPutPagesWithDirty adds pages 1..n, marking dirtyPages as dirty, all unreffed.
+func ctPutPagesWithDirty(t *testing.T, cache *LRUCache, n Pgno, dirtyPages map[Pgno]bool) {
+	t.Helper()
+	for i := Pgno(1); i <= n; i++ {
 		page := NewDbPage(i, 4096)
 		page.Unref()
-		if i == 2 || i == 4 {
+		if dirtyPages[i] {
 			page.MakeDirty()
 		}
 		cache.Put(page)
 	}
+}
+
+func TestLRUCacheEvictClean(t *testing.T) {
+	t.Parallel()
+	cache := NewLRUCacheSimple(4096, 10)
+
+	ctPutPagesWithDirty(t, cache, 5, map[Pgno]bool{2: true, 4: true})
 
 	if cache.Size() != 5 {
 		t.Errorf("expected size 5, got %d", cache.Size())
 	}
 
-	// Evict all clean pages
 	evicted := cache.EvictClean()
 	if evicted != 3 {
 		t.Errorf("expected 3 evicted, got %d", evicted)
@@ -444,8 +436,6 @@ func TestLRUCacheEvictClean(t *testing.T) {
 	if cache.Size() != 2 {
 		t.Errorf("expected size 2 after EvictClean, got %d", cache.Size())
 	}
-
-	// Only dirty pages should remain
 	if !cache.Contains(2) || !cache.Contains(4) {
 		t.Error("dirty pages should remain in cache")
 	}
@@ -945,85 +935,48 @@ func TestDefaultLRUCacheConfig(t *testing.T) {
 }
 
 // TestLRUCacheSetMaxMemory tests the SetMaxMemory function
+// ctSetMaxMemoryCase creates a cache with the given config, adds 5 pages, and sets new memory limit.
+func ctSetMaxMemoryCase(t *testing.T, maxPages int, maxMemory, newMemory int64, wantErr bool) {
+	t.Helper()
+	config := LRUCacheConfig{PageSize: 4096, MaxPages: maxPages, MaxMemory: maxMemory}
+	cache, err := NewLRUCache(config)
+	if err != nil {
+		t.Fatalf("failed to create cache: %v", err)
+	}
+	for i := Pgno(1); i <= 5; i++ {
+		page := NewDbPage(i, 4096)
+		page.Unref()
+		cache.Put(page)
+	}
+	err = cache.SetMaxMemory(newMemory)
+	if wantErr {
+		if err == nil {
+			t.Error("expected error but got nil")
+		}
+		return
+	}
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if newMemory > 0 && cache.MemoryUsage() > newMemory {
+		t.Errorf("memory usage %d exceeds limit %d", cache.MemoryUsage(), newMemory)
+	}
+}
+
 func TestLRUCacheSetMaxMemory(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name      string
-		maxPages  int
-		maxMemory int64
-		newMemory int64
-		wantErr   bool
-	}{
-		{
-			name:      "valid memory limit",
-			maxPages:  10,
-			maxMemory: 100000,
-			newMemory: 50000,
-			wantErr:   false,
-		},
-		{
-			name:      "increase memory limit",
-			maxPages:  10,
-			maxMemory: 50000,
-			newMemory: 100000,
-			wantErr:   false,
-		},
-		{
-			name:      "zero memory with zero pages",
-			maxPages:  0,
-			maxMemory: 100000,
-			newMemory: 0,
-			wantErr:   true,
-		},
-		{
-			name:      "zero memory with positive pages",
-			maxPages:  10,
-			maxMemory: 100000,
-			newMemory: 0,
-			wantErr:   false,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			config := LRUCacheConfig{
-				PageSize:  4096,
-				MaxPages:  tt.maxPages,
-				MaxMemory: tt.maxMemory,
-			}
-			cache, err := NewLRUCache(config)
-			if err != nil {
-				t.Fatalf("failed to create cache: %v", err)
-			}
-
-			// Add some pages
-			for i := Pgno(1); i <= 5; i++ {
-				page := NewDbPage(i, 4096)
-				page.Unref() // Make evictable
-				cache.Put(page)
-			}
-
-			err = cache.SetMaxMemory(tt.newMemory)
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error but got nil")
-				}
-			} else {
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-
-				// Verify memory limit is respected
-				if tt.newMemory > 0 {
-					memUsage := cache.MemoryUsage()
-					if memUsage > tt.newMemory {
-						t.Errorf("memory usage %d exceeds limit %d", memUsage, tt.newMemory)
-					}
-				}
-			}
-		})
-	}
+	t.Run("valid memory limit", func(t *testing.T) {
+		ctSetMaxMemoryCase(t, 10, 100000, 50000, false)
+	})
+	t.Run("increase memory limit", func(t *testing.T) {
+		ctSetMaxMemoryCase(t, 10, 50000, 100000, false)
+	})
+	t.Run("zero memory with zero pages", func(t *testing.T) {
+		ctSetMaxMemoryCase(t, 0, 100000, 0, true)
+	})
+	t.Run("zero memory with positive pages", func(t *testing.T) {
+		ctSetMaxMemoryCase(t, 10, 100000, 0, false)
+	})
 }
 
 // TestLRUCacheMarkDirty tests the MarkDirty function

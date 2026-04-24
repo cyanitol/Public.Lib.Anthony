@@ -175,83 +175,40 @@ func testTryTypeSpecificOptimization_variations(t *testing.T) {
 		NOut:     planner.NewLogEst(500),
 	}
 
-	// SubqueryFrom: not EXISTS, not IN → tryTypeSpecificOptimization returns (nil, false),
-	// then tryMaterialize is attempted (CanMaterialize=false here → returns false too).
-	// Final result is parentInfo unchanged.
 	t.Run("FromType_NeitherExistsNorIn", func(t *testing.T) {
 		info := &planner.SubqueryInfo{
-			Type:           planner.SubqueryFrom,
-			CanFlatten:     false,
-			IsCorrelated:   false,
-			CanMaterialize: false,
-			EstimatedRows:  planner.NewLogEst(50),
+			Type: planner.SubqueryFrom, CanFlatten: false,
+			IsCorrelated: false, CanMaterialize: false,
+			EstimatedRows: planner.NewLogEst(50),
 		}
-		result, err := opt.OptimizeSubquery(info, parent)
-		if err != nil {
-			t.Fatalf("OptimizeSubquery (SubqueryFrom) returned error: %v", err)
-		}
-		if result == nil {
-			t.Error("expected non-nil result from OptimizeSubquery")
-		}
+		optimizeSubqueryOK(t, opt, info, parent)
 	})
 
-	// Correlated SubqueryExists: tryDecorrelate runs first, then tryTypeSpecificOptimization.
-	// After decorrelation, IsCorrelated=false; type is still EXISTS so tryTypeSpecificOptimization
-	// calls ConvertExistsToSemiJoin which fails → returns false. tryMaterialize then runs (CanMaterialize=true after decorrelation).
 	t.Run("CorrelatedExists_DecorrelatedThenTypeSpecific", func(t *testing.T) {
 		info := &planner.SubqueryInfo{
-			Type:           planner.SubqueryExists,
-			CanFlatten:     false,
-			IsCorrelated:   true,
-			CanMaterialize: false,
-			EstimatedRows:  planner.NewLogEst(100),
-			ExecutionCount: planner.NewLogEst(500),
+			Type: planner.SubqueryExists, CanFlatten: false,
+			IsCorrelated: true, CanMaterialize: false,
+			EstimatedRows: planner.NewLogEst(100), ExecutionCount: planner.NewLogEst(500),
 		}
-		result, err := opt.OptimizeSubquery(info, parent)
-		if err != nil {
-			t.Fatalf("OptimizeSubquery (correlated EXISTS) returned error: %v", err)
-		}
-		if result == nil {
-			t.Error("expected non-nil result from OptimizeSubquery")
-		}
+		optimizeSubqueryOK(t, opt, info, parent)
 	})
 
-	// Correlated SubqueryIn: similar to above but for IN type.
 	t.Run("CorrelatedIn_DecorrelatedThenTypeSpecific", func(t *testing.T) {
 		info := &planner.SubqueryInfo{
-			Type:           planner.SubqueryIn,
-			CanFlatten:     false,
-			IsCorrelated:   true,
-			CanMaterialize: false,
-			EstimatedRows:  planner.NewLogEst(200),
-			ExecutionCount: planner.NewLogEst(1000),
+			Type: planner.SubqueryIn, CanFlatten: false,
+			IsCorrelated: true, CanMaterialize: false,
+			EstimatedRows: planner.NewLogEst(200), ExecutionCount: planner.NewLogEst(1000),
 		}
-		result, err := opt.OptimizeSubquery(info, parent)
-		if err != nil {
-			t.Fatalf("OptimizeSubquery (correlated IN) returned error: %v", err)
-		}
-		if result == nil {
-			t.Error("expected non-nil result from OptimizeSubquery")
-		}
+		optimizeSubqueryOK(t, opt, info, parent)
 	})
 
-	// SubqueryScalar with CanMaterialize=true: tryTypeSpecificOptimization returns (nil,false),
-	// then tryMaterialize succeeds (CanMaterialize=true).
 	t.Run("ScalarWithCanMaterialize", func(t *testing.T) {
 		info := &planner.SubqueryInfo{
-			Type:           planner.SubqueryScalar,
-			CanFlatten:     false,
-			IsCorrelated:   false,
-			CanMaterialize: true,
-			EstimatedRows:  planner.NewLogEst(10),
+			Type: planner.SubqueryScalar, CanFlatten: false,
+			IsCorrelated: false, CanMaterialize: true,
+			EstimatedRows: planner.NewLogEst(10),
 		}
-		result, err := opt.OptimizeSubquery(info, parent)
-		if err != nil {
-			t.Fatalf("OptimizeSubquery (scalar CanMaterialize) returned error: %v", err)
-		}
-		if result == nil {
-			t.Error("expected non-nil result from OptimizeSubquery")
-		}
+		optimizeSubqueryOK(t, opt, info, parent)
 	})
 }
 
@@ -330,24 +287,17 @@ func testCreateMaterializedSubqueryTable(t *testing.T) {
 	// MaterializeSubquery succeeds when CanMaterialize=true.
 	t.Run("MaterializeSuccess", func(t *testing.T) {
 		info := &planner.SubqueryInfo{
-			Type:           planner.SubqueryScalar,
-			CanMaterialize: true,
-			EstimatedRows:  planner.NewLogEst(100),
+			Type: planner.SubqueryScalar, CanMaterialize: true,
+			EstimatedRows: planner.NewLogEst(100),
 		}
-		materialized, err := opt.MaterializeSubquery(info)
-		if err != nil {
-			t.Fatalf("MaterializeSubquery succeeded unexpectedly: %v", err)
-		}
-		if materialized == nil {
-			t.Fatal("expected non-nil materialized info")
-		}
-		if materialized.MaterializedTable == "" {
+		m := materializeOK(t, opt, info)
+		if m.MaterializedTable == "" {
 			t.Error("expected non-empty MaterializedTable name")
 		}
-		if materialized.CanMaterialize {
+		if m.CanMaterialize {
 			t.Error("materialized info should have CanMaterialize=false")
 		}
-		if materialized.IsCorrelated {
+		if m.IsCorrelated {
 			t.Error("materialized info should have IsCorrelated=false")
 		}
 	})
@@ -355,9 +305,8 @@ func testCreateMaterializedSubqueryTable(t *testing.T) {
 	// MaterializeSubquery fails when CanMaterialize=false.
 	t.Run("MaterializeFailure", func(t *testing.T) {
 		info := &planner.SubqueryInfo{
-			Type:           planner.SubqueryScalar,
-			CanMaterialize: false,
-			EstimatedRows:  planner.NewLogEst(50),
+			Type: planner.SubqueryScalar, CanMaterialize: false,
+			EstimatedRows: planner.NewLogEst(50),
 		}
 		_, err := opt.MaterializeSubquery(info)
 		if err == nil {
@@ -370,14 +319,10 @@ func testCreateMaterializedSubqueryTable(t *testing.T) {
 		opt2 := planner.NewSubqueryOptimizer(planner.NewCostModel())
 		for i := 0; i < 3; i++ {
 			info := &planner.SubqueryInfo{
-				Type:           planner.SubqueryExists,
-				CanMaterialize: true,
-				EstimatedRows:  planner.NewLogEst(int64(10 * (i + 1))),
+				Type: planner.SubqueryExists, CanMaterialize: true,
+				EstimatedRows: planner.NewLogEst(int64(10 * (i + 1))),
 			}
-			m, err := opt2.MaterializeSubquery(info)
-			if err != nil {
-				t.Fatalf("iteration %d: MaterializeSubquery error: %v", i, err)
-			}
+			m := materializeOK(t, opt2, info)
 			if m.MaterializedTable == "" {
 				t.Errorf("iteration %d: expected non-empty temp table name", i)
 			}
@@ -661,85 +606,49 @@ func testExpandViewsInSelectWithDepth_viaJoins(t *testing.T) {
 	// expandedSelect itself is then processed by flattenViewsInSelect).
 	t.Run("ComplexViewWithInnerSimpleView", func(t *testing.T) {
 		s := schema.NewSchema()
-
-		// inner_simple_v is flattenable.
 		s.Views["inner_simple_v"] = &schema.View{
 			Name: "inner_simple_v",
 			Select: &parser.SelectStmt{
 				Columns: []parser.ResultColumn{{Star: true}},
-				From: &parser.FromClause{
-					Tables: []parser.TableOrSubquery{{TableName: "raw_t"}},
-				},
+				From:    &parser.FromClause{Tables: []parser.TableOrSubquery{{TableName: "raw_t"}}},
 			},
 		}
-
-		// outer_complex_v has a JOIN (non-flattenable) referencing inner_simple_v.
 		s.Views["outer_complex_v"] = &schema.View{
 			Name: "outer_complex_v",
 			Select: &parser.SelectStmt{
 				Columns: []parser.ResultColumn{{Star: true}},
 				From: &parser.FromClause{
 					Tables: []parser.TableOrSubquery{{TableName: "inner_simple_v"}},
-					Joins: []parser.JoinClause{
-						{Table: parser.TableOrSubquery{TableName: "other_t"}},
-					},
+					Joins:  []parser.JoinClause{{Table: parser.TableOrSubquery{TableName: "other_t"}}},
 				},
 			},
 		}
-
 		stmt := &parser.SelectStmt{
 			Columns: []parser.ResultColumn{{Star: true}},
-			From: &parser.FromClause{
-				Tables: []parser.TableOrSubquery{{TableName: "outer_complex_v"}},
-			},
+			From:    &parser.FromClause{Tables: []parser.TableOrSubquery{{TableName: "outer_complex_v"}}},
 		}
-
-		result, err := planner.ExpandViewsInSelect(stmt, s)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if result == nil {
-			t.Fatal("expected non-nil result")
-		}
-		// Complex view is expanded as subquery.
-		if result.From.Tables[0].Subquery == nil {
+		result := expandView(t, stmt, s)
+		if result == nil || result.From.Tables[0].Subquery == nil {
 			t.Error("expected outer_complex_v to become a subquery")
 		}
 	})
 
-	// Stmt where FROM contains an existing subquery — flattenViewsInSelect
-	// skips it (the Subquery != nil check in processFromTablesForFlattening).
 	t.Run("FromSubqueryPassthrough", func(t *testing.T) {
 		s := schema.NewSchema()
 		innerStmt := &parser.SelectStmt{
 			Columns: []parser.ResultColumn{{Star: true}},
-			From: &parser.FromClause{
-				Tables: []parser.TableOrSubquery{{TableName: "inner_t"}},
-			},
+			From:    &parser.FromClause{Tables: []parser.TableOrSubquery{{TableName: "inner_t"}}},
 		}
 		stmt := &parser.SelectStmt{
 			Columns: []parser.ResultColumn{{Star: true}},
-			From: &parser.FromClause{
-				Tables: []parser.TableOrSubquery{{
-					Subquery: innerStmt,
-					Alias:    "sq",
-				}},
-			},
+			From:    &parser.FromClause{Tables: []parser.TableOrSubquery{{Subquery: innerStmt, Alias: "sq"}}},
 		}
-		result, err := planner.ExpandViewsInSelect(stmt, s)
-		if err != nil {
-			t.Fatalf("unexpected error for subquery passthrough: %v", err)
-		}
-		if result == nil {
-			t.Fatal("expected non-nil result")
-		}
-		// Subquery entry is preserved as-is.
-		if result.From.Tables[0].Subquery == nil {
+		result := expandView(t, stmt, s)
+		if result == nil || result.From.Tables[0].Subquery == nil {
 			t.Error("expected subquery to be preserved")
 		}
 	})
 
-	// Stmt that has no FROM tables but has a non-empty schema: should pass through cleanly.
 	t.Run("EmptyFromTables", func(t *testing.T) {
 		s := schema.NewSchema()
 		s.Views["some_view"] = &schema.View{
@@ -753,10 +662,7 @@ func testExpandViewsInSelectWithDepth_viaJoins(t *testing.T) {
 			Columns: []parser.ResultColumn{{Star: true}},
 			From:    &parser.FromClause{Tables: []parser.TableOrSubquery{}},
 		}
-		result, err := planner.ExpandViewsInSelect(stmt, s)
-		if err != nil {
-			t.Fatalf("unexpected error for empty FROM: %v", err)
-		}
+		result := expandView(t, stmt, s)
 		if result == nil {
 			t.Fatal("expected non-nil result")
 		}

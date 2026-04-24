@@ -127,30 +127,35 @@ func TestWindowCovRankWithPartition(t *testing.T) {
 	}
 }
 
-// TestWindowCovExcludeCurrentRow exercises applyFrameExclude/shouldExcludeRow
-// with EXCLUDE CURRENT ROW.
-func TestWindowCovExcludeCurrentRow(t *testing.T) {
+// windowCovSetupExcludeTable creates a table with column "v" for EXCLUDE tests.
+func windowCovSetupExcludeTable(t *testing.T, tableName string, values []int) *sql.DB {
+	t.Helper()
 	db := windowCovOpenDB(t)
-	defer db.Close()
-	windowCovExec(t, db, "CREATE TABLE ex (v INTEGER)")
-	for _, v := range []int{10, 20, 30, 40, 50} {
-		if _, err := db.Exec("INSERT INTO ex VALUES (?)", v); err != nil {
+	windowCovExec(t, db, "CREATE TABLE "+tableName+" (v INTEGER)")
+	for _, v := range values {
+		if _, err := db.Exec("INSERT INTO "+tableName+" VALUES (?)", v); err != nil {
 			t.Fatalf("insert: %v", err)
 		}
 	}
+	return db
+}
 
-	rows, err := db.Query(`
-		SELECT v,
-		       SUM(v) OVER (ORDER BY v
-		                    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-		                    EXCLUDE CURRENT ROW)
-		FROM ex ORDER BY v`)
-	if err != nil {
-		t.Fatalf("EXCLUDE CURRENT ROW query: %v", err)
+// windowCovSetupValTable creates a table with column "val" for FIRST_VALUE/LAST_VALUE tests.
+func windowCovSetupValTable(t *testing.T, tableName string, values []int) *sql.DB {
+	t.Helper()
+	db := windowCovOpenDB(t)
+	windowCovExec(t, db, "CREATE TABLE "+tableName+" (val INTEGER)")
+	for _, v := range values {
+		if _, err := db.Exec("INSERT INTO "+tableName+" VALUES (?)", v); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
 	}
-	defer rows.Close()
+	return db
+}
 
-	totalSum := 10 + 20 + 30 + 40 + 50 // 150
+// windowCovCheckExcludeCurrentRow validates EXCLUDE CURRENT ROW results.
+func windowCovCheckExcludeCurrentRow(t *testing.T, rows *sql.Rows, totalSum int) {
+	t.Helper()
 	count := 0
 	for rows.Next() {
 		var v int
@@ -172,6 +177,25 @@ func TestWindowCovExcludeCurrentRow(t *testing.T) {
 	if count == 0 {
 		t.Error("expected rows from EXCLUDE CURRENT ROW query")
 	}
+}
+
+// TestWindowCovExcludeCurrentRow exercises applyFrameExclude/shouldExcludeRow
+// with EXCLUDE CURRENT ROW.
+func TestWindowCovExcludeCurrentRow(t *testing.T) {
+	db := windowCovSetupExcludeTable(t, "ex", []int{10, 20, 30, 40, 50})
+	defer db.Close()
+
+	rows, err := db.Query(`
+		SELECT v,
+		       SUM(v) OVER (ORDER BY v
+		                    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+		                    EXCLUDE CURRENT ROW)
+		FROM ex ORDER BY v`)
+	if err != nil {
+		t.Fatalf("EXCLUDE CURRENT ROW query: %v", err)
+	}
+	defer rows.Close()
+	windowCovCheckExcludeCurrentRow(t, rows, 150)
 }
 
 // TestWindowCovExcludeGroup exercises shouldExcludeRow with EXCLUDE GROUP.
@@ -366,6 +390,35 @@ func TestWindowCovFrameCurrentRowStart(t *testing.T) {
 	}
 }
 
+// windowCovCheckEntirePartition validates EntirePartitionFrame results.
+func windowCovCheckEntirePartition(t *testing.T, rows *sql.Rows, wantSums map[string]int) {
+	t.Helper()
+	type row struct {
+		grp string
+		v   int
+		sum int
+	}
+	var results []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.grp, &r.v, &r.sum); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows err: %v", err)
+	}
+	for _, r := range results {
+		if r.sum != wantSums[r.grp] {
+			t.Errorf("grp=%s v=%d: want sum=%d got %d", r.grp, r.v, wantSums[r.grp], r.sum)
+		}
+	}
+	if len(results) == 0 {
+		t.Error("expected rows")
+	}
+}
+
 // TestWindowCovEntirePartition exercises EntirePartitionFrame via window without ORDER BY.
 func TestWindowCovEntirePartition(t *testing.T) {
 	db := windowCovOpenDB(t)
@@ -383,7 +436,6 @@ func TestWindowCovEntirePartition(t *testing.T) {
 		}
 	}
 
-	// No ORDER BY → EntirePartitionFrame is used.
 	rows, err := db.Query(`
 		SELECT grp, v, SUM(v) OVER (PARTITION BY grp)
 		FROM ep2 ORDER BY grp, v`)
@@ -391,33 +443,7 @@ func TestWindowCovEntirePartition(t *testing.T) {
 		t.Fatalf("EntirePartitionFrame query: %v", err)
 	}
 	defer rows.Close()
-
-	type row struct {
-		grp string
-		v   int
-		sum int
-	}
-	var results []row
-	for rows.Next() {
-		var r row
-		if err := rows.Scan(&r.grp, &r.v, &r.sum); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		results = append(results, r)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows err: %v", err)
-	}
-	// Partition X sum=6, partition Y sum=30.
-	wantSums := map[string]int{"X": 6, "Y": 30}
-	for _, r := range results {
-		if r.sum != wantSums[r.grp] {
-			t.Errorf("grp=%s v=%d: want sum=%d got %d", r.grp, r.v, wantSums[r.grp], r.sum)
-		}
-	}
-	if len(results) == 0 {
-		t.Error("expected rows")
-	}
+	windowCovCheckEntirePartition(t, rows, map[string]int{"X": 6, "Y": 30})
 }
 
 // TestWindowCovSameRowValuesUnit exercises SameRowValues directly.
@@ -534,178 +560,141 @@ func TestWindowCovUpdateRankingFromRowUnit(t *testing.T) {
 	ws.UpdateRankingFromRow(nil)
 }
 
-// TestWindowCoverageAdditional exercises the remaining uncovered branches in window.go:
-// - calculateFrameStart/End default branches
-// - shouldExcludeRow default branch (ExcludeNoOthers via direct call)
-// - sameOrderByValues with colIdx out of range
-// - GetLagRow/GetLeadRow with no valid partition (CurrentPartIdx < 0)
-// - GetFirstValue/GetLastValue with colIdx out of range
-// - CurrentRow with CurrentPartRow < 0
-// - LAG/LEAD with offset > partition size
-// - FIRST_VALUE/LAST_VALUE with non-trivial ROWS frames
-// - RANGE frames with ORDER BY
-func TestWindowCoverageAdditional(t *testing.T) {
-	t.Run("calculateFrameStartDefault", func(t *testing.T) {
-		// Use a WindowFrameBound type value that hits the default case.
-		// BoundUnboundedFollowing (4) on the Start triggers default in calculateFrameStart.
-		ws := vdbe.NewWindowState(nil, nil, nil, vdbe.WindowFrame{
-			Type:  vdbe.FrameRows,
-			Start: vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedFollowing},
-			End:   vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedFollowing},
-		})
-		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(1)})
-		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(2)})
-		ws.NextRow()
-		// GetFrameRows will call calculateFrameStart/End; the default branch returns 0.
-		_ = ws.GetFirstValue(0)
+// TestWindowCovAdditional_CalculateFrameStartDefault exercises the default branch
+// of calculateFrameStart with BoundUnboundedFollowing on the Start.
+func TestWindowCovAdditional_CalculateFrameStartDefault(t *testing.T) {
+	ws := vdbe.NewWindowState(nil, nil, nil, vdbe.WindowFrame{
+		Type:  vdbe.FrameRows,
+		Start: vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedFollowing},
+		End:   vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedFollowing},
 	})
-
-	t.Run("calculateFrameEndDefault", func(t *testing.T) {
-		// BoundPreceding (1) on End with offset 0 → hits BoundPreceding case, not default.
-		// Use an invalid FrameBoundType (e.g. 99) by casting — not possible without unsafe.
-		// Instead confirm the default path in calculateFrameEnd is the BoundUnboundedFollowing
-		// already covered; the default returns partitionSize-1.
-		// We cover it indirectly by using a frame where End.Type is BoundUnboundedFollowing (4).
-		ws := vdbe.NewWindowState(nil, nil, nil, vdbe.WindowFrame{
-			Type:  vdbe.FrameRows,
-			Start: vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedPreceding},
-			End:   vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedFollowing},
-		})
-		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(10)})
-		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(20)})
-		ws.NextRow()
-		got := ws.GetLastValue(0)
-		if got == nil || got.IsNull() {
-			t.Errorf("calculateFrameEndDefault: expected non-null last value")
-		}
-	})
-
-	t.Run("sameOrderByValuesColIdxOutOfRange", func(t *testing.T) {
-		// colIdx beyond row length → continue (treated as equal)
-		ws := vdbe.NewWindowState(nil, []int{5}, nil, vdbe.DefaultWindowFrame())
-		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(1)})
-		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(2)})
-		ws.NextRow()
-		ws.UpdateRanking() // exercises sameOrderByValues with colIdx=5 > row length
-		ws.NextRow()
-		ws.UpdateRanking()
-		// If colIdx is out of range, both rows are treated as equal peers.
-		if ws.CurrentRank != 0 {
-			t.Errorf("out-of-range orderby col: expected rank to stay at 0 (same group), got %d", ws.CurrentRank)
-		}
-	})
-
-	t.Run("getLagRowNoPartition", func(t *testing.T) {
-		// CurrentPartIdx < 0 → GetLagRow returns nil
-		ws := vdbe.NewWindowState(nil, nil, nil, vdbe.DefaultWindowFrame())
-		got := ws.GetLagRow(1)
-		if got != nil {
-			t.Errorf("GetLagRow with no partition: expected nil, got %v", got)
-		}
-	})
-
-	t.Run("getLeadRowNoPartition", func(t *testing.T) {
-		// CurrentPartIdx < 0 → GetLeadRow returns nil
-		ws := vdbe.NewWindowState(nil, nil, nil, vdbe.DefaultWindowFrame())
-		got := ws.GetLeadRow(1)
-		if got != nil {
-			t.Errorf("GetLeadRow with no partition: expected nil, got %v", got)
-		}
-	})
-
-	t.Run("getLagRowOffsetBeyondPartition", func(t *testing.T) {
-		// offset > partition size → targetIdx < 0 → nil
-		ws := vdbe.NewWindowState(nil, nil, nil, vdbe.DefaultWindowFrame())
-		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(1)})
-		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(2)})
-		ws.NextRow()           // CurrentPartRow = 0
-		got := ws.GetLagRow(5) // 0 - 5 = -5 < 0
-		if got != nil {
-			t.Errorf("GetLagRow offset>partition: expected nil, got %v", got)
-		}
-	})
-
-	t.Run("getLeadRowOffsetBeyondPartition", func(t *testing.T) {
-		// offset > remaining rows → targetIdx >= len → nil
-		ws := vdbe.NewWindowState(nil, nil, nil, vdbe.DefaultWindowFrame())
-		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(1)})
-		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(2)})
-		ws.NextRow()
-		ws.NextRow()            // CurrentPartRow = 1 (last row)
-		got := ws.GetLeadRow(5) // 1 + 5 = 6 >= 2
-		if got != nil {
-			t.Errorf("GetLeadRow offset>partition: expected nil, got %v", got)
-		}
-	})
-
-	t.Run("getFirstValueColIdxOutOfRange", func(t *testing.T) {
-		ws := vdbe.NewWindowState(nil, nil, nil, vdbe.WindowFrame{
-			Type:  vdbe.FrameRows,
-			Start: vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedPreceding},
-			End:   vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedFollowing},
-		})
-		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(42)})
-		ws.NextRow()
-		got := ws.GetFirstValue(99) // colIdx out of range
-		if got == nil || !got.IsNull() {
-			t.Errorf("GetFirstValue colIdx out of range: expected NULL, got %v", got)
-		}
-	})
-
-	t.Run("getLastValueColIdxOutOfRange", func(t *testing.T) {
-		ws := vdbe.NewWindowState(nil, nil, nil, vdbe.WindowFrame{
-			Type:  vdbe.FrameRows,
-			Start: vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedPreceding},
-			End:   vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedFollowing},
-		})
-		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(42)})
-		ws.NextRow()
-		got := ws.GetLastValue(99) // colIdx out of range
-		if got == nil || !got.IsNull() {
-			t.Errorf("GetLastValue colIdx out of range: expected NULL, got %v", got)
-		}
-	})
-
-	t.Run("currentRowPartRowNegative", func(t *testing.T) {
-		// CurrentPartRow < 0 → CurrentRow returns nil
-		ws := vdbe.NewWindowState(nil, nil, nil, vdbe.DefaultWindowFrame())
-		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(1)})
-		// Manually position to a valid partition but invalid row index
-		ws.CurrentPartIdx = 0
-		ws.CurrentPartRow = -1
-		got := ws.CurrentRow()
-		if got != nil {
-			t.Errorf("CurrentRow with CurrentPartRow=-1: expected nil, got %v", got)
-		}
-	})
-
-	t.Run("shouldExcludeRowDefaultBranch", func(t *testing.T) {
-		// ExcludeNoOthers: shouldExcludeRow returns false (default branch).
-		// applyFrameExclude is only called when Exclude != ExcludeNoOthers,
-		// so we test this by using ExcludeNoOthers but exercising the logic via
-		// a frame that would call applyFrameExclude with an out-of-range exclude value.
-		// Since we can't set an invalid exclude value easily, we verify the
-		// ExcludeNoOthers short-circuit in GetFrameRows returns rawRows directly.
-		ws := vdbe.NewWindowState(nil, []int{0}, nil, vdbe.WindowFrame{
-			Type:    vdbe.FrameRows,
-			Start:   vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedPreceding},
-			End:     vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedFollowing},
-			Exclude: vdbe.ExcludeNoOthers,
-		})
-		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(10)})
-		ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(10)})
-		ws.NextRow()
-		rows := ws.GetFrameRows()
-		if len(rows) != 2 {
-			t.Errorf("ExcludeNoOthers: expected 2 frame rows, got %d", len(rows))
-		}
-	})
+	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(1)})
+	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(2)})
+	ws.NextRow()
+	_ = ws.GetFirstValue(0)
 }
 
-// TestWindowCovLagLeadSQL exercises LAG/LEAD via SQL including offset > partition size.
-func TestWindowCovLagLeadSQL(t *testing.T) {
+// TestWindowCovAdditional_CalculateFrameEndDefault exercises the default branch
+// of calculateFrameEnd with BoundUnboundedFollowing on the End.
+func TestWindowCovAdditional_CalculateFrameEndDefault(t *testing.T) {
+	ws := vdbe.NewWindowState(nil, nil, nil, vdbe.WindowFrame{
+		Type:  vdbe.FrameRows,
+		Start: vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedPreceding},
+		End:   vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedFollowing},
+	})
+	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(10)})
+	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(20)})
+	ws.NextRow()
+	got := ws.GetLastValue(0)
+	if got == nil || got.IsNull() {
+		t.Errorf("calculateFrameEndDefault: expected non-null last value")
+	}
+}
+
+// TestWindowCovAdditional_SameOrderByValuesColIdxOutOfRange exercises
+// sameOrderByValues with colIdx beyond row length.
+func TestWindowCovAdditional_SameOrderByValuesColIdxOutOfRange(t *testing.T) {
+	ws := vdbe.NewWindowState(nil, []int{5}, nil, vdbe.DefaultWindowFrame())
+	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(1)})
+	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(2)})
+	ws.NextRow()
+	ws.UpdateRanking()
+	ws.NextRow()
+	ws.UpdateRanking()
+	if ws.CurrentRank != 0 {
+		t.Errorf("out-of-range orderby col: expected rank to stay at 0 (same group), got %d", ws.CurrentRank)
+	}
+}
+
+// TestWindowCovAdditional_GetLagLeadRowNoPartition exercises GetLagRow/GetLeadRow
+// when CurrentPartIdx < 0.
+func TestWindowCovAdditional_GetLagLeadRowNoPartition(t *testing.T) {
+	ws := vdbe.NewWindowState(nil, nil, nil, vdbe.DefaultWindowFrame())
+	if got := ws.GetLagRow(1); got != nil {
+		t.Errorf("GetLagRow with no partition: expected nil, got %v", got)
+	}
+	if got := ws.GetLeadRow(1); got != nil {
+		t.Errorf("GetLeadRow with no partition: expected nil, got %v", got)
+	}
+}
+
+// TestWindowCovAdditional_GetLagRowOffsetBeyondPartition exercises GetLagRow
+// with offset > partition size.
+func TestWindowCovAdditional_GetLagRowOffsetBeyondPartition(t *testing.T) {
+	ws := vdbe.NewWindowState(nil, nil, nil, vdbe.DefaultWindowFrame())
+	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(1)})
+	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(2)})
+	ws.NextRow()
+	if got := ws.GetLagRow(5); got != nil {
+		t.Errorf("GetLagRow offset>partition: expected nil, got %v", got)
+	}
+}
+
+// TestWindowCovAdditional_GetLeadRowOffsetBeyondPartition exercises GetLeadRow
+// with offset > remaining rows.
+func TestWindowCovAdditional_GetLeadRowOffsetBeyondPartition(t *testing.T) {
+	ws := vdbe.NewWindowState(nil, nil, nil, vdbe.DefaultWindowFrame())
+	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(1)})
+	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(2)})
+	ws.NextRow()
+	ws.NextRow()
+	if got := ws.GetLeadRow(5); got != nil {
+		t.Errorf("GetLeadRow offset>partition: expected nil, got %v", got)
+	}
+}
+
+// TestWindowCovAdditional_GetValueColIdxOutOfRange exercises GetFirstValue and
+// GetLastValue with colIdx out of range.
+func TestWindowCovAdditional_GetValueColIdxOutOfRange(t *testing.T) {
+	ws := vdbe.NewWindowState(nil, nil, nil, vdbe.WindowFrame{
+		Type:  vdbe.FrameRows,
+		Start: vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedPreceding},
+		End:   vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedFollowing},
+	})
+	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(42)})
+	ws.NextRow()
+	if got := ws.GetFirstValue(99); got == nil || !got.IsNull() {
+		t.Errorf("GetFirstValue colIdx out of range: expected NULL, got %v", got)
+	}
+	if got := ws.GetLastValue(99); got == nil || !got.IsNull() {
+		t.Errorf("GetLastValue colIdx out of range: expected NULL, got %v", got)
+	}
+}
+
+// TestWindowCovAdditional_CurrentRowPartRowNegative exercises CurrentRow
+// with CurrentPartRow < 0.
+func TestWindowCovAdditional_CurrentRowPartRowNegative(t *testing.T) {
+	ws := vdbe.NewWindowState(nil, nil, nil, vdbe.DefaultWindowFrame())
+	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(1)})
+	ws.CurrentPartIdx = 0
+	ws.CurrentPartRow = -1
+	if got := ws.CurrentRow(); got != nil {
+		t.Errorf("CurrentRow with CurrentPartRow=-1: expected nil, got %v", got)
+	}
+}
+
+// TestWindowCovAdditional_ShouldExcludeRowDefault exercises the ExcludeNoOthers
+// short-circuit in GetFrameRows.
+func TestWindowCovAdditional_ShouldExcludeRowDefault(t *testing.T) {
+	ws := vdbe.NewWindowState(nil, []int{0}, nil, vdbe.WindowFrame{
+		Type:    vdbe.FrameRows,
+		Start:   vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedPreceding},
+		End:     vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedFollowing},
+		Exclude: vdbe.ExcludeNoOthers,
+	})
+	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(10)})
+	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(10)})
+	ws.NextRow()
+	rows := ws.GetFrameRows()
+	if len(rows) != 2 {
+		t.Errorf("ExcludeNoOthers: expected 2 frame rows, got %d", len(rows))
+	}
+}
+
+// windowCovSetupLagTest creates a lagtest table for LAG/LEAD SQL tests.
+func windowCovSetupLagTest(t *testing.T) *sql.DB {
+	t.Helper()
 	db := windowCovOpenDB(t)
-	defer db.Close()
 	windowCovExec(t, db, "CREATE TABLE lagtest (grp TEXT, val INTEGER)")
 	for _, row := range []struct {
 		g string
@@ -718,17 +707,12 @@ func TestWindowCovLagLeadSQL(t *testing.T) {
 			t.Fatalf("insert: %v", err)
 		}
 	}
+	return db
+}
 
-	// LAG with offset 1 and offset 5 (beyond partition)
-	rows, err := db.Query(`
-		SELECT grp, val,
-		       LAG(val, 1) OVER (PARTITION BY grp ORDER BY val),
-		       LAG(val, 5) OVER (PARTITION BY grp ORDER BY val)
-		FROM lagtest ORDER BY grp, val`)
-	if err != nil {
-		t.Fatalf("LAG query: %v", err)
-	}
-	defer rows.Close()
+// windowCovCheckLagResults validates LAG query results.
+func windowCovCheckLagResults(t *testing.T, rows *sql.Rows) {
+	t.Helper()
 	count := 0
 	for rows.Next() {
 		var grp string
@@ -737,11 +721,9 @@ func TestWindowCovLagLeadSQL(t *testing.T) {
 		if err := rows.Scan(&grp, &val, &lag1, &lag5); err != nil {
 			t.Fatalf("scan: %v", err)
 		}
-		// First row in each partition: lag1 should be NULL
 		if grp == "A" && val == 10 && lag1.Valid {
 			t.Errorf("LAG(val,1) for first row in partition A: expected NULL")
 		}
-		// Offset 5 always exceeds partition size (3 rows max): should be NULL
 		if lag5.Valid {
 			t.Errorf("LAG(val,5) should always be NULL (offset>partition), got %d", lag5.Int64)
 		}
@@ -752,6 +734,46 @@ func TestWindowCovLagLeadSQL(t *testing.T) {
 	}
 	if count == 0 {
 		t.Error("expected rows from LAG query")
+	}
+}
+
+// TestWindowCovLagLeadSQL exercises LAG/LEAD via SQL including offset > partition size.
+func TestWindowCovLagLeadSQL(t *testing.T) {
+	db := windowCovSetupLagTest(t)
+	defer db.Close()
+
+	rows, err := db.Query(`
+		SELECT grp, val,
+		       LAG(val, 1) OVER (PARTITION BY grp ORDER BY val),
+		       LAG(val, 5) OVER (PARTITION BY grp ORDER BY val)
+		FROM lagtest ORDER BY grp, val`)
+	if err != nil {
+		t.Fatalf("LAG query: %v", err)
+	}
+	defer rows.Close()
+	windowCovCheckLagResults(t, rows)
+}
+
+// windowCovCheckLeadResults validates LEAD query results.
+func windowCovCheckLeadResults(t *testing.T, rows *sql.Rows) {
+	t.Helper()
+	count := 0
+	for rows.Next() {
+		var val int
+		var lead1, lead10 sql.NullInt64
+		if err := rows.Scan(&val, &lead1, &lead10); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if lead10.Valid {
+			t.Errorf("LEAD(val,10) should be NULL (offset>partition), got %d", lead10.Int64)
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows err: %v", err)
+	}
+	if count == 0 {
+		t.Error("expected rows from LEAD query")
 	}
 }
 
@@ -775,37 +797,43 @@ func TestWindowCovLeadSQL(t *testing.T) {
 		t.Fatalf("LEAD query: %v", err)
 	}
 	defer rows.Close()
-	count := 0
+	windowCovCheckLeadResults(t, rows)
+}
+
+// windowCovCheckValueResults validates FIRST_VALUE/LAST_VALUE query results against expected map.
+func windowCovCheckValueResults(t *testing.T, rows *sql.Rows, wantMap map[int]int, funcName string) {
+	t.Helper()
+	type resultRow struct {
+		val      int
+		funcVal  int
+	}
+	var results []resultRow
 	for rows.Next() {
-		var val int
-		var lead1, lead10 sql.NullInt64
-		if err := rows.Scan(&val, &lead1, &lead10); err != nil {
+		var r resultRow
+		if err := rows.Scan(&r.val, &r.funcVal); err != nil {
 			t.Fatalf("scan: %v", err)
 		}
-		// offset 10 always exceeds partition (3 rows): should be NULL
-		if lead10.Valid {
-			t.Errorf("LEAD(val,10) should be NULL (offset>partition), got %d", lead10.Int64)
-		}
-		count++
+		results = append(results, r)
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows err: %v", err)
 	}
-	if count == 0 {
-		t.Error("expected rows from LEAD query")
+	if len(results) == 0 {
+		t.Errorf("expected rows from %s query", funcName)
+	}
+	for _, r := range results {
+		if want, ok := wantMap[r.val]; ok {
+			if r.funcVal != want {
+				t.Errorf("%s for val=%d: want %d got %d", funcName, r.val, want, r.funcVal)
+			}
+		}
 	}
 }
 
 // TestWindowCovFirstValueNonTrivialFrame exercises FIRST_VALUE with ROWS BETWEEN N PRECEDING AND CURRENT ROW.
 func TestWindowCovFirstValueNonTrivialFrame(t *testing.T) {
-	db := windowCovOpenDB(t)
+	db := windowCovSetupValTable(t, "fvtest", []int{10, 20, 30, 40, 50})
 	defer db.Close()
-	windowCovExec(t, db, "CREATE TABLE fvtest (val INTEGER)")
-	for _, v := range []int{10, 20, 30, 40, 50} {
-		if _, err := db.Exec("INSERT INTO fvtest VALUES (?)", v); err != nil {
-			t.Fatalf("insert: %v", err)
-		}
-	}
 
 	rows, err := db.Query(`
 		SELECT val,
@@ -815,48 +843,13 @@ func TestWindowCovFirstValueNonTrivialFrame(t *testing.T) {
 		t.Fatalf("FIRST_VALUE query: %v", err)
 	}
 	defer rows.Close()
-
-	type resultRow struct {
-		val        int
-		firstValue int
-	}
-	var results []resultRow
-	for rows.Next() {
-		var r resultRow
-		if err := rows.Scan(&r.val, &r.firstValue); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		results = append(results, r)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows err: %v", err)
-	}
-	if len(results) == 0 {
-		t.Error("expected rows from FIRST_VALUE query")
-	}
-	// For row with val=10 (index 0): frame is rows 0..0, FIRST_VALUE=10
-	// For row with val=30 (index 2): frame is rows 0..2, FIRST_VALUE=10
-	// For row with val=50 (index 4): frame is rows 2..4, FIRST_VALUE=30
-	wantFirst := map[int]int{10: 10, 20: 10, 30: 10, 40: 20, 50: 30}
-	for _, r := range results {
-		if want, ok := wantFirst[r.val]; ok {
-			if r.firstValue != want {
-				t.Errorf("FIRST_VALUE for val=%d: want %d got %d", r.val, want, r.firstValue)
-			}
-		}
-	}
+	windowCovCheckValueResults(t, rows, map[int]int{10: 10, 20: 10, 30: 10, 40: 20, 50: 30}, "FIRST_VALUE")
 }
 
 // TestWindowCovLastValueNonTrivialFrame exercises LAST_VALUE with ROWS BETWEEN CURRENT ROW AND N FOLLOWING.
 func TestWindowCovLastValueNonTrivialFrame(t *testing.T) {
-	db := windowCovOpenDB(t)
+	db := windowCovSetupValTable(t, "lvtest", []int{10, 20, 30, 40, 50})
 	defer db.Close()
-	windowCovExec(t, db, "CREATE TABLE lvtest (val INTEGER)")
-	for _, v := range []int{10, 20, 30, 40, 50} {
-		if _, err := db.Exec("INSERT INTO lvtest VALUES (?)", v); err != nil {
-			t.Fatalf("insert: %v", err)
-		}
-	}
 
 	rows, err := db.Query(`
 		SELECT val,
@@ -866,36 +859,7 @@ func TestWindowCovLastValueNonTrivialFrame(t *testing.T) {
 		t.Fatalf("LAST_VALUE query: %v", err)
 	}
 	defer rows.Close()
-
-	type resultRow struct {
-		val       int
-		lastValue int
-	}
-	var results []resultRow
-	for rows.Next() {
-		var r resultRow
-		if err := rows.Scan(&r.val, &r.lastValue); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		results = append(results, r)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows err: %v", err)
-	}
-	if len(results) == 0 {
-		t.Error("expected rows from LAST_VALUE query")
-	}
-	// For val=10 (idx 0): frame 0..2, LAST_VALUE=30
-	// For val=40 (idx 3): frame 3..5 clamped to 3..4, LAST_VALUE=50
-	// For val=50 (idx 4): frame 4..6 clamped to 4..4, LAST_VALUE=50
-	wantLast := map[int]int{10: 30, 20: 40, 30: 50, 40: 50, 50: 50}
-	for _, r := range results {
-		if want, ok := wantLast[r.val]; ok {
-			if r.lastValue != want {
-				t.Errorf("LAST_VALUE for val=%d: want %d got %d", r.val, want, r.lastValue)
-			}
-		}
-	}
+	windowCovCheckValueResults(t, rows, map[int]int{10: 30, 20: 40, 30: 50, 40: 50, 50: 50}, "LAST_VALUE")
 }
 
 // TestWindowCovRangeFrameSameOrderByValues exercises RANGE frames using sameOrderByValues comparisons.
@@ -976,47 +940,42 @@ func TestWindowCovFrameStartBeyondPartition(t *testing.T) {
 	}
 }
 
-// TestWindowCovGetNthValueUnit exercises GetNthValue directly including edge cases.
-func TestWindowCovGetNthValueUnit(t *testing.T) {
+// windowCovMakeNthValueState creates a WindowState for GetNthValue tests.
+func windowCovMakeNthValueState() *vdbe.WindowState {
 	ws := vdbe.NewWindowState(nil, nil, nil, vdbe.WindowFrame{
 		Type:  vdbe.FrameRows,
 		Start: vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedPreceding},
 		End:   vdbe.WindowFrameBound{Type: vdbe.BoundUnboundedFollowing},
 	})
-
 	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(100)})
 	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(200)})
 	ws.AddRow([]*vdbe.Mem{vdbe.NewMemInt(300)})
+	ws.NextRow()
+	return ws
+}
 
-	ws.NextRow() // position at first row; frame = entire partition
+// windowCovCheckNthValueNull asserts that GetNthValue returns NULL.
+func windowCovCheckNthValueNull(t *testing.T, ws *vdbe.WindowState, colIdx, n int, desc string) {
+	t.Helper()
+	got := ws.GetNthValue(colIdx, n)
+	if got == nil || !got.IsNull() {
+		t.Errorf("%s: want NULL got %v", desc, got)
+	}
+}
 
-	// N=1 → first row value 100.
+// TestWindowCovGetNthValueUnit exercises GetNthValue directly including edge cases.
+func TestWindowCovGetNthValueUnit(t *testing.T) {
+	ws := windowCovMakeNthValueState()
+
 	got := ws.GetNthValue(0, 1)
 	if got == nil || got.IntValue() != 100 {
 		t.Errorf("GetNthValue(0,1): want 100 got %v", got)
 	}
-
-	// N=2 → second row value 200.
 	got = ws.GetNthValue(0, 2)
 	if got == nil || got.IntValue() != 200 {
 		t.Errorf("GetNthValue(0,2): want 200 got %v", got)
 	}
-
-	// N=0 (invalid) → NULL.
-	got = ws.GetNthValue(0, 0)
-	if got == nil || !got.IsNull() {
-		t.Errorf("GetNthValue(0,0): want NULL got %v", got)
-	}
-
-	// N > frame size → NULL.
-	got = ws.GetNthValue(0, 10)
-	if got == nil || !got.IsNull() {
-		t.Errorf("GetNthValue(0,10): want NULL got %v", got)
-	}
-
-	// colIdx out of range → NULL.
-	got = ws.GetNthValue(99, 1)
-	if got == nil || !got.IsNull() {
-		t.Errorf("GetNthValue(99,1): want NULL got %v", got)
-	}
+	windowCovCheckNthValueNull(t, ws, 0, 0, "GetNthValue(0,0)")
+	windowCovCheckNthValueNull(t, ws, 0, 10, "GetNthValue(0,10)")
+	windowCovCheckNthValueNull(t, ws, 99, 1, "GetNthValue(99,1)")
 }

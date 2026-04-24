@@ -11,40 +11,15 @@ import (
 // TestIndexCursor_InteriorPageNavigation tests navigation through interior pages
 func TestIndexCursor_InteriorPageNavigation(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(512) // Small pages to force interior structure
-	rootPage, err := createIndexPage(bt)
-	if err != nil {
-		t.Fatalf("createIndexPage() error = %v", err)
-	}
+	_, cursor := setupIndexCursor(t, 512)
+	insertIndexEntriesN(cursor, 30, func(i int) []byte {
+		return []byte(fmt.Sprintf("key%04d", i))
+	})
 
-	cursor := NewIndexCursor(bt, rootPage)
-
-	// Insert enough entries to potentially create interior pages
-	for i := 0; i < 30; i++ {
-		key := []byte(fmt.Sprintf("key%04d", i))
-		err := cursor.InsertIndex(key, int64(i))
-		if err != nil {
-			// Page might be full
-			break
-		}
-	}
-
-	// Try to navigate - this will exercise interior page code paths
-	err = cursor.MoveToFirst()
-	if err != nil {
-		t.Logf("MoveToFirst() error: %v", err)
-	}
-
-	// Try navigation which might hit interior pages
-	for i := 0; i < 10 && cursor.IsValid(); i++ {
-		cursor.NextIndex()
-	}
-
-	// Try backward navigation
-	cursor.MoveToLast()
-	for i := 0; i < 5 && cursor.IsValid(); i++ {
-		cursor.PrevIndex()
-	}
+	cursor.MoveToFirst() //nolint:errcheck
+	navigateIndexForward(cursor, 10)
+	cursor.MoveToLast() //nolint:errcheck
+	navigateIndexBackward(cursor, 5)
 }
 
 // TestIndexCursor_descendToRightChild tests descending to right child in interior page

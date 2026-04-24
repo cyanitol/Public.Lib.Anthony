@@ -69,113 +69,93 @@ func fk6TextPayload(s string) []byte {
 // Exercises findMatchingRow (line 541).
 // ---------------------------------------------------------------------------
 
-func TestFKAdapter6FindMatchingRow(t *testing.T) {
+func TestFKAdapter6FindMatchingRow_BadCursor(t *testing.T) {
 	t.Parallel()
+	v := New()
+	v.Ctx = &VDBEContext{}
+	if err := v.AllocCursors(5); err != nil {
+		t.Fatalf("AllocCursors: %v", err)
+	}
+	v.Cursors[0] = &Cursor{
+		CurType:     CursorBTree,
+		BtreeCursor: "not-a-btcursor",
+	}
+	r := &VDBERowReader{vdbe: v}
+	tbl := makeTableInfo([]columnInfo{{Name: "id", Type: "INTEGER"}})
+	_, err := r.findMatchingRow(0, tbl, []string{"id"}, []interface{}{int64(1)})
+	if err == nil {
+		t.Error("expected error for invalid cursor type")
+	}
+}
 
-	t.Run("BadCursor_ReturnsError", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		v.Ctx = &VDBEContext{}
-		if err := v.AllocCursors(5); err != nil {
-			t.Fatalf("AllocCursors: %v", err)
-		}
-		// Install a cursor with a wrong BtreeCursor type so getBTreeCursor fails.
-		v.Cursors[0] = &Cursor{
-			CurType:     CursorBTree,
-			BtreeCursor: "not-a-btcursor",
-		}
-		r := &VDBERowReader{vdbe: v}
-		tbl := makeTableInfo([]columnInfo{{Name: "id", Type: "INTEGER"}})
-		_, err := r.findMatchingRow(0, tbl, []string{"id"}, []interface{}{int64(1)})
-		if err == nil {
-			t.Error("expected error for invalid cursor type")
-		}
-	})
+func TestFKAdapter6FindMatchingRow_EmptyTable(t *testing.T) {
+	t.Parallel()
+	v, _ := fk6MakeVDBEWithTable(t,
+		[]columnInfo{{Name: "id", Type: "INTEGER"}, {Name: "val", Type: "TEXT"}},
+		0, nil,
+	)
+	r := &VDBERowReader{vdbe: v}
+	tbl, err := r.getTable("items")
+	if err != nil {
+		t.Fatalf("getTable: %v", err)
+	}
+	bt := v.Ctx.Btree.(*btree.Btree)
+	cur := btree.NewCursorWithOptions(bt, tbl.RootPage, false)
+	v.Cursors[0] = &Cursor{
+		CurType:     CursorBTree,
+		BtreeCursor: cur,
+	}
+	found, err := r.findMatchingRow(0, tbl, []string{"id"}, []interface{}{int64(99)})
+	if err != nil {
+		t.Fatalf("findMatchingRow on empty table: %v", err)
+	}
+	if found {
+		t.Error("expected false for empty table")
+	}
+}
 
-	t.Run("EmptyTable_ReturnsFalse", func(t *testing.T) {
-		t.Parallel()
-		// Empty table: moveToFirstRow returns isEmpty=true → false, nil
-		v, _ := fk6MakeVDBEWithTable(t,
-			[]columnInfo{{Name: "id", Type: "INTEGER"}, {Name: "val", Type: "TEXT"}},
-			0, nil, // no rows inserted
-		)
-		r := &VDBERowReader{vdbe: v}
-		tbl, err := r.getTable("items")
-		if err != nil {
-			t.Fatalf("getTable: %v", err)
-		}
-		// Open a real cursor on the empty table.
-		bt := v.Ctx.Btree.(*btree.Btree)
-		cur := btree.NewCursorWithOptions(bt, tbl.RootPage, false)
-		v.Cursors[0] = &Cursor{
-			CurType:     CursorBTree,
-			BtreeCursor: cur,
-		}
-		found, err := r.findMatchingRow(0, tbl, []string{"id"}, []interface{}{int64(99)})
-		if err != nil {
-			t.Fatalf("findMatchingRow on empty table: %v", err)
-		}
-		if found {
-			t.Error("expected false for empty table")
-		}
-	})
+// fk6FindMatchingRowWithPayload is a helper that creates a VDBE with a table
+// containing one row, opens a cursor, and calls findMatchingRow.
+func fk6FindMatchingRowWithPayload(t *testing.T, payload []byte, rowid int64, searchID int64) (bool, error) {
+	t.Helper()
+	v, root := fk6MakeVDBEWithTable(t,
+		[]columnInfo{{Name: "id", Type: "INTEGER"}, {Name: "val", Type: "TEXT"}},
+		rowid, payload,
+	)
+	r := &VDBERowReader{vdbe: v}
+	tbl, err := r.getTable("items")
+	if err != nil {
+		t.Fatalf("getTable: %v", err)
+	}
+	bt := v.Ctx.Btree.(*btree.Btree)
+	cur := btree.NewCursorWithOptions(bt, root, false)
+	v.Cursors[0] = &Cursor{
+		CurType:     CursorBTree,
+		BtreeCursor: cur,
+	}
+	return r.findMatchingRow(0, tbl, []string{"id"}, []interface{}{searchID})
+}
 
-	t.Run("MatchFound_ReturnsTrue", func(t *testing.T) {
-		t.Parallel()
-		// Insert one row with val="hello"
-		payload := fk6TextPayload("hello")
-		v, root := fk6MakeVDBEWithTable(t,
-			[]columnInfo{{Name: "id", Type: "INTEGER"}, {Name: "val", Type: "TEXT"}},
-			1, payload,
-		)
-		r := &VDBERowReader{vdbe: v}
-		tbl, err := r.getTable("items")
-		if err != nil {
-			t.Fatalf("getTable: %v", err)
-		}
-		bt := v.Ctx.Btree.(*btree.Btree)
-		cur := btree.NewCursorWithOptions(bt, root, false)
-		v.Cursors[0] = &Cursor{
-			CurType:     CursorBTree,
-			BtreeCursor: cur,
-		}
-		// Match by rowid (id column is integer PK — rowid value is stored in Mem.i)
-		found, err := r.findMatchingRow(0, tbl, []string{"id"}, []interface{}{int64(1)})
-		if err != nil {
-			t.Fatalf("findMatchingRow: %v", err)
-		}
-		if !found {
-			t.Error("expected true when row with id=1 exists")
-		}
-	})
+func TestFKAdapter6FindMatchingRow_MatchFound(t *testing.T) {
+	t.Parallel()
+	found, err := fk6FindMatchingRowWithPayload(t, fk6TextPayload("hello"), 1, int64(1))
+	if err != nil {
+		t.Fatalf("findMatchingRow: %v", err)
+	}
+	if !found {
+		t.Error("expected true when row with id=1 exists")
+	}
+}
 
-	t.Run("NoMatch_ReturnsFalse", func(t *testing.T) {
-		t.Parallel()
-		payload := fk6TextPayload("world")
-		v, root := fk6MakeVDBEWithTable(t,
-			[]columnInfo{{Name: "id", Type: "INTEGER"}, {Name: "val", Type: "TEXT"}},
-			2, payload,
-		)
-		r := &VDBERowReader{vdbe: v}
-		tbl, err := r.getTable("items")
-		if err != nil {
-			t.Fatalf("getTable: %v", err)
-		}
-		bt := v.Ctx.Btree.(*btree.Btree)
-		cur := btree.NewCursorWithOptions(bt, root, false)
-		v.Cursors[0] = &Cursor{
-			CurType:     CursorBTree,
-			BtreeCursor: cur,
-		}
-		// Search for id=99 which does not exist.
-		found, err := r.findMatchingRow(0, tbl, []string{"id"}, []interface{}{int64(99)})
-		if err != nil {
-			t.Fatalf("findMatchingRow: %v", err)
-		}
-		if found {
-			t.Error("expected false when id=99 does not exist")
-		}
-	})
+func TestFKAdapter6FindMatchingRow_NoMatch(t *testing.T) {
+	t.Parallel()
+	found, err := fk6FindMatchingRowWithPayload(t, fk6TextPayload("world"), 2, int64(99))
+	if err != nil {
+		t.Fatalf("findMatchingRow: %v", err)
+	}
+	if found {
+		t.Error("expected false when id=99 does not exist")
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -183,110 +163,95 @@ func TestFKAdapter6FindMatchingRow(t *testing.T) {
 // Exercises collectMatchingRowData (line 645).
 // ---------------------------------------------------------------------------
 
-func TestFKAdapter6CollectMatchingRowData(t *testing.T) {
+func TestFKAdapter6CollectMatchingRowData_BadCursor(t *testing.T) {
 	t.Parallel()
+	v := New()
+	v.Ctx = &VDBEContext{}
+	if err := v.AllocCursors(5); err != nil {
+		t.Fatalf("AllocCursors: %v", err)
+	}
+	v.Cursors[0] = &Cursor{
+		CurType:     CursorBTree,
+		BtreeCursor: struct{}{},
+	}
+	r := &VDBERowReader{vdbe: v}
+	tbl := makeTableInfo([]columnInfo{{Name: "id", Type: "INTEGER"}})
+	_, err := r.collectMatchingRowData(0, tbl, []string{"id"}, []interface{}{int64(1)})
+	if err == nil {
+		t.Error("expected error for invalid cursor type")
+	}
+}
 
-	t.Run("BadCursor_ReturnsError", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		v.Ctx = &VDBEContext{}
-		if err := v.AllocCursors(5); err != nil {
-			t.Fatalf("AllocCursors: %v", err)
-		}
-		v.Cursors[0] = &Cursor{
-			CurType:     CursorBTree,
-			BtreeCursor: struct{}{}, // wrong type
-		}
-		r := &VDBERowReader{vdbe: v}
-		tbl := makeTableInfo([]columnInfo{{Name: "id", Type: "INTEGER"}})
-		_, err := r.collectMatchingRowData(0, tbl, []string{"id"}, []interface{}{int64(1)})
-		if err == nil {
-			t.Error("expected error for invalid cursor type")
-		}
-	})
+func TestFKAdapter6CollectMatchingRowData_EmptyTable(t *testing.T) {
+	t.Parallel()
+	v, _ := fk6MakeVDBEWithTable(t,
+		[]columnInfo{{Name: "id", Type: "INTEGER"}, {Name: "val", Type: "TEXT"}},
+		0, nil,
+	)
+	r := &VDBERowReader{vdbe: v}
+	tbl, err := r.getTable("items")
+	if err != nil {
+		t.Fatalf("getTable: %v", err)
+	}
+	bt := v.Ctx.Btree.(*btree.Btree)
+	cur := btree.NewCursorWithOptions(bt, tbl.RootPage, false)
+	v.Cursors[0] = &Cursor{
+		CurType:     CursorBTree,
+		BtreeCursor: cur,
+	}
+	rows, err := r.collectMatchingRowData(0, tbl, []string{"id"}, []interface{}{int64(1)})
+	if err != nil {
+		t.Fatalf("collectMatchingRowData on empty table: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("expected empty slice for empty table, got %d rows", len(rows))
+	}
+}
 
-	t.Run("EmptyTable_ReturnsEmptySlice", func(t *testing.T) {
-		t.Parallel()
-		v, _ := fk6MakeVDBEWithTable(t,
-			[]columnInfo{{Name: "id", Type: "INTEGER"}, {Name: "val", Type: "TEXT"}},
-			0, nil,
-		)
-		r := &VDBERowReader{vdbe: v}
-		tbl, err := r.getTable("items")
-		if err != nil {
-			t.Fatalf("getTable: %v", err)
-		}
-		bt := v.Ctx.Btree.(*btree.Btree)
-		cur := btree.NewCursorWithOptions(bt, tbl.RootPage, false)
-		v.Cursors[0] = &Cursor{
-			CurType:     CursorBTree,
-			BtreeCursor: cur,
-		}
-		rows, err := r.collectMatchingRowData(0, tbl, []string{"id"}, []interface{}{int64(1)})
-		if err != nil {
-			t.Fatalf("collectMatchingRowData on empty table: %v", err)
-		}
-		if len(rows) != 0 {
-			t.Errorf("expected empty slice for empty table, got %d rows", len(rows))
-		}
-	})
+// fk6CollectMatchingWithPayload is a helper for collectMatchingRowData tests.
+func fk6CollectMatchingWithPayload(t *testing.T, payload []byte, rowid, searchID int64) ([]map[string]interface{}, error) {
+	t.Helper()
+	v, root := fk6MakeVDBEWithTable(t,
+		[]columnInfo{{Name: "id", Type: "INTEGER"}, {Name: "val", Type: "TEXT"}},
+		rowid, payload,
+	)
+	r := &VDBERowReader{vdbe: v}
+	tbl, err := r.getTable("items")
+	if err != nil {
+		t.Fatalf("getTable: %v", err)
+	}
+	bt := v.Ctx.Btree.(*btree.Btree)
+	cur := btree.NewCursorWithOptions(bt, root, false)
+	v.Cursors[0] = &Cursor{
+		CurType:     CursorBTree,
+		BtreeCursor: cur,
+	}
+	return r.collectMatchingRowData(0, tbl, []string{"id"}, []interface{}{searchID})
+}
 
-	t.Run("MatchFound_ReturnsRows", func(t *testing.T) {
-		t.Parallel()
-		payload := fk6TextPayload("alice")
-		v, root := fk6MakeVDBEWithTable(t,
-			[]columnInfo{{Name: "id", Type: "INTEGER"}, {Name: "val", Type: "TEXT"}},
-			5, payload,
-		)
-		r := &VDBERowReader{vdbe: v}
-		tbl, err := r.getTable("items")
-		if err != nil {
-			t.Fatalf("getTable: %v", err)
-		}
-		bt := v.Ctx.Btree.(*btree.Btree)
-		cur := btree.NewCursorWithOptions(bt, root, false)
-		v.Cursors[0] = &Cursor{
-			CurType:     CursorBTree,
-			BtreeCursor: cur,
-		}
-		rows, err := r.collectMatchingRowData(0, tbl, []string{"id"}, []interface{}{int64(5)})
-		if err != nil {
-			t.Fatalf("collectMatchingRowData: %v", err)
-		}
-		if len(rows) != 1 {
-			t.Errorf("expected 1 matching row, got %d", len(rows))
-		}
-		if rows[0]["id"] != int64(5) {
-			t.Errorf("expected id=5, got %v", rows[0]["id"])
-		}
-	})
+func TestFKAdapter6CollectMatchingRowData_MatchFound(t *testing.T) {
+	t.Parallel()
+	rows, err := fk6CollectMatchingWithPayload(t, fk6TextPayload("alice"), 5, int64(5))
+	if err != nil {
+		t.Fatalf("collectMatchingRowData: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Errorf("expected 1 matching row, got %d", len(rows))
+	}
+	if rows[0]["id"] != int64(5) {
+		t.Errorf("expected id=5, got %v", rows[0]["id"])
+	}
+}
 
-	t.Run("NoMatch_ReturnsEmptySlice", func(t *testing.T) {
-		t.Parallel()
-		payload := fk6TextPayload("bob")
-		v, root := fk6MakeVDBEWithTable(t,
-			[]columnInfo{{Name: "id", Type: "INTEGER"}, {Name: "val", Type: "TEXT"}},
-			3, payload,
-		)
-		r := &VDBERowReader{vdbe: v}
-		tbl, err := r.getTable("items")
-		if err != nil {
-			t.Fatalf("getTable: %v", err)
-		}
-		bt := v.Ctx.Btree.(*btree.Btree)
-		cur := btree.NewCursorWithOptions(bt, root, false)
-		v.Cursors[0] = &Cursor{
-			CurType:     CursorBTree,
-			BtreeCursor: cur,
-		}
-		rows, err := r.collectMatchingRowData(0, tbl, []string{"id"}, []interface{}{int64(999)})
-		if err != nil {
-			t.Fatalf("collectMatchingRowData no match: %v", err)
-		}
-		if len(rows) != 0 {
-			t.Errorf("expected 0 rows for no match, got %d", len(rows))
-		}
-	})
+func TestFKAdapter6CollectMatchingRowData_NoMatch(t *testing.T) {
+	t.Parallel()
+	rows, err := fk6CollectMatchingWithPayload(t, fk6TextPayload("bob"), 3, int64(999))
+	if err != nil {
+		t.Fatalf("collectMatchingRowData no match: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("expected 0 rows for no match, got %d", len(rows))
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -294,126 +259,116 @@ func TestFKAdapter6CollectMatchingRowData(t *testing.T) {
 // Exercises VDBERowModifier.DeleteRow (line 1238).
 // ---------------------------------------------------------------------------
 
-func TestFKAdapter6DeleteRow(t *testing.T) {
+func TestFKAdapter6DeleteRow_TableNotFound(t *testing.T) {
 	t.Parallel()
+	schema := &fkaCovSchema{tables: map[string]interface{}{}}
+	v := New()
+	v.Ctx = &VDBEContext{Schema: schema}
+	m := NewVDBERowModifier(v)
+	if err := m.DeleteRow("missing", 1); err == nil {
+		t.Error("expected error for missing table")
+	}
+}
 
-	t.Run("TableNotFound_ReturnsError", func(t *testing.T) {
-		t.Parallel()
-		schema := &fkaCovSchema{tables: map[string]interface{}{}}
-		v := New()
-		v.Ctx = &VDBEContext{Schema: schema}
-		m := NewVDBERowModifier(v)
-		err := m.DeleteRow("missing", 1)
-		if err == nil {
-			t.Error("expected error for missing table")
-		}
-	})
-
-	t.Run("WithoutRowID_ReturnsError", func(t *testing.T) {
-		t.Parallel()
-		bt := btree.NewBtree(4096)
-		root, err := bt.CreateTable()
-		if err != nil {
-			t.Fatalf("CreateTable: %v", err)
-		}
-		schema := &fkaCovSchema{
-			tables: map[string]interface{}{
-				"wr": &fkaCovMockTable{
-					RootPage:     root,
-					WithoutRowID: true,
-					columns: []interface{}{
-						&fkaCovMockColumn{name: "pk", colType: "TEXT", isPK: true},
-					},
+func TestFKAdapter6DeleteRow_WithoutRowID(t *testing.T) {
+	t.Parallel()
+	bt := btree.NewBtree(4096)
+	root, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	schema := &fkaCovSchema{
+		tables: map[string]interface{}{
+			"wr": &fkaCovMockTable{
+				RootPage:     root,
+				WithoutRowID: true,
+				columns: []interface{}{
+					&fkaCovMockColumn{name: "pk", colType: "TEXT", isPK: true},
 				},
 			},
-		}
-		v := New()
-		v.Ctx = &VDBEContext{Btree: bt, Schema: schema}
-		if err := v.AllocCursors(10); err != nil {
-			t.Fatalf("AllocCursors: %v", err)
-		}
-		m := NewVDBERowModifier(v)
-		err = m.DeleteRow("wr", 1)
-		if err == nil {
-			t.Error("expected error for WITHOUT ROWID table")
-		}
-	})
+		},
+	}
+	v := New()
+	v.Ctx = &VDBEContext{Btree: bt, Schema: schema}
+	if err := v.AllocCursors(10); err != nil {
+		t.Fatalf("AllocCursors: %v", err)
+	}
+	m := NewVDBERowModifier(v)
+	if err := m.DeleteRow("wr", 1); err == nil {
+		t.Error("expected error for WITHOUT ROWID table")
+	}
+}
 
-	t.Run("RowNotFound_ReturnsError", func(t *testing.T) {
-		t.Parallel()
-		bt := btree.NewBtree(4096)
-		root, err := bt.CreateTable()
-		if err != nil {
-			t.Fatalf("CreateTable: %v", err)
-		}
-		// Empty table; rowid 42 does not exist.
-		schema := &fkaCovSchema{
-			tables: map[string]interface{}{
-				"items": &fkaCovMockTable{
-					RootPage:     root,
-					WithoutRowID: false,
-					columns: []interface{}{
-						&fkaCovMockColumn{name: "id", colType: "INTEGER", isPK: true},
-					},
+func TestFKAdapter6DeleteRow_RowNotFound(t *testing.T) {
+	t.Parallel()
+	bt := btree.NewBtree(4096)
+	root, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	schema := &fkaCovSchema{
+		tables: map[string]interface{}{
+			"items": &fkaCovMockTable{
+				RootPage:     root,
+				WithoutRowID: false,
+				columns: []interface{}{
+					&fkaCovMockColumn{name: "id", colType: "INTEGER", isPK: true},
 				},
 			},
-		}
-		v := New()
-		v.Ctx = &VDBEContext{Btree: bt, Schema: schema}
-		if err := v.AllocCursors(10); err != nil {
-			t.Fatalf("AllocCursors: %v", err)
-		}
-		m := NewVDBERowModifier(v)
-		err = m.DeleteRow("items", 42)
-		if err == nil {
-			t.Error("expected error for rowid not found in empty table")
-		}
-	})
+		},
+	}
+	v := New()
+	v.Ctx = &VDBEContext{Btree: bt, Schema: schema}
+	if err := v.AllocCursors(10); err != nil {
+		t.Fatalf("AllocCursors: %v", err)
+	}
+	m := NewVDBERowModifier(v)
+	if err := m.DeleteRow("items", 42); err == nil {
+		t.Error("expected error for rowid not found in empty table")
+	}
+}
 
-	t.Run("HappyPath_DeletesRow", func(t *testing.T) {
-		t.Parallel()
-		bt := btree.NewBtree(4096)
-		root, err := bt.CreateTable()
-		if err != nil {
-			t.Fatalf("CreateTable: %v", err)
-		}
-		// Insert rowid=7 with a small payload.
-		payload := fk6TextPayload("to-delete")
-		cur := btree.NewCursorWithOptions(bt, root, false)
-		if err := cur.Insert(7, payload); err != nil {
-			t.Fatalf("Insert: %v", err)
-		}
-		schema := &fkaCovSchema{
-			tables: map[string]interface{}{
-				"items": &fkaCovMockTable{
-					RootPage:     root,
-					WithoutRowID: false,
-					columns: []interface{}{
-						&fkaCovMockColumn{name: "id", colType: "INTEGER", isPK: true},
-						&fkaCovMockColumn{name: "val", colType: "TEXT"},
-					},
+func TestFKAdapter6DeleteRow_HappyPath(t *testing.T) {
+	t.Parallel()
+	bt := btree.NewBtree(4096)
+	root, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	payload := fk6TextPayload("to-delete")
+	cur := btree.NewCursorWithOptions(bt, root, false)
+	if err := cur.Insert(7, payload); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	schema := &fkaCovSchema{
+		tables: map[string]interface{}{
+			"items": &fkaCovMockTable{
+				RootPage:     root,
+				WithoutRowID: false,
+				columns: []interface{}{
+					&fkaCovMockColumn{name: "id", colType: "INTEGER", isPK: true},
+					&fkaCovMockColumn{name: "val", colType: "TEXT"},
 				},
 			},
-		}
-		v := New()
-		v.Ctx = &VDBEContext{Btree: bt, Schema: schema}
-		if err := v.AllocCursors(10); err != nil {
-			t.Fatalf("AllocCursors: %v", err)
-		}
-		m := NewVDBERowModifier(v)
-		if err := m.DeleteRow("items", 7); err != nil {
-			t.Fatalf("DeleteRow: %v", err)
-		}
-		// Verify the row is gone by checking the rowid cannot be sought.
-		verifyCur := btree.NewCursorWithOptions(bt, root, false)
-		found, err := verifyCur.SeekRowid(7)
-		if err != nil {
-			t.Fatalf("SeekRowid after delete: %v", err)
-		}
-		if found {
-			t.Error("expected rowid 7 to be deleted")
-		}
-	})
+		},
+	}
+	v := New()
+	v.Ctx = &VDBEContext{Btree: bt, Schema: schema}
+	if err := v.AllocCursors(10); err != nil {
+		t.Fatalf("AllocCursors: %v", err)
+	}
+	m := NewVDBERowModifier(v)
+	if err := m.DeleteRow("items", 7); err != nil {
+		t.Fatalf("DeleteRow: %v", err)
+	}
+	verifyCur := btree.NewCursorWithOptions(bt, root, false)
+	found, err := verifyCur.SeekRowid(7)
+	if err != nil {
+		t.Fatalf("SeekRowid after delete: %v", err)
+	}
+	if found {
+		t.Error("expected rowid 7 to be deleted")
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -482,77 +437,65 @@ func TestFKAdapter6GetTriggerCompiler(t *testing.T) {
 // Exercises writeAndRecordSpill (line 159 in sorter_spill.go).
 // ---------------------------------------------------------------------------
 
-func TestFKAdapter6WriteAndRecordSpill(t *testing.T) {
+func TestFKAdapter6WriteAndRecordSpill_InvalidPath(t *testing.T) {
 	t.Parallel()
+	s := NewSorterWithSpill([]int{0}, []bool{false}, []string{"BINARY"}, 1, nil)
+	err := s.writeAndRecordSpill("/nonexistent_dir_abc123/spill.tmp", 0)
+	if err == nil {
+		t.Error("expected error for invalid spill file path")
+	}
+}
 
-	t.Run("InvalidPath_ReturnsError", func(t *testing.T) {
-		t.Parallel()
-		s := NewSorterWithSpill([]int{0}, []bool{false}, []string{"BINARY"}, 1, nil)
-		// Use an invalid path (directory that doesn't exist).
-		err := s.writeAndRecordSpill("/nonexistent_dir_abc123/spill.tmp", 0)
-		if err == nil {
-			t.Error("expected error for invalid spill file path")
-		}
-	})
+func TestFKAdapter6WriteAndRecordSpill_EmptyRows(t *testing.T) {
+	t.Parallel()
+	s := NewSorterWithSpill([]int{0}, []bool{false}, []string{"BINARY"}, 1, nil)
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "spill_empty.tmp")
+	err := s.writeAndRecordSpill(filePath, 0)
+	if err != nil {
+		t.Fatalf("writeAndRecordSpill (empty rows): %v", err)
+	}
+	if len(s.spilledRuns) != 1 {
+		t.Errorf("expected 1 spilled run recorded, got %d", len(s.spilledRuns))
+	}
+	if s.spilledRuns[0].FilePath != filePath {
+		t.Errorf("expected FilePath=%q, got %q", filePath, s.spilledRuns[0].FilePath)
+	}
+	if s.spilledRuns[0].NumRows != 0 {
+		t.Errorf("expected NumRows=0, got %d", s.spilledRuns[0].NumRows)
+	}
+	if s.spilledRuns[0].File != nil {
+		t.Error("expected File to be nil (file is closed) after writeAndRecordSpill")
+	}
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		t.Error("expected spill file to exist on disk")
+	}
+}
 
-	t.Run("EmptyRows_WritesSpilledRun", func(t *testing.T) {
-		t.Parallel()
-		s := NewSorterWithSpill([]int{0}, []bool{false}, []string{"BINARY"}, 1, nil)
-		// s.Rows is empty; writeAndRecordSpill writes 0 rows.
-		dir := t.TempDir()
-		filePath := filepath.Join(dir, "spill_empty.tmp")
-		err := s.writeAndRecordSpill(filePath, 0)
-		if err != nil {
-			t.Fatalf("writeAndRecordSpill (empty rows): %v", err)
-		}
-		if len(s.spilledRuns) != 1 {
-			t.Errorf("expected 1 spilled run recorded, got %d", len(s.spilledRuns))
-		}
-		if s.spilledRuns[0].FilePath != filePath {
-			t.Errorf("expected FilePath=%q, got %q", filePath, s.spilledRuns[0].FilePath)
-		}
-		if s.spilledRuns[0].NumRows != 0 {
-			t.Errorf("expected NumRows=0, got %d", s.spilledRuns[0].NumRows)
-		}
-		// Verify the file was created and then closed (no open handle).
-		if s.spilledRuns[0].File != nil {
-			t.Error("expected File to be nil (file is closed) after writeAndRecordSpill")
-		}
-		// Verify the spill file exists on disk.
-		if _, err := os.Stat(filePath); os.IsNotExist(err) {
-			t.Error("expected spill file to exist on disk")
-		}
-	})
+func TestFKAdapter6WriteAndRecordSpill_WithRows(t *testing.T) {
+	t.Parallel()
+	s := NewSorterWithSpill([]int{0}, []bool{false}, []string{"BINARY"}, 2, nil)
+	s.Sorter.Insert([]*Mem{NewMemInt(1), NewMemStr("alpha")})
+	s.Sorter.Insert([]*Mem{NewMemInt(2), NewMemStr("beta")})
 
-	t.Run("WithRows_WritesSpilledRun", func(t *testing.T) {
-		t.Parallel()
-		s := NewSorterWithSpill([]int{0}, []bool{false}, []string{"BINARY"}, 2, nil)
-		// Add rows to the in-memory buffer.
-		row1 := []*Mem{NewMemInt(1), NewMemStr("alpha")}
-		row2 := []*Mem{NewMemInt(2), NewMemStr("beta")}
-		s.Sorter.Insert(row1)
-		s.Sorter.Insert(row2)
-
-		dir := t.TempDir()
-		filePath := filepath.Join(dir, "spill_rows.tmp")
-		numRows := len(s.Rows)
-		err := s.writeAndRecordSpill(filePath, numRows)
-		if err != nil {
-			t.Fatalf("writeAndRecordSpill (with rows): %v", err)
-		}
-		if len(s.spilledRuns) != 1 {
-			t.Errorf("expected 1 spilled run, got %d", len(s.spilledRuns))
-		}
-		if s.spilledRuns[0].NumRows != numRows {
-			t.Errorf("expected NumRows=%d, got %d", numRows, s.spilledRuns[0].NumRows)
-		}
-		// Verify file is non-empty.
-		info, err := os.Stat(filePath)
-		if err != nil {
-			t.Fatalf("Stat spill file: %v", err)
-		}
-		if info.Size() == 0 {
-			t.Error("expected non-empty spill file")
-		}
-	})
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "spill_rows.tmp")
+	numRows := len(s.Rows)
+	err := s.writeAndRecordSpill(filePath, numRows)
+	if err != nil {
+		t.Fatalf("writeAndRecordSpill (with rows): %v", err)
+	}
+	if len(s.spilledRuns) != 1 {
+		t.Errorf("expected 1 spilled run, got %d", len(s.spilledRuns))
+	}
+	if s.spilledRuns[0].NumRows != numRows {
+		t.Errorf("expected NumRows=%d, got %d", numRows, s.spilledRuns[0].NumRows)
+	}
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat spill file: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Error("expected non-empty spill file")
+	}
 }

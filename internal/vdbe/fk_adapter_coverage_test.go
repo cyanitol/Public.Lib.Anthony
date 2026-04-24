@@ -291,76 +291,39 @@ func TestGetParentColumnTypeAndCollation(t *testing.T) {
 // valuesEqualDirect
 // ---------------------------------------------------------------------------
 
-func TestValuesEqualDirect(t *testing.T) {
+func TestValuesEqualDirect_NilAndString(t *testing.T) {
 	t.Parallel()
+	if !valuesEqualDirect(nil, nil) {
+		t.Error("nil == nil should be true")
+	}
+	if !valuesEqualDirect("hello", "hello") {
+		t.Error("same string should be equal")
+	}
+	if valuesEqualDirect("hello", "world") {
+		t.Error("different strings should not be equal")
+	}
+	if valuesEqualDirect("abc", "def") {
+		t.Error("different strings should not be equal (non-numeric fallback)")
+	}
+}
 
-	t.Run("BothNil", func(t *testing.T) {
-		t.Parallel()
-		if !valuesEqualDirect(nil, nil) {
-			t.Error("nil == nil should be true")
-		}
-	})
-
-	t.Run("SameString", func(t *testing.T) {
-		t.Parallel()
-		if !valuesEqualDirect("hello", "hello") {
-			t.Error("same string should be equal")
-		}
-	})
-
-	t.Run("DifferentStrings", func(t *testing.T) {
-		t.Parallel()
-		if valuesEqualDirect("hello", "world") {
-			t.Error("different strings should not be equal")
-		}
-	})
-
-	t.Run("Int_Int64_Equal", func(t *testing.T) {
-		t.Parallel()
-		// int and int64 of same value – handled via toInt64 path
-		if !valuesEqualDirect(int(42), int64(42)) {
-			t.Error("int(42) and int64(42) should be equal")
-		}
-	})
-
-	t.Run("Int64_Int64_Equal", func(t *testing.T) {
-		t.Parallel()
-		if !valuesEqualDirect(int64(7), int64(7)) {
-			t.Error("int64 equal values should match")
-		}
-	})
-
-	t.Run("Int64_Int64_NotEqual", func(t *testing.T) {
-		t.Parallel()
-		if valuesEqualDirect(int64(1), int64(2)) {
-			t.Error("different int64 values should not be equal")
-		}
-	})
-
-	t.Run("Float64_Int64_Equal", func(t *testing.T) {
-		t.Parallel()
-		// toInt64 converts float64 to int64
-		if !valuesEqualDirect(float64(10), int64(10)) {
-			t.Error("float64(10) and int64(10) should be equal via toInt64")
-		}
-	})
-
-	t.Run("OneNumericOneNot_NotEqual", func(t *testing.T) {
-		t.Parallel()
-		// int64 vs string: toInt64 fails on string, returns false
-		if valuesEqualDirect(int64(5), "5") {
-			t.Error("int64 and string should not be equal via this path")
-		}
-	})
-
-	t.Run("BothNonNumericNonEqual", func(t *testing.T) {
-		t.Parallel()
-		// Use struct{}{} and a string: v1==v2 panics on slices, so use comparable types.
-		// Both fail toInt64, and v1 != v2, so result is false.
-		if valuesEqualDirect("abc", "def") {
-			t.Error("different strings should not be equal (non-numeric fallback)")
-		}
-	})
+func TestValuesEqualDirect_Numeric(t *testing.T) {
+	t.Parallel()
+	if !valuesEqualDirect(int(42), int64(42)) {
+		t.Error("int(42) and int64(42) should be equal")
+	}
+	if !valuesEqualDirect(int64(7), int64(7)) {
+		t.Error("int64 equal values should match")
+	}
+	if valuesEqualDirect(int64(1), int64(2)) {
+		t.Error("different int64 values should not be equal")
+	}
+	if !valuesEqualDirect(float64(10), int64(10)) {
+		t.Error("float64(10) and int64(10) should be equal via toInt64")
+	}
+	if valuesEqualDirect(int64(5), "5") {
+		t.Error("int64 and string should not be equal via this path")
+	}
 }
 
 // ---------------------------------------------------------------------------

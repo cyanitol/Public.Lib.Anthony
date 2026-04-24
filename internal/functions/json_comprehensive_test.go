@@ -43,26 +43,9 @@ func TestJSONFunc_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := jsonFunc([]Value{tt.input})
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("jsonFunc() expected error for invalid JSON, got result: %v", result)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("jsonFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonFunc() returned NULL")
-			}
-			if tt.validate != nil && !tt.validate(result.AsString()) {
-				t.Errorf("jsonFunc() = %v, validation failed", result.AsString())
+			r, ok := assertFuncResult(t, "jsonFunc", result, err, tt.wantErr, tt.wantNull)
+			if ok && tt.validate != nil && !tt.validate(r.AsString()) {
+				t.Errorf("jsonFunc() = %v, validation failed", r.AsString())
 			}
 		})
 	}
@@ -173,27 +156,10 @@ func TestJSONArrayLengthFunc_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := jsonArrayLengthFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("jsonArrayLengthFunc() expected error, got nil")
+			if r, ok := assertFuncResult(t, "jsonArrayLengthFunc", result, err, tt.wantErr, tt.wantNull); ok {
+				if got := r.AsInt64(); got != tt.want {
+					t.Errorf("jsonArrayLengthFunc() = %d, want %d", got, tt.want)
 				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("jsonArrayLengthFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonArrayLengthFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonArrayLengthFunc() returned NULL")
-			}
-			got := result.AsInt64()
-			if got != tt.want {
-				t.Errorf("jsonArrayLengthFunc() = %d, want %d", got, tt.want)
 			}
 		})
 	}
@@ -253,27 +219,10 @@ func TestJSONExtractFunc_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := jsonExtractFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("jsonExtractFunc() expected error, got nil")
+			if r, ok := assertFuncResult(t, "jsonExtractFunc", result, err, tt.wantErr, tt.wantNull); ok {
+				if got := r.AsString(); got != tt.want {
+					t.Errorf("jsonExtractFunc() = %v, want %v", got, tt.want)
 				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("jsonExtractFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonExtractFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonExtractFunc() returned NULL")
-			}
-			got := result.AsString()
-			if got != tt.want {
-				t.Errorf("jsonExtractFunc() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -328,27 +277,10 @@ func TestJSONInsertFunc_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := jsonInsertFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("jsonInsertFunc() expected error, got nil")
+			if r, ok := assertFuncResult(t, "jsonInsertFunc", result, err, tt.wantErr, tt.wantNull); ok {
+				if got := r.AsString(); got != tt.want {
+					t.Errorf("jsonInsertFunc() = %v, want %v", got, tt.want)
 				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("jsonInsertFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonInsertFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonInsertFunc() returned NULL")
-			}
-			got := result.AsString()
-			if got != tt.want {
-				t.Errorf("jsonInsertFunc() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -534,27 +466,10 @@ func TestJSONRemoveFunc_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := jsonRemoveFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("jsonRemoveFunc() expected error, got nil")
+			if r, ok := assertFuncResult(t, "jsonRemoveFunc", result, err, tt.wantErr, tt.wantNull); ok {
+				if got := r.AsString(); got != tt.want {
+					t.Errorf("jsonRemoveFunc() = %v, want %v", got, tt.want)
 				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("jsonRemoveFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonRemoveFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonRemoveFunc() returned NULL")
-			}
-			got := result.AsString()
-			if got != tt.want {
-				t.Errorf("jsonRemoveFunc() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -609,27 +524,10 @@ func TestJSONReplaceFunc_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := jsonReplaceFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("jsonReplaceFunc() expected error, got nil")
+			if r, ok := assertFuncResult(t, "jsonReplaceFunc", result, err, tt.wantErr, tt.wantNull); ok {
+				if got := r.AsString(); got != tt.want {
+					t.Errorf("jsonReplaceFunc() = %v, want %v", got, tt.want)
 				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("jsonReplaceFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonReplaceFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonReplaceFunc() returned NULL")
-			}
-			got := result.AsString()
-			if got != tt.want {
-				t.Errorf("jsonReplaceFunc() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -684,27 +582,10 @@ func TestJSONSetFunc_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := jsonSetFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("jsonSetFunc() expected error, got nil")
+			if r, ok := assertFuncResult(t, "jsonSetFunc", result, err, tt.wantErr, tt.wantNull); ok {
+				if got := r.AsString(); got != tt.want {
+					t.Errorf("jsonSetFunc() = %v, want %v", got, tt.want)
 				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("jsonSetFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonSetFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonSetFunc() returned NULL")
-			}
-			got := result.AsString()
-			if got != tt.want {
-				t.Errorf("jsonSetFunc() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -789,27 +670,10 @@ func TestJSONTypeFunc_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := jsonTypeFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("jsonTypeFunc() expected error, got nil")
+			if r, ok := assertFuncResult(t, "jsonTypeFunc", result, err, tt.wantErr, tt.wantNull); ok {
+				if got := r.AsString(); got != tt.want {
+					t.Errorf("jsonTypeFunc() = %v, want %v", got, tt.want)
 				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("jsonTypeFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("jsonTypeFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("jsonTypeFunc() returned NULL")
-			}
-			got := result.AsString()
-			if got != tt.want {
-				t.Errorf("jsonTypeFunc() = %v, want %v", got, tt.want)
 			}
 		})
 	}

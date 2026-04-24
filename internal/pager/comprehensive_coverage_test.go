@@ -707,6 +707,29 @@ func TestFreeListProcessTrunkPageFull(t *testing.T) {
 }
 
 // TestFreeListAddPendingToTrunkPartial tests addPendingToTrunk with partial fill
+// ccAllocPages allocates n pages in the pager.
+func ccAllocPages(t *testing.T, p *Pager, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		if _, err := p.AllocatePage(); err != nil {
+			t.Fatalf("failed to allocate: %v", err)
+		}
+	}
+}
+
+// ccSetupTrunkPage gets page 2, marks it dirty, and initializes it as a trunk page.
+func ccSetupTrunkPage(t *testing.T, p *Pager) *DbPage {
+	t.Helper()
+	trunkPage, err := p.Get(2)
+	if err != nil {
+		t.Fatalf("failed to get trunk: %v", err)
+	}
+	p.Write(trunkPage)
+	binary.BigEndian.PutUint32(trunkPage.Data[0:4], 0)
+	binary.BigEndian.PutUint32(trunkPage.Data[4:8], 2) // 2 leaves
+	return trunkPage
+}
+
 func TestFreeListAddPendingToTrunkPartial(t *testing.T) {
 	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_pending_*.db")
@@ -722,41 +745,19 @@ func TestFreeListAddPendingToTrunkPartial(t *testing.T) {
 	}
 	defer pager.Close()
 
-	fl := pager.freeList
-
 	if err := pager.BeginWrite(); err != nil {
 		t.Fatalf("failed to begin write: %v", err)
 	}
+	ccAllocPages(t, pager, 10)
 
-	// Allocate pages
-	for i := 0; i < 10; i++ {
-		_, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("failed to allocate: %v", err)
-		}
-	}
+	trunkPage := ccSetupTrunkPage(t, pager)
+	pager.freeList.pendingFree = []Pgno{50, 51, 52}
 
-	// Setup trunk page
-	trunkPage, err := pager.Get(2)
-	if err != nil {
-		t.Fatalf("failed to get trunk: %v", err)
-	}
-	pager.Write(trunkPage)
-
-	// Initialize as trunk with some space
-	binary.BigEndian.PutUint32(trunkPage.Data[0:4], 0)
-	binary.BigEndian.PutUint32(trunkPage.Data[4:8], 2) // 2 leaves
-
-	// Add pending pages
-	fl.pendingFree = []Pgno{50, 51, 52}
-	maxLeaves := 10
-
-	err = fl.addPendingToTrunk(trunkPage, 2, maxLeaves)
+	err = pager.freeList.addPendingToTrunk(trunkPage, 2, 10)
 	if err != nil {
 		t.Errorf("failed to add pending to trunk: %v", err)
 	}
 
-	// Verify leaf count increased
 	leafCount := binary.BigEndian.Uint32(trunkPage.Data[4:8])
 	if leafCount != 5 {
 		t.Errorf("expected 5 leaves, got %d", leafCount)

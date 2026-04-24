@@ -112,214 +112,123 @@ func TestHandleConnStateFunc(t *testing.T) {
 // opFunction edge cases
 // --------------------------------------------------------------------------
 
-func TestOpFunctionEdgeCases(t *testing.T) {
+func TestOpFunctionEdgeCases_Errors(t *testing.T) {
 	t.Parallel()
 
-	t.Run("invalid P4Type returns error", func(t *testing.T) {
-		t.Parallel()
-		instr := &Instruction{
-			Opcode: OpFunction,
-			P4Type: P4Type(0), // invalid
-		}
-		v := newVDBEWithInstr(instr)
-		err := v.opFunction(0, 1, 5, 0, 0)
-		if err == nil {
-			t.Error("expected error for missing P4 function name, got nil")
-		}
-	})
+	// invalid P4Type
+	instr := &Instruction{Opcode: OpFunction, P4Type: P4Type(0)}
+	v := newVDBEWithInstr(instr)
+	if err := v.opFunction(0, 1, 5, 0, 0); err == nil {
+		t.Error("expected error for missing P4 function name")
+	}
 
-	t.Run("unknown function returns error", func(t *testing.T) {
-		t.Parallel()
-		instr := &Instruction{
-			Opcode: OpFunction,
-			P4:     P4Union{Z: "no_such_func_xyz"},
-			P4Type: P4Static,
-		}
-		v := newVDBEWithInstr(instr)
-		err := v.opFunction(0, 1, 5, 0, 0)
-		if err == nil {
-			t.Error("expected error for unknown function, got nil")
-		}
-	})
+	// unknown function
+	instr = &Instruction{Opcode: OpFunction, P4: P4Union{Z: "no_such_func_xyz"}, P4Type: P4Static}
+	v = newVDBEWithInstr(instr)
+	if err := v.opFunction(0, 1, 5, 0, 0); err == nil {
+		t.Error("expected error for unknown function")
+	}
 
-	t.Run("conn-state function last_insert_rowid via opFunction", func(t *testing.T) {
-		t.Parallel()
-		instr := &Instruction{
-			Opcode: OpFunction,
-			P2:     1,
-			P3:     5,
-			P4:     P4Union{Z: "last_insert_rowid"},
-			P4Type: P4Static,
-			P5:     0,
-		}
-		v := newVDBEWithInstr(instr)
-		v.Ctx = &VDBEContext{ConnState: &mockConnStateFKSorter{lastInsertRowID: 77}}
-		if err := v.opFunction(0, 1, 5, 0, 0); err != nil {
-			t.Fatalf("opFunction(last_insert_rowid) error = %v", err)
-		}
-		if v.Mem[5].IntValue() != 77 {
-			t.Errorf("got %d, want 77", v.Mem[5].IntValue())
-		}
-	})
+	// aggregate as scalar
+	instr = &Instruction{Opcode: OpFunction, P2: 1, P3: 5, P4: P4Union{Z: "sum"}, P4Type: P4Static, P5: 1}
+	v = newVDBEWithInstr(instr)
+	v.Mem[1].SetInt(1)
+	if err := v.opFunction(0, 1, 5, 0, 1); err == nil {
+		t.Error("expected error calling aggregate sum() as scalar")
+	}
+}
 
-	t.Run("conn-state function total_changes via opFunction", func(t *testing.T) {
-		t.Parallel()
-		instr := &Instruction{
-			Opcode: OpFunction,
-			P2:     1,
-			P3:     5,
-			P4:     P4Union{Z: "total_changes"},
-			P4Type: P4Static,
-			P5:     0,
-		}
-		v := newVDBEWithInstr(instr)
-		v.Ctx = &VDBEContext{ConnState: &mockConnStateFKSorter{totalChanges: 123}}
-		if err := v.opFunction(0, 1, 5, 0, 0); err != nil {
-			t.Fatalf("opFunction(total_changes) error = %v", err)
-		}
-		if v.Mem[5].IntValue() != 123 {
-			t.Errorf("got %d, want 123", v.Mem[5].IntValue())
-		}
-	})
+func TestOpFunctionEdgeCases_ConnState(t *testing.T) {
+	t.Parallel()
 
-	t.Run("abs with NULL arg returns NULL", func(t *testing.T) {
-		t.Parallel()
-		instr := &Instruction{
-			Opcode: OpFunction,
-			P2:     1,
-			P3:     5,
-			P4:     P4Union{Z: "abs"},
-			P4Type: P4Static,
-			P5:     1,
-		}
-		v := newVDBEWithInstr(instr)
-		v.Mem[1].SetNull()
-		if err := v.opFunction(0, 1, 5, 0, 1); err != nil {
-			t.Fatalf("opFunction(abs, NULL) error = %v", err)
-		}
-		if !v.Mem[5].IsNull() {
-			t.Errorf("abs(NULL) expected NULL, got flags=%v", v.Mem[5].flags)
-		}
-	})
+	instr := &Instruction{Opcode: OpFunction, P2: 1, P3: 5, P4: P4Union{Z: "last_insert_rowid"}, P4Type: P4Static}
+	v := newVDBEWithInstr(instr)
+	v.Ctx = &VDBEContext{ConnState: &mockConnStateFKSorter{lastInsertRowID: 77}}
+	if err := v.opFunction(0, 1, 5, 0, 0); err != nil {
+		t.Fatalf("opFunction(last_insert_rowid) error = %v", err)
+	}
+	if v.Mem[5].IntValue() != 77 {
+		t.Errorf("got %d, want 77", v.Mem[5].IntValue())
+	}
 
-	t.Run("calling aggregate as scalar returns error", func(t *testing.T) {
-		t.Parallel()
-		instr := &Instruction{
-			Opcode: OpFunction,
-			P2:     1,
-			P3:     5,
-			P4:     P4Union{Z: "sum"},
-			P4Type: P4Static,
-			P5:     1,
-		}
-		v := newVDBEWithInstr(instr)
-		v.Mem[1].SetInt(1)
-		// sum is aggregate-only, calling via opFunction should fail
-		err := v.opFunction(0, 1, 5, 0, 1)
-		if err == nil {
-			t.Error("expected error calling aggregate sum() as scalar, got nil")
-		}
-	})
+	instr = &Instruction{Opcode: OpFunction, P2: 1, P3: 5, P4: P4Union{Z: "total_changes"}, P4Type: P4Static}
+	v = newVDBEWithInstr(instr)
+	v.Ctx = &VDBEContext{ConnState: &mockConnStateFKSorter{totalChanges: 123}}
+	if err := v.opFunction(0, 1, 5, 0, 0); err != nil {
+		t.Fatalf("opFunction(total_changes) error = %v", err)
+	}
+	if v.Mem[5].IntValue() != 123 {
+		t.Errorf("got %d, want 123", v.Mem[5].IntValue())
+	}
+}
+
+func TestOpFunctionEdgeCases_AbsNull(t *testing.T) {
+	t.Parallel()
+	instr := &Instruction{Opcode: OpFunction, P2: 1, P3: 5, P4: P4Union{Z: "abs"}, P4Type: P4Static, P5: 1}
+	v := newVDBEWithInstr(instr)
+	v.Mem[1].SetNull()
+	if err := v.opFunction(0, 1, 5, 0, 1); err != nil {
+		t.Fatalf("opFunction(abs, NULL) error = %v", err)
+	}
+	if !v.Mem[5].IsNull() {
+		t.Errorf("abs(NULL) expected NULL")
+	}
 }
 
 // --------------------------------------------------------------------------
 // opAggStep edge cases
 // --------------------------------------------------------------------------
 
-func TestOpAggStepEdgeCases(t *testing.T) {
+func TestOpAggStepEdgeCases_Errors(t *testing.T) {
 	t.Parallel()
 
-	t.Run("invalid P4Type returns error", func(t *testing.T) {
-		t.Parallel()
-		instr := &Instruction{
-			Opcode: OpAggStep,
-			P4Type: P4Type(0), // invalid
-		}
-		v := newVDBEWithInstr(instr)
-		err := v.opAggStep(0, 0, 0, 0, 0)
-		if err == nil {
-			t.Error("expected error for missing P4 name, got nil")
-		}
-	})
+	instr := &Instruction{Opcode: OpAggStep, P4Type: P4Type(0)}
+	v := newVDBEWithInstr(instr)
+	if err := v.opAggStep(0, 0, 0, 0, 0); err == nil {
+		t.Error("expected error for missing P4 name")
+	}
 
-	t.Run("unknown aggregate function returns error", func(t *testing.T) {
-		t.Parallel()
-		instr := &Instruction{
-			Opcode: OpAggStep,
-			P4:     P4Union{Z: "no_such_agg_xyz"},
-			P4Type: P4Static,
-		}
-		v := newVDBEWithInstr(instr)
-		v.AllocCursors(1)
-		err := v.opAggStep(0, 1, 0, 0, 0)
-		if err == nil {
-			t.Error("expected error for unknown aggregate, got nil")
-		}
-	})
+	instr = &Instruction{Opcode: OpAggStep, P4: P4Union{Z: "no_such_agg_xyz"}, P4Type: P4Static}
+	v = newVDBEWithInstr(instr)
+	v.AllocCursors(1)
+	if err := v.opAggStep(0, 1, 0, 0, 0); err == nil {
+		t.Error("expected error for unknown aggregate")
+	}
+}
 
-	t.Run("sum aggregate with integer args", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		v.AllocMemory(10)
-		v.AllocCursors(1)
+// opAggStepHelper runs an aggregate function over values and returns the finalized result.
+func opAggStepHelper(t *testing.T, funcName string, values []int64) int64 {
+	t.Helper()
+	v := New()
+	v.AllocMemory(10)
+	v.AllocCursors(1)
+	for i, val := range values {
+		v.Mem[i].SetInt(val)
+		instr := &Instruction{Opcode: OpAggStep, P1: 0, P2: i, P3: 0, P4: P4Union{Z: funcName}, P4Type: P4Static, P5: 1}
+		v.Program = append(v.Program, instr)
+		v.PC = len(v.Program)
+		if err := v.opAggStep(0, i, 0, 0, 1); err != nil {
+			t.Fatalf("opAggStep(%s) error = %v", funcName, err)
+		}
+	}
+	if err := v.opAggFinal(0, 5, 0); err != nil {
+		t.Fatalf("opAggFinal(%s) error = %v", funcName, err)
+	}
+	return v.Mem[5].IntValue()
+}
 
-		for i, val := range []int64{10, 20, 30} {
-			v.Mem[i].SetInt(val)
-			instr := &Instruction{
-				Opcode: OpAggStep,
-				P1:     0,
-				P2:     i,
-				P3:     0,
-				P4:     P4Union{Z: "sum"},
-				P4Type: P4Static,
-				P5:     1,
-			}
-			v.Program = append(v.Program, instr)
-			v.PC = len(v.Program)
-			if err := v.opAggStep(0, i, 0, 0, 1); err != nil {
-				t.Fatalf("opAggStep(sum) error = %v", err)
-			}
-		}
+func TestOpAggStepEdgeCases_Sum(t *testing.T) {
+	t.Parallel()
+	if got := opAggStepHelper(t, "sum", []int64{10, 20, 30}); got != 60 {
+		t.Errorf("sum result = %d, want 60", got)
+	}
+}
 
-		if err := v.opAggFinal(0, 5, 0); err != nil {
-			t.Fatalf("opAggFinal(sum) error = %v", err)
-		}
-		if v.Mem[5].IntValue() != 60 {
-			t.Errorf("sum result = %d, want 60", v.Mem[5].IntValue())
-		}
-	})
-
-	t.Run("max aggregate", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		v.AllocMemory(10)
-		v.AllocCursors(1)
-
-		for i, val := range []int64{3, 1, 2} {
-			v.Mem[i].SetInt(val)
-			instr := &Instruction{
-				Opcode: OpAggStep,
-				P1:     0,
-				P2:     i,
-				P3:     0,
-				P4:     P4Union{Z: "max"},
-				P4Type: P4Static,
-				P5:     1,
-			}
-			v.Program = append(v.Program, instr)
-			v.PC = len(v.Program)
-			if err := v.opAggStep(0, i, 0, 0, 1); err != nil {
-				t.Fatalf("opAggStep(max) error = %v", err)
-			}
-		}
-
-		if err := v.opAggFinal(0, 5, 0); err != nil {
-			t.Fatalf("opAggFinal(max) error = %v", err)
-		}
-		if v.Mem[5].IntValue() != 3 {
-			t.Errorf("max result = %d, want 3", v.Mem[5].IntValue())
-		}
-	})
+func TestOpAggStepEdgeCases_Max(t *testing.T) {
+	t.Parallel()
+	if got := opAggStepHelper(t, "max", []int64{3, 1, 2}); got != 3 {
+		t.Errorf("max result = %d, want 3", got)
+	}
 }
 
 // --------------------------------------------------------------------------

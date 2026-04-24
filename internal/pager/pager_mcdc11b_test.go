@@ -308,13 +308,33 @@ func TestMCDC11B_SQL_Transaction_BeginSelectCommit(t *testing.T) {
 	}
 }
 
+// mcdc11bQueryAllInts reads all integer values from a query within a tx.
+func mcdc11bQueryAllInts(t *testing.T, tx *sql.Tx, query string) []int {
+	t.Helper()
+	rows, err := tx.Query(query)
+	if err != nil {
+		tx.Rollback()
+		t.Fatalf("Query: %v", err)
+	}
+	var vals []int
+	for rows.Next() {
+		var v int
+		if err := rows.Scan(&v); err != nil {
+			rows.Close()
+			tx.Rollback()
+			t.Fatalf("Scan: %v", err)
+		}
+		vals = append(vals, v)
+	}
+	rows.Close()
+	return vals
+}
+
 func TestMCDC11B_SQL_Transaction_MultipleReadsAndWrites(t *testing.T) {
 	t.Parallel()
 	db, _ := mcdc11bOpen(t, "tx_rw.db")
 
 	mcdc11bExec(t, db, "CREATE TABLE rw (id INTEGER PRIMARY KEY, n INTEGER)")
-
-	// Interleave reads and writes to exercise transaction state transitions.
 	for i := 1; i <= 5; i++ {
 		mcdc11bExec(t, db, "INSERT INTO rw (n) VALUES (?)", i)
 	}
@@ -329,24 +349,7 @@ func TestMCDC11B_SQL_Transaction_MultipleReadsAndWrites(t *testing.T) {
 		t.Fatalf("Begin: %v", err)
 	}
 
-	rows, err := tx.Query("SELECT n FROM rw ORDER BY n")
-	if err != nil {
-		tx.Rollback()
-		t.Fatalf("SELECT: %v", err)
-	}
-
-	var vals []int
-	for rows.Next() {
-		var v int
-		if err := rows.Scan(&v); err != nil {
-			rows.Close()
-			tx.Rollback()
-			t.Fatalf("Scan: %v", err)
-		}
-		vals = append(vals, v)
-	}
-	rows.Close()
-
+	vals := mcdc11bQueryAllInts(t, tx, "SELECT n FROM rw ORDER BY n")
 	if len(vals) != 5 {
 		t.Errorf("got %d rows, want 5", len(vals))
 	}
@@ -355,13 +358,11 @@ func TestMCDC11B_SQL_Transaction_MultipleReadsAndWrites(t *testing.T) {
 		tx.Rollback()
 		t.Fatalf("UPDATE: %v", err)
 	}
-
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 
 	sum := mcdc11bQueryInt(t, db, "SELECT SUM(n) FROM rw")
-	// Sum should be (101+102+103+104+105) = 515
 	if sum != 515 {
 		t.Errorf("sum after UPDATE = %d, want 515", sum)
 	}

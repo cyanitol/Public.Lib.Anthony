@@ -259,27 +259,10 @@ func TestUnhexFunc_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := unhexFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("unhexFunc() expected error, got nil")
+			if r, ok := assertFuncResult(t, "unhexFunc", result, err, tt.wantErr, tt.wantNull); ok {
+				if got := r.AsBlob(); string(got) != string(tt.want) {
+					t.Errorf("unhexFunc() = %v, want %v", got, tt.want)
 				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unhexFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("unhexFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("unhexFunc() returned NULL")
-			}
-			got := result.AsBlob()
-			if string(got) != string(tt.want) {
-				t.Errorf("unhexFunc() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -364,27 +347,10 @@ func TestTrimFunc_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := tt.fn(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("%s() expected error, got nil", tt.fnName)
+			if r, ok := assertFuncResult(t, tt.fnName, result, err, tt.wantErr, tt.wantNull); ok {
+				if got := r.AsString(); got != tt.want {
+					t.Errorf("%s() = %q, want %q", tt.fnName, got, tt.want)
 				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("%s() error = %v", tt.fnName, err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("%s() = %v, want NULL", tt.fnName, result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("%s() returned NULL", tt.fnName)
-			}
-			got := result.AsString()
-			if got != tt.want {
-				t.Errorf("%s() = %q, want %q", tt.fnName, got, tt.want)
 			}
 		})
 	}
@@ -789,26 +755,10 @@ func TestCoalesceFunc_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := coalesceFunc(tt.args)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("coalesceFunc() expected error, got nil")
+			if r, ok := assertFuncResult(t, "coalesceFunc", result, err, tt.wantErr, tt.wantNull); ok {
+				if !valuesEqual(r, tt.want) {
+					t.Errorf("coalesceFunc() = %v, want %v", r, tt.want)
 				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("coalesceFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("coalesceFunc() = %v, want NULL", result)
-				}
-				return
-			}
-			if result.IsNull() {
-				t.Fatalf("coalesceFunc() returned NULL")
-			}
-			if !valuesEqual(result, tt.want) {
-				t.Errorf("coalesceFunc() = %v, want %v", result, tt.want)
 			}
 		})
 	}
@@ -983,28 +933,15 @@ func TestZeroblobFunc_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := zeroblobFunc([]Value{tt.input})
-			if err != nil {
-				t.Fatalf("zeroblobFunc() error = %v", err)
-			}
-			if tt.wantNull {
-				if !result.IsNull() {
-					t.Errorf("zeroblobFunc() = %v, want NULL", result)
-				}
+			r, ok := assertFuncResult(t, "zeroblobFunc", result, err, false, tt.wantNull)
+			if !ok {
 				return
 			}
-			if result.IsNull() {
-				t.Fatalf("zeroblobFunc() returned NULL")
-			}
-			got := result.AsBlob()
+			got := r.AsBlob()
 			if len(got) != tt.wantLen {
 				t.Errorf("zeroblobFunc() length = %d, want %d", len(got), tt.wantLen)
 			}
-			// Verify all bytes are zero
-			for i, b := range got {
-				if b != 0 {
-					t.Errorf("zeroblobFunc() byte[%d] = %d, want 0", i, b)
-				}
-			}
+			assertAllZeroBytes(t, got)
 		})
 	}
 }

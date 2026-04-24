@@ -230,43 +230,45 @@ func TestWALValidate_CheckpointFramesToDB_ReopenAndCheckpoint(t *testing.T) {
 // TestWALValidate_RecoverWALReadWrite_LargeWAL creates a large WAL file by
 // writing many frames, closes without checkpointing, and reopens read-write to
 // trigger recoverWALReadWrite with a non-trivial frame set.
+// wvcSetupWALWithRows creates a WAL-mode database with rows inserted in a transaction.
+func wvcSetupWALWithRows(t *testing.T, dbPath string, numRows int, data string) {
+	t.Helper()
+	db, err := sql.Open("sqlite_internal", dbPath)
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	defer db.Close()
+
+	wvcMustExec(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, data TEXT)")
+	wvcMustExec(t, db, "PRAGMA journal_mode=WAL")
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	for i := 0; i < numRows; i++ {
+		if _, err := tx.Exec("INSERT INTO t (data) VALUES (?)", strings.Repeat(data, 500)); err != nil {
+			tx.Rollback()
+			t.Fatalf("INSERT %d: %v", i, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+}
+
 func TestWALValidate_RecoverWALReadWrite_LargeWAL(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "rcv_rw_large.db")
 
-	func() {
-		db, err := sql.Open("sqlite_internal", dbPath)
-		if err != nil {
-			t.Fatalf("setup: %v", err)
-		}
-		defer db.Close()
-
-		wvcMustExec(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, data TEXT)")
-		wvcMustExec(t, db, "PRAGMA journal_mode=WAL")
-
-		tx, err := db.Begin()
-		if err != nil {
-			t.Fatalf("Begin: %v", err)
-		}
-		for i := 0; i < 100; i++ {
-			if _, err := tx.Exec("INSERT INTO t (data) VALUES (?)", strings.Repeat("R", 500)); err != nil {
-				tx.Rollback()
-				t.Fatalf("INSERT %d: %v", i, err)
-			}
-		}
-		if err := tx.Commit(); err != nil {
-			t.Fatalf("Commit: %v", err)
-		}
-		// Intentionally skip checkpoint — WAL stays on disk.
-	}()
+	wvcSetupWALWithRows(t, dbPath, 100, "R")
 
 	walPath := dbPath + "-wal"
 	if info, err := os.Stat(walPath); err == nil && info.Size() > 0 {
 		t.Logf("WAL present: %d bytes", info.Size())
 	}
 
-	// Reopen triggers recoverWALReadWrite.
 	db2, err := sql.Open("sqlite_internal", dbPath)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)

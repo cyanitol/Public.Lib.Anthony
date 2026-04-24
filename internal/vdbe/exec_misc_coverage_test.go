@@ -73,11 +73,9 @@ func TestExecClearEphemeral_HappyPath(t *testing.T) {
 }
 
 // TestGetRowidFromIndexCursor_HappyPath exercises the index cursor rowid retrieval.
-func TestGetRowidFromIndexCursor_HappyPath(t *testing.T) {
-	t.Parallel()
-	v, bt := newVDBEWithBtree(t)
-
-	// Build an index page and insert one entry.
+// makeIndexPageAndCursor creates an index page, inserts a key, seeks to it, and returns the cursor.
+func makeIndexPageAndCursor(t *testing.T, bt *btree.Btree, key []byte, rowid int64) (*btree.IndexCursor, uint32) {
+	t.Helper()
 	pageNum, err := bt.AllocatePage()
 	if err != nil {
 		t.Fatalf("AllocatePage: %v", err)
@@ -91,27 +89,29 @@ func TestGetRowidFromIndexCursor_HappyPath(t *testing.T) {
 		headerOffset = btree.FileHeaderSize
 	}
 	pageData[headerOffset+btree.PageHeaderOffsetType] = 0x0a
-	pageData[headerOffset+btree.PageHeaderOffsetFreeblock] = 0
-	pageData[headerOffset+btree.PageHeaderOffsetFreeblock+1] = 0
-	pageData[headerOffset+btree.PageHeaderOffsetNumCells] = 0
-	pageData[headerOffset+btree.PageHeaderOffsetNumCells+1] = 0
-	pageData[headerOffset+btree.PageHeaderOffsetCellStart] = 0
-	pageData[headerOffset+btree.PageHeaderOffsetCellStart+1] = 0
-	pageData[headerOffset+btree.PageHeaderOffsetFragmented] = 0
-
+	for i := 1; i <= 6; i++ {
+		pageData[headerOffset+i] = 0
+	}
 	idxCursor := btree.NewIndexCursor(bt, pageNum)
-	if err := idxCursor.InsertIndex([]byte("hello"), 42); err != nil {
+	if err := idxCursor.InsertIndex(key, rowid); err != nil {
 		t.Fatalf("InsertIndex: %v", err)
 	}
-	found, err := idxCursor.SeekIndex([]byte("hello"))
+	found, err := idxCursor.SeekIndex(key)
 	if err != nil {
 		t.Fatalf("SeekIndex: %v", err)
 	}
 	if !found {
-		t.Fatal("expected to find key 'hello'")
+		t.Fatal("expected to find key")
 	}
+	return idxCursor, pageNum
+}
 
-	// Wire the index cursor into the VDBE.
+func TestGetRowidFromIndexCursor_HappyPath(t *testing.T) {
+	t.Parallel()
+	v, bt := newVDBEWithBtree(t)
+
+	idxCursor, pageNum := makeIndexPageAndCursor(t, bt, []byte("hello"), 42)
+
 	if err := v.AllocCursors(2); err != nil {
 		t.Fatalf("AllocCursors: %v", err)
 	}
@@ -222,59 +222,31 @@ func TestParseRecordColumn_OutOfRange(t *testing.T) {
 }
 
 // TestMemToInterface_AllTypes exercises every branch of MemToInterface.
-func TestMemToInterface_AllTypes(t *testing.T) {
+func TestMemToInterface_NilAndNull(t *testing.T) {
 	t.Parallel()
+	if MemToInterface(nil) != nil {
+		t.Error("expected nil for nil mem")
+	}
+	if MemToInterface(NewMemNull()) != nil {
+		t.Error("expected nil for NULL mem")
+	}
+	if MemToInterface(NewMem()) != nil {
+		t.Error("expected nil for undefined mem")
+	}
+}
 
-	t.Run("nil_mem", func(t *testing.T) {
-		result := MemToInterface(nil)
-		if result != nil {
-			t.Errorf("expected nil, got %v", result)
-		}
-	})
-
-	t.Run("null", func(t *testing.T) {
-		m := NewMemNull()
-		if MemToInterface(m) != nil {
-			t.Error("expected nil for NULL mem")
-		}
-	})
-
-	t.Run("int", func(t *testing.T) {
-		m := NewMemInt(123)
-		v, ok := MemToInterface(m).(int64)
-		if !ok || v != 123 {
-			t.Errorf("expected int64(123), got %v", MemToInterface(m))
-		}
-	})
-
-	t.Run("real", func(t *testing.T) {
-		m := NewMemReal(3.14)
-		v, ok := MemToInterface(m).(float64)
-		if !ok || v != 3.14 {
-			t.Errorf("expected float64(3.14), got %v", MemToInterface(m))
-		}
-	})
-
-	t.Run("string", func(t *testing.T) {
-		m := NewMemStr("hi")
-		v, ok := MemToInterface(m).(string)
-		if !ok || v != "hi" {
-			t.Errorf("expected \"hi\", got %v", MemToInterface(m))
-		}
-	})
-
-	t.Run("blob", func(t *testing.T) {
-		m := NewMemBlob([]byte{1, 2, 3})
-		v, ok := MemToInterface(m).([]byte)
-		if !ok || len(v) != 3 {
-			t.Errorf("expected []byte{1,2,3}, got %v", MemToInterface(m))
-		}
-	})
-
-	t.Run("undefined", func(t *testing.T) {
-		m := NewMem() // MemUndefined flags
-		if MemToInterface(m) != nil {
-			t.Error("expected nil for undefined mem")
-		}
-	})
+func TestMemToInterface_TypedValues(t *testing.T) {
+	t.Parallel()
+	if v, ok := MemToInterface(NewMemInt(123)).(int64); !ok || v != 123 {
+		t.Errorf("expected int64(123), got %v", MemToInterface(NewMemInt(123)))
+	}
+	if v, ok := MemToInterface(NewMemReal(3.14)).(float64); !ok || v != 3.14 {
+		t.Errorf("expected float64(3.14), got %v", MemToInterface(NewMemReal(3.14)))
+	}
+	if v, ok := MemToInterface(NewMemStr("hi")).(string); !ok || v != "hi" {
+		t.Errorf("expected \"hi\", got %v", MemToInterface(NewMemStr("hi")))
+	}
+	if v, ok := MemToInterface(NewMemBlob([]byte{1, 2, 3})).([]byte); !ok || len(v) != 3 {
+		t.Errorf("expected []byte{1,2,3}, got %v", MemToInterface(NewMemBlob([]byte{1, 2, 3})))
+	}
 }

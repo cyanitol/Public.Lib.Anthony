@@ -122,14 +122,8 @@ func TestMCDC_Filter_MatchPath(t *testing.T) {
 func TestMCDC_EOF_Conditions(t *testing.T) {
 	t.Parallel()
 
-	module := NewFTS5Module()
-	table, _, err := module.Create(nil, "fts5", "main", "mcdc_eof", []string{"content"})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if _, err := table.Update(3, []interface{}{nil, nil, "eof test doc"}); err != nil {
-		t.Fatalf("Insert: %v", err)
-	}
+	table := newFTS5TableForTest(t, "mcdc_eof", []string{"content"})
+	insertFTS5Docs(t, table, []string{"eof test doc"})
 
 	tests := []struct {
 		name    string
@@ -137,30 +131,26 @@ func TestMCDC_EOF_Conditions(t *testing.T) {
 		wantEOF bool
 	}{
 		{
-			// A=true (pos=-1 after no results), B=false → EOF
-			name: "MCDC_EOF_A1_B0_pos_negative",
+			name: "pos_negative",
 			setup: func(cursor vtab.VirtualCursor) error {
-				// Query that matches nothing → pos stays -1
 				return cursor.Filter(1, "", []interface{}{"zzznomatch"})
 			},
 			wantEOF: true,
 		},
 		{
-			// A=false, B=false → not EOF (valid cursor at pos 0)
-			name: "MCDC_EOF_A0_B0_valid_position",
+			name: "valid_position",
 			setup: func(cursor vtab.VirtualCursor) error {
 				return cursor.Filter(1, "", []interface{}{"eof"})
 			},
 			wantEOF: false,
 		},
 		{
-			// A=false, B=true → EOF because pos advanced past end
-			name: "MCDC_EOF_A0_B1_pos_past_end",
+			name: "pos_past_end",
 			setup: func(cursor vtab.VirtualCursor) error {
 				if err := cursor.Filter(1, "", []interface{}{"eof"}); err != nil {
 					return err
 				}
-				return cursor.Next() // advance from 0 → 1, which equals len(results)
+				return cursor.Next()
 			},
 			wantEOF: true,
 		},
@@ -170,23 +160,27 @@ func TestMCDC_EOF_Conditions(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			cursor, err := table.Open()
-			if err != nil {
-				t.Fatalf("Open: %v", err)
-			}
-			defer cursor.Close()
-			if err := tt.setup(cursor); err != nil {
-				// A "no valid terms" error from zzznomatch is acceptable: cursor stays at EOF
-				if tt.wantEOF {
-					return
-				}
-				t.Fatalf("setup: %v", err)
-			}
-			got := cursor.EOF()
-			if got != tt.wantEOF {
-				t.Errorf("EOF()=%v, want %v", got, tt.wantEOF)
-			}
+			assertCursorEOF(t, table, tt.setup, tt.wantEOF)
 		})
+	}
+}
+
+// assertCursorEOF opens a cursor, runs setup, and checks EOF.
+func assertCursorEOF(t *testing.T, table vtab.VirtualTable, setup func(vtab.VirtualCursor) error, wantEOF bool) {
+	t.Helper()
+	cursor, err := table.Open()
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer cursor.Close()
+	if err := setup(cursor); err != nil {
+		if wantEOF {
+			return // acceptable: e.g. "no valid terms"
+		}
+		t.Fatalf("setup: %v", err)
+	}
+	if got := cursor.EOF(); got != wantEOF {
+		t.Errorf("EOF()=%v, want %v", got, wantEOF)
 	}
 }
 
@@ -203,11 +197,7 @@ func TestMCDC_EOF_Conditions(t *testing.T) {
 func TestMCDC_Column_IndexRange(t *testing.T) {
 	t.Parallel()
 
-	module := NewFTS5Module()
-	table, _, err := module.Create(nil, "fts5", "main", "mcdc_col", []string{"title", "body"})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	table := newFTS5TableForTest(t, "mcdc_col", []string{"title", "body"})
 	if _, err := table.Update(4, []interface{}{nil, nil, "mytitle", "mybody"}); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
@@ -218,63 +208,41 @@ func TestMCDC_Column_IndexRange(t *testing.T) {
 		wantErr   bool
 		wantValue string
 	}{
-		{
-			// A=false, B=false → valid index 0
-			name:      "MCDC_Column_A0_B0_valid_index_0",
-			colIndex:  0,
-			wantErr:   false,
-			wantValue: "mytitle",
-		},
-		{
-			// A=false, B=false → valid index 1
-			name:      "MCDC_Column_A0_B0_valid_index_1",
-			colIndex:  1,
-			wantErr:   false,
-			wantValue: "mybody",
-		},
-		{
-			// A=false, B=true → index >= len(row) (len=2, index=2)
-			name:     "MCDC_Column_A0_B1_index_too_large",
-			colIndex: 2,
-			wantErr:  true,
-		},
-		{
-			// A=true, B=false → index < 0 (index=-2; -1 is reserved for score)
-			name:     "MCDC_Column_A1_B0_index_negative",
-			colIndex: -2,
-			wantErr:  true,
-		},
+		{"valid_index_0", 0, false, "mytitle"},
+		{"valid_index_1", 1, false, "mybody"},
+		{"index_too_large", 2, true, ""},
+		{"index_negative", -2, true, ""},
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			cursor, err := table.Open()
-			if err != nil {
-				t.Fatalf("Open: %v", err)
-			}
+			cursor := openCursorForScan(t, table)
 			defer cursor.Close()
-			if err := cursor.Filter(0, "", nil); err != nil {
-				t.Fatalf("Filter: %v", err)
-			}
 			if cursor.EOF() {
 				t.Fatal("cursor at EOF before Column call")
 			}
-			val, err := cursor.Column(tt.colIndex)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error for colIndex=%d, got nil (val=%v)", tt.colIndex, val)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-				if s, ok := val.(string); !ok || s != tt.wantValue {
-					t.Errorf("Column(%d)=%v, want %q", tt.colIndex, val, tt.wantValue)
-				}
-			}
+			assertColumnResult(t, cursor, tt.colIndex, tt.wantErr, tt.wantValue)
 		})
+	}
+}
+
+// assertColumnResult checks the column value or error.
+func assertColumnResult(t *testing.T, cursor vtab.VirtualCursor, colIndex int, wantErr bool, wantValue string) {
+	t.Helper()
+	val, err := cursor.Column(colIndex)
+	if wantErr {
+		if err == nil {
+			t.Errorf("expected error for colIndex=%d, got nil (val=%v)", colIndex, val)
+		}
+		return
+	}
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if s, ok := val.(string); !ok || s != wantValue {
+		t.Errorf("Column(%d)=%v, want %q", colIndex, val, wantValue)
 	}
 }
 
@@ -289,80 +257,45 @@ func TestMCDC_Column_IndexRange(t *testing.T) {
 //   isUpdate=true  if oldRowID=valid nonzero int64 (A=false, B=false)
 // ---------------------------------------------------------------------------
 
+// runCheckAndRemoveCase runs a single test case for CheckAndRemoveOldDocument.
+func runCheckAndRemoveCase(t *testing.T, oldRowID interface{}, wantUpdate bool) {
+	t.Helper()
+	table := newFTS5TableForTest(t, "mcdc_upd", []string{"content"})
+	rowid, err := table.Update(3, []interface{}{nil, nil, "original content"})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	effectiveOldRowID := oldRowID
+	if wantUpdate {
+		effectiveOldRowID = rowid
+	}
+	_, err = table.Update(3, []interface{}{effectiveOldRowID, nil, "new content"})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	hasOriginal, _ := openAndFilter(table, 1, "original")
+	if wantUpdate && hasOriginal {
+		t.Error("expected original doc to be removed after update")
+	}
+	if !wantUpdate && !hasOriginal {
+		t.Error("expected original doc to remain")
+	}
+}
+
 func TestMCDC_CheckAndRemoveOldDocument(t *testing.T) {
 	t.Parallel()
-
-	tests := []struct {
-		name       string
-		oldRowID   interface{}
-		wantUpdate bool // whether the old doc should be removed
-	}{
-		{
-			// A=true (cast fails: nil is not int64), B=irrelevant → not update
-			name:       "MCDC_CheckAndRemove_A1_nil_oldRowID",
-			oldRowID:   nil,
-			wantUpdate: false,
-		},
-		{
-			// A=false (ok=true), B=true (rid==0) → not update
-			name:       "MCDC_CheckAndRemove_A0_B1_zero_rowID",
-			oldRowID:   int64(0),
-			wantUpdate: false,
-		},
-		{
-			// A=false (ok=true), B=false (rid!=0) → is update, old doc removed
-			name:       "MCDC_CheckAndRemove_A0_B0_valid_rowID",
-			oldRowID:   int64(1), // will be set dynamically below
-			wantUpdate: true,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			module := NewFTS5Module()
-			table, _, err := module.Create(nil, "fts5", "main", "mcdc_upd", []string{"content"})
-			if err != nil {
-				t.Fatalf("Create: %v", err)
-			}
-
-			// Insert a document so there is something to potentially update.
-			rowid, err := table.Update(3, []interface{}{nil, nil, "original content"})
-			if err != nil {
-				t.Fatalf("Insert: %v", err)
-			}
-
-			// For the valid-rowID case, use the actual rowid.
-			oldRowID := tt.oldRowID
-			if tt.wantUpdate {
-				oldRowID = rowid
-			}
-
-			// Perform the Update call: argc=4 means INSERT/UPDATE with 2 columns of argv.
-			// argv[0]=oldRowID, argv[1]=newRowID(nil→auto), argv[2]=new content value
-			_, err = table.Update(3, []interface{}{oldRowID, nil, "new content"})
-			if err != nil {
-				t.Fatalf("Update: %v", err)
-			}
-
-			// Check whether the original text still matches (means old doc was NOT removed).
-			hasOriginal, _ := openAndFilter(table, 1, "original")
-			if tt.wantUpdate {
-				// Old doc should have been removed, only new content remains.
-				if hasOriginal {
-					t.Error("expected original doc to be removed after update, but it still matches")
-				}
-			} else {
-				// Not an update: old doc was left, new doc added alongside.
-				// "original" should still be findable.
-				if !hasOriginal {
-					t.Error("expected original doc to remain (not an update operation)")
-				}
-			}
-		})
-	}
+	t.Run("nil_oldRowID", func(t *testing.T) {
+		t.Parallel()
+		runCheckAndRemoveCase(t, nil, false)
+	})
+	t.Run("zero_rowID", func(t *testing.T) {
+		t.Parallel()
+		runCheckAndRemoveCase(t, int64(0), false)
+	})
+	t.Run("valid_rowID", func(t *testing.T) {
+		t.Parallel()
+		runCheckAndRemoveCase(t, int64(1), true)
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -1077,69 +1010,25 @@ func TestMCDC_QueryExecutor_NilRanker(t *testing.T) {
 func TestMCDC_AND_Query_Intersection(t *testing.T) {
 	t.Parallel()
 
-	module := NewFTS5Module()
-	table, _, err := module.Create(nil, "fts5", "main", "mcdc_and", []string{"content"})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	docs := []string{
-		"alpha beta",  // both terms → should match AND
-		"alpha only",  // only alpha
-		"beta only",   // only beta
-		"gamma delta", // neither
-	}
-	for _, d := range docs {
-		if _, err := table.Update(3, []interface{}{nil, nil, d}); err != nil {
-			t.Fatalf("Insert %q: %v", d, err)
-		}
-	}
+	table := newFTS5TableForTest(t, "mcdc_and", []string{"content"})
+	insertFTS5Docs(t, table, []string{"alpha beta", "alpha only", "beta only", "gamma delta"})
 
 	tests := []struct {
 		name      string
 		query     string
 		wantCount int
 	}{
-		{
-			// A=true, B=true → both alpha AND beta → 1 doc
-			name:      "MCDC_AND_A1_B1_both_match",
-			query:     "alpha AND beta",
-			wantCount: 1,
-		},
-		{
-			// A=true (alpha matches 2), B=false (only is not beta) → 0 from AND
-			// Actually "alpha AND only" matches "alpha only" → count=1
-			name:      "MCDC_AND_A1_B0_first_only",
-			query:     "alpha AND only",
-			wantCount: 1,
-		},
-		{
-			// A=false, B=true: "gamma AND beta" → gamma not in alpha docs → 0
-			name:      "MCDC_AND_A0_B1_second_only",
-			query:     "gamma AND beta",
-			wantCount: 0,
-		},
+		{"both_match", "alpha AND beta", 1},
+		{"first_only", "alpha AND only", 1},
+		{"second_only", "gamma AND beta", 0},
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			cursor, err := table.Open()
-			if err != nil {
-				t.Fatalf("Open: %v", err)
-			}
-			defer cursor.Close()
-			if err := cursor.Filter(1, "", []interface{}{tt.query}); err != nil {
-				t.Fatalf("Filter: %v", err)
-			}
-			count := 0
-			for !cursor.EOF() {
-				count++
-				cursor.Next()
-			}
-			if count != tt.wantCount {
-				t.Errorf("query %q: got %d results, want %d", tt.query, count, tt.wantCount)
+			if got := countQueryResults(t, table, tt.query); got != tt.wantCount {
+				t.Errorf("query %q: got %d results, want %d", tt.query, got, tt.wantCount)
 			}
 		})
 	}
@@ -1158,68 +1047,25 @@ func TestMCDC_AND_Query_Intersection(t *testing.T) {
 func TestMCDC_OR_Query_Union(t *testing.T) {
 	t.Parallel()
 
-	module := NewFTS5Module()
-	table, _, err := module.Create(nil, "fts5", "main", "mcdc_or", []string{"content"})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	docs := []string{
-		"alpha beta",  // both
-		"alpha only",  // first only
-		"beta only",   // second only
-		"gamma delta", // neither
-	}
-	for _, d := range docs {
-		if _, err := table.Update(3, []interface{}{nil, nil, d}); err != nil {
-			t.Fatalf("Insert %q: %v", d, err)
-		}
-	}
+	table := newFTS5TableForTest(t, "mcdc_or", []string{"content"})
+	insertFTS5Docs(t, table, []string{"alpha beta", "alpha only", "beta only", "gamma delta"})
 
 	tests := []struct {
 		name      string
 		query     string
 		wantCount int
 	}{
-		{
-			// A=true (alpha matches 2), B=true (beta matches 2) → union = 3 docs
-			name:      "MCDC_OR_A1_B1_both_match",
-			query:     "alpha OR beta",
-			wantCount: 3,
-		},
-		{
-			// A=true (alpha matches 2), B=false (zzz matches 0) → 2 docs
-			name:      "MCDC_OR_A1_B0_only_first",
-			query:     "alpha OR zzznomatch",
-			wantCount: 2,
-		},
-		{
-			// A=false (zzz matches 0), B=true (beta matches 2) → 2 docs
-			name:      "MCDC_OR_A0_B1_only_second",
-			query:     "zzznomatch OR beta",
-			wantCount: 2,
-		},
+		{"both_match", "alpha OR beta", 3},
+		{"only_first", "alpha OR zzznomatch", 2},
+		{"only_second", "zzznomatch OR beta", 2},
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			cursor, err := table.Open()
-			if err != nil {
-				t.Fatalf("Open: %v", err)
-			}
-			defer cursor.Close()
-			if err := cursor.Filter(1, "", []interface{}{tt.query}); err != nil {
-				t.Fatalf("Filter: %v", err)
-			}
-			count := 0
-			for !cursor.EOF() {
-				count++
-				cursor.Next()
-			}
-			if count != tt.wantCount {
-				t.Errorf("query %q: got %d results, want %d", tt.query, count, tt.wantCount)
+			if got := countQueryResults(t, table, tt.query); got != tt.wantCount {
+				t.Errorf("query %q: got %d results, want %d", tt.query, got, tt.wantCount)
 			}
 		})
 	}
@@ -1239,22 +1085,8 @@ func TestMCDC_OR_Query_Union(t *testing.T) {
 func TestMCDC_NOT_Query_Exclusion(t *testing.T) {
 	t.Parallel()
 
-	module := NewFTS5Module()
-	table, _, err := module.Create(nil, "fts5", "main", "mcdc_not", []string{"content"})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	docs := []string{
-		"alpha beta",  // both alpha and beta
-		"alpha gamma", // alpha but not beta
-		"beta delta",  // beta but not alpha
-	}
-	for _, d := range docs {
-		if _, err := table.Update(3, []interface{}{nil, nil, d}); err != nil {
-			t.Fatalf("Insert %q: %v", d, err)
-		}
-	}
+	table := newFTS5TableForTest(t, "mcdc_not", []string{"content"})
+	insertFTS5Docs(t, table, []string{"alpha beta", "alpha gamma", "beta delta"})
 
 	tests := []struct {
 		name      string
@@ -1262,8 +1094,7 @@ func TestMCDC_NOT_Query_Exclusion(t *testing.T) {
 		wantCount int
 	}{
 		{
-			// A=true (in alpha set), B=false (not in beta set) → 1 doc: "alpha gamma"
-			name:      "MCDC_NOT_A1_B0_in_first_not_second",
+			name:      "in_first_not_second",
 			query:     "alpha NOT beta",
 			wantCount: 1,
 		},
@@ -1289,21 +1120,8 @@ func TestMCDC_NOT_Query_Exclusion(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			cursor, err := table.Open()
-			if err != nil {
-				t.Fatalf("Open: %v", err)
-			}
-			defer cursor.Close()
-			if err := cursor.Filter(1, "", []interface{}{tt.query}); err != nil {
-				t.Fatalf("Filter: %v", err)
-			}
-			count := 0
-			for !cursor.EOF() {
-				count++
-				cursor.Next()
-			}
-			if count != tt.wantCount {
-				t.Errorf("query %q: got %d results, want %d", tt.query, count, tt.wantCount)
+			if got := countQueryResults(t, table, tt.query); got != tt.wantCount {
+				t.Errorf("query %q: got %d results, want %d", tt.query, got, tt.wantCount)
 			}
 		})
 	}

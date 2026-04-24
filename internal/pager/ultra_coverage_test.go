@@ -331,6 +331,20 @@ func TestAllocatePageCoverage(t *testing.T) {
 }
 
 // TestFreePageCoverage tests FreePage coverage
+// ucAllocatePages allocates n pages and returns their page numbers.
+func ucAllocatePages(t *testing.T, p *Pager, n int) []Pgno {
+	t.Helper()
+	var pgnos []Pgno
+	for i := 0; i < n; i++ {
+		pgno, err := p.AllocatePage()
+		if err != nil {
+			t.Fatalf("AllocatePage() error = %v", err)
+		}
+		pgnos = append(pgnos, pgno)
+	}
+	return pgnos
+}
+
 func TestFreePageCoverage(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_free.db")
@@ -341,43 +355,27 @@ func TestFreePageCoverage(t *testing.T) {
 	}
 	defer pager.Close()
 
-	// Allocate pages
-	pgno1, err := pager.AllocatePage()
-	if err != nil {
-		t.Fatalf("AllocatePage() error = %v", err)
-	}
-	pgno2, err := pager.AllocatePage()
-	if err != nil {
-		t.Fatalf("AllocatePage() error = %v", err)
-	}
-
+	pgnos := ucAllocatePages(t, pager, 2)
 	if err := pager.Commit(); err != nil {
 		t.Fatalf("Commit() error = %v", err)
 	}
 
-	// Free a page
-	if err := pager.FreePage(pgno1); err != nil {
+	if err := pager.FreePage(pgnos[0]); err != nil {
 		t.Errorf("FreePage() error = %v", err)
 	}
-
 	if err := pager.Commit(); err != nil {
 		t.Errorf("Commit() error = %v", err)
 	}
 
-	// Verify free page count increased
-	freeCount := pager.GetFreePageCount()
-	if freeCount == 0 {
+	if pager.GetFreePageCount() == 0 {
 		t.Error("expected non-zero free page count")
 	}
 
-	// Allocate should reuse freed page
 	pgno3, err := pager.AllocatePage()
 	if err != nil {
 		t.Fatalf("AllocatePage() after free error = %v", err)
 	}
-
-	// Should get the freed page back (might be pgno1)
-	t.Logf("Allocated page %d after freeing %d (also allocated %d)", pgno3, pgno1, pgno2)
+	t.Logf("Allocated page %d after freeing %d (also allocated %d)", pgno3, pgnos[0], pgnos[1])
 }
 
 // TestReadHeaderCoverage tests readHeader coverage
@@ -457,6 +455,27 @@ func TestInitializeNewDatabaseCoverage(t *testing.T) {
 }
 
 // TestWriteDirtyPagesCoverage tests writeDirtyPages coverage
+// ucDirtyPages gets and dirties pages 1 through n in the pager.
+func ucDirtyPages(t *testing.T, p *Pager, n Pgno) {
+	t.Helper()
+	for i := Pgno(1); i <= n; i++ {
+		page, err := p.Get(i)
+		if err != nil {
+			t.Fatalf("failed to get page %d: %v", i, err)
+		}
+		if err := p.Write(page); err != nil {
+			t.Fatalf("Write() error = %v", err)
+		}
+		data := []byte{byte(i * 10)}
+		if i == 1 {
+			copy(page.Data[DatabaseHeaderSize:], data)
+		} else {
+			copy(page.Data[:], data)
+		}
+		p.Put(page)
+	}
+}
+
 func TestWriteDirtyPagesCoverage(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_dirty_pages.db")
@@ -467,38 +486,15 @@ func TestWriteDirtyPagesCoverage(t *testing.T) {
 	}
 	defer pager.Close()
 
-	// Create multiple dirty pages
-	for i := Pgno(1); i <= 5; i++ {
-		page, err := pager.Get(i)
-		if err != nil {
-			t.Fatalf("failed to get page %d: %v", i, err)
-		}
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("Write() error = %v", err)
-		}
-		data := []byte{byte(i * 10)}
-		if i == 1 {
-			copy(page.Data[DatabaseHeaderSize:], data)
-		} else {
-			copy(page.Data[:], data)
-		}
-		pager.Put(page)
-	}
+	ucDirtyPages(t, pager, 5)
 
-	// Get dirty pages before commit
-	dirtyPages := pager.cache.GetDirtyPages()
-	if len(dirtyPages) == 0 {
+	if len(pager.cache.GetDirtyPages()) == 0 {
 		t.Error("expected dirty pages")
 	}
-
-	// Commit should write all dirty pages
 	if err := pager.Commit(); err != nil {
 		t.Errorf("Commit() error = %v", err)
 	}
-
-	// After commit, no dirty pages should remain
-	dirtyPages = pager.cache.GetDirtyPages()
-	if len(dirtyPages) > 0 {
+	if len(pager.cache.GetDirtyPages()) > 0 {
 		t.Error("expected no dirty pages after commit")
 	}
 }

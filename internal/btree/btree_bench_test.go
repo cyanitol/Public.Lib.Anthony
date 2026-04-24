@@ -86,6 +86,23 @@ func BenchmarkBtreeRangeScan(b *testing.B) {
 
 // BenchmarkBtreeDelete measures deleting rows from a pre-populated tree.
 // Inserts a fixed 20-row dataset then deletes rows cyclically for b.N iterations.
+func benchDeleteAndReinsert(b *testing.B, cursor *BtCursor, rowid int64, payload []byte) {
+	b.Helper()
+	found, err := cursor.SeekRowid(rowid)
+	if err != nil {
+		b.Fatalf("SeekRowid(%d) error = %v", rowid, err)
+	}
+	if !found {
+		return
+	}
+	if err := cursor.Delete(); err != nil {
+		b.Fatalf("Delete(%d) error = %v", rowid, err)
+	}
+	if err := cursor.Insert(rowid, payload); err != nil {
+		b.Fatalf("re-Insert(%d) error = %v", rowid, err)
+	}
+}
+
 func BenchmarkBtreeDelete(b *testing.B) {
 	const preload = 20
 	bt := NewBtree(4096)
@@ -103,19 +120,6 @@ func BenchmarkBtreeDelete(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		rowid := int64((i % preload) + 1)
-		found, err := cursor.SeekRowid(rowid)
-		if err != nil {
-			b.Fatalf("SeekRowid(%d) error = %v", rowid, err)
-		}
-		if found {
-			if err := cursor.Delete(); err != nil {
-				b.Fatalf("Delete(%d) error = %v", rowid, err)
-			}
-			// Re-insert to keep the dataset stable across iterations.
-			if err := cursor.Insert(rowid, payload); err != nil {
-				b.Fatalf("re-Insert(%d) error = %v", rowid, err)
-			}
-		}
+		benchDeleteAndReinsert(b, cursor, int64((i%preload)+1), payload)
 	}
 }

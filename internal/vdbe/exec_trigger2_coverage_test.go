@@ -9,18 +9,34 @@ import (
 	_ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
-// TestTrigger2AfterDeleteLogsOldRow exercises the AFTER DELETE trigger path
-// that reads OLD column values and inserts them into a log table.
-// This covers buildTriggerRowFromDeleteRegs and extractOldRowFromRegisters
-// for a table with INTEGER PRIMARY KEY, TEXT, and REAL columns.
-func TestTrigger2AfterDeleteLogsOldRow(t *testing.T) {
+// trigger2OpenAndExec opens an in-memory DB and executes a list of statements.
+func trigger2OpenAndExec(t *testing.T, stmts []string) *sql.DB {
+	t.Helper()
 	db, err := sql.Open("sqlite_internal", ":memory:")
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer db.Close()
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("exec %q: %v", s, err)
+		}
+	}
+	return db
+}
 
-	stmts := []string{
+// trigger2QueryCount queries a count and returns it.
+func trigger2QueryCount(t *testing.T, db *sql.DB, q string) int {
+	t.Helper()
+	var cnt int
+	if err := db.QueryRow(q).Scan(&cnt); err != nil {
+		t.Fatalf("query count %q: %v", q, err)
+	}
+	return cnt
+}
+
+// TestTrigger2AfterDeleteLogsOldRow exercises the AFTER DELETE trigger path.
+func TestTrigger2AfterDeleteLogsOldRow(t *testing.T) {
+	db := trigger2OpenAndExec(t, []string{
 		"CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, price REAL)",
 		"CREATE TABLE deleted_log (id INTEGER, name TEXT, price REAL)",
 		`CREATE TRIGGER log_delete AFTER DELETE ON items BEGIN
@@ -28,35 +44,20 @@ func TestTrigger2AfterDeleteLogsOldRow(t *testing.T) {
 		END`,
 		"INSERT INTO items VALUES(1, 'Widget', 9.99)",
 		"DELETE FROM items WHERE id = 1",
-	}
-	for _, s := range stmts {
-		if _, err := db.Exec(s); err != nil {
-			t.Fatalf("exec %q: %v", s, err)
-		}
-	}
+	})
+	defer db.Close()
 
-	var cnt int
-	if err := db.QueryRow("SELECT COUNT(*) FROM deleted_log").Scan(&cnt); err != nil {
-		t.Fatalf("query deleted_log count: %v", err)
-	}
-	if cnt != 1 {
+	if cnt := trigger2QueryCount(t, db, "SELECT COUNT(*) FROM deleted_log"); cnt != 1 {
 		t.Errorf("expected 1 row in deleted_log after DELETE, got %d", cnt)
 	}
-
 	var id int
 	var name string
 	var price float64
 	if err := db.QueryRow("SELECT id, name, price FROM deleted_log WHERE id=1").Scan(&id, &name, &price); err != nil {
 		t.Fatalf("query deleted_log row: %v", err)
 	}
-	if id != 1 {
-		t.Errorf("deleted_log.id: want 1, got %d", id)
-	}
-	if name != "Widget" {
-		t.Errorf("deleted_log.name: want 'Widget', got %q", name)
-	}
-	if price < 9.98 || price > 10.0 {
-		t.Errorf("deleted_log.price: want ~9.99, got %f", price)
+	if id != 1 || name != "Widget" || price < 9.98 || price > 10.0 {
+		t.Errorf("deleted_log row: id=%d name=%q price=%f", id, name, price)
 	}
 }
 
@@ -65,13 +66,7 @@ func TestTrigger2AfterDeleteLogsOldRow(t *testing.T) {
 // with status='complete' should succeed; one with status='pending' should
 // raise ABORT and leave the row in place.
 func TestTrigger2BeforeDeleteWithWhenClause(t *testing.T) {
-	db, err := sql.Open("sqlite_internal", ":memory:")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer db.Close()
-
-	stmts := []string{
+	db := trigger2OpenAndExec(t, []string{
 		"CREATE TABLE orders (id INTEGER PRIMARY KEY, total REAL, status TEXT)",
 		`CREATE TRIGGER validate_delete BEFORE DELETE ON orders
 			WHEN OLD.status != 'complete'
@@ -80,27 +75,16 @@ func TestTrigger2BeforeDeleteWithWhenClause(t *testing.T) {
 			END`,
 		"INSERT INTO orders VALUES(1, 100.0, 'complete')",
 		"INSERT INTO orders VALUES(2, 50.0, 'pending')",
-	}
-	for _, s := range stmts {
-		if _, err := db.Exec(s); err != nil {
-			t.Fatalf("exec %q: %v", s, err)
-		}
-	}
+	})
+	defer db.Close()
 
-	// Deleting a complete order should succeed.
 	if _, err := db.Exec("DELETE FROM orders WHERE id = 1"); err != nil {
 		t.Errorf("expected no error deleting complete order, got: %v", err)
 	}
-
-	var remaining int
-	if err := db.QueryRow("SELECT COUNT(*) FROM orders WHERE id=1").Scan(&remaining); err != nil {
-		t.Fatalf("count orders id=1: %v", err)
-	}
-	if remaining != 0 {
-		t.Errorf("expected complete order removed, got %d rows", remaining)
+	if cnt := trigger2QueryCount(t, db, "SELECT COUNT(*) FROM orders WHERE id=1"); cnt != 0 {
+		t.Errorf("expected complete order removed, got %d rows", cnt)
 	}
 
-	// Deleting a pending order should raise an error.
 	_, deleteErr := db.Exec("DELETE FROM orders WHERE id = 2")
 	if deleteErr == nil {
 		t.Log("RAISE(ABORT) did not produce error (engine may differ)")
@@ -198,13 +182,7 @@ func TestTrigger2BeforeUpdateWithNegativePriceRaises(t *testing.T) {
 // on a wide table with many heterogeneous column types. This stresses the
 // multi-column row extraction code paths.
 func TestTrigger2WideTableDeleteLogsColumns(t *testing.T) {
-	db, err := sql.Open("sqlite_internal", ":memory:")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer db.Close()
-
-	stmts := []string{
+	db := trigger2OpenAndExec(t, []string{
 		"CREATE TABLE wide (a INTEGER PRIMARY KEY, b TEXT, c REAL, d INTEGER, e TEXT, f INTEGER)",
 		"CREATE TABLE wide_log (a INTEGER, b TEXT, c REAL)",
 		`CREATE TRIGGER wide_delete AFTER DELETE ON wide BEGIN
@@ -212,34 +190,21 @@ func TestTrigger2WideTableDeleteLogsColumns(t *testing.T) {
 		END`,
 		"INSERT INTO wide VALUES(1, 'hello', 3.14, 42, 'world', 99)",
 		"DELETE FROM wide WHERE a = 1",
-	}
-	for _, s := range stmts {
-		if _, err := db.Exec(s); err != nil {
-			t.Fatalf("exec %q: %v", s, err)
-		}
-	}
+	})
+	defer db.Close()
 
-	var cnt int
-	if err := db.QueryRow("SELECT COUNT(*) FROM wide_log WHERE a=1").Scan(&cnt); err != nil {
-		t.Fatalf("count wide_log: %v", err)
+	if cnt := trigger2QueryCount(t, db, "SELECT COUNT(*) FROM wide_log WHERE a=1"); cnt != 1 {
+		t.Errorf("expected 1 row in wide_log, got %d", cnt)
 	}
-	if cnt != 1 {
-		t.Errorf("expected 1 row in wide_log after DELETE on wide table, got %d", cnt)
-	}
-
 	var a int
 	var b string
 	var c float64
 	if err := db.QueryRow("SELECT a, b, c FROM wide_log").Scan(&a, &b, &c); err != nil {
 		t.Fatalf("scan wide_log: %v", err)
 	}
-	if a != 1 {
-		t.Errorf("wide_log.a: want 1, got %d", a)
+	if a != 1 || b != "hello" {
+		t.Errorf("wide_log row: a=%d b=%q", a, b)
 	}
-	if b != "hello" {
-		t.Errorf("wide_log.b: want 'hello', got %q", b)
-	}
-	t.Logf("wide_log: a=%d b=%q c=%f", a, b, c)
 }
 
 // TestTrigger2AfterDeleteNonIPKTable exercises an AFTER DELETE trigger on a

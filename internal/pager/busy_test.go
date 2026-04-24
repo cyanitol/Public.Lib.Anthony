@@ -147,70 +147,65 @@ func TestBusyTimeout(t *testing.T) {
 }
 
 // TestBusyCallback tests the callback-based busy handler
-func TestBusyCallback(t *testing.T) {
+func TestBusyCallback_InvokesWithCount(t *testing.T) {
 	t.Parallel()
-	t.Run("invokes callback with count", func(t *testing.T) {
-		callCount := 0
-		maxRetries := 5
+	callCount := 0
+	maxRetries := 5
 
-		handler := BusyCallback(func(count int) bool {
-			if count != callCount {
-				t.Errorf("Expected count %d, got %d", callCount, count)
-			}
-			callCount++
-			return count < maxRetries
-		})
-
-		count := 0
-		for handler.Busy(count) {
-			count++
+	handler := BusyCallback(func(count int) bool {
+		if count != callCount {
+			t.Errorf("Expected count %d, got %d", callCount, count)
 		}
-
-		if count != maxRetries {
-			t.Errorf("Expected %d retries, got %d", maxRetries, count)
-		}
+		callCount++
+		return count < maxRetries
 	})
 
-	t.Run("nil callback returns false", func(t *testing.T) {
-		handler := &CallbackBusyHandler{callback: nil}
+	count := 0
+	for handler.Busy(count) {
+		count++
+	}
+	if count != maxRetries {
+		t.Errorf("Expected %d retries, got %d", maxRetries, count)
+	}
+}
 
-		result := handler.Busy(0)
-		if result {
-			t.Error("Expected false for nil callback")
+func TestBusyCallback_NilReturns(t *testing.T) {
+	t.Parallel()
+	handler := &CallbackBusyHandler{callback: nil}
+	if handler.Busy(0) {
+		t.Error("Expected false for nil callback")
+	}
+}
+
+func TestBusyCallback_CustomRetryLogic(t *testing.T) {
+	t.Parallel()
+	retries := 0
+	maxRetries := 3
+	delay := 10 * time.Millisecond
+
+	handler := BusyCallback(func(count int) bool {
+		if count >= maxRetries {
+			return false
 		}
+		retries++
+		time.Sleep(delay)
+		return true
 	})
 
-	t.Run("custom retry logic", func(t *testing.T) {
-		retries := 0
-		maxRetries := 3
-		delay := 10 * time.Millisecond
+	start := time.Now()
+	count := 0
+	for handler.Busy(count) {
+		count++
+	}
+	elapsed := time.Since(start)
 
-		handler := BusyCallback(func(count int) bool {
-			if count >= maxRetries {
-				return false
-			}
-			retries++
-			time.Sleep(delay)
-			return true
-		})
-
-		start := time.Now()
-		count := 0
-		for handler.Busy(count) {
-			count++
-		}
-		elapsed := time.Since(start)
-
-		if retries != maxRetries {
-			t.Errorf("Expected %d retries, got %d", maxRetries, retries)
-		}
-
-		// Should have slept for delay * maxRetries
-		expectedTime := delay * time.Duration(maxRetries)
-		if elapsed < expectedTime {
-			t.Errorf("Expected at least %v, got %v", expectedTime, elapsed)
-		}
-	})
+	if retries != maxRetries {
+		t.Errorf("Expected %d retries, got %d", maxRetries, retries)
+	}
+	expectedTime := delay * time.Duration(maxRetries)
+	if elapsed < expectedTime {
+		t.Errorf("Expected at least %v, got %v", expectedTime, elapsed)
+	}
 }
 
 // TestNoBusyHandler tests the no-retry busy handler
@@ -283,62 +278,47 @@ func TestPagerBusyHandler(t *testing.T) {
 }
 
 // TestConcurrentLockAcquisition tests busy handler behavior with concurrent access
+// busySimulateContention simulates lock contention with a busy handler, reporting success/fail.
+func busySimulateContention(t *testing.T, id int, successCount, failCount *atomic.Int32) {
+	t.Helper()
+	handler := BusyTimeout(50 * time.Millisecond)
+	count := 0
+	for {
+		if count >= 2 {
+			successCount.Add(1)
+			break
+		}
+		if !handler.Busy(count) {
+			failCount.Add(1)
+			break
+		}
+		count++
+	}
+}
+
 func TestConcurrentLockAcquisition(t *testing.T) {
 	t.Parallel()
-	t.Run("multiple goroutines with busy handler", func(t *testing.T) {
-		// This is a simulation test since we don't have real file locking yet
-		// We test that the busy handler mechanism works correctly
-		successCount := atomic.Int32{}
-		failCount := atomic.Int32{}
+	successCount := atomic.Int32{}
+	failCount := atomic.Int32{}
 
-		var wg sync.WaitGroup
-		numGoroutines := 10
+	var wg sync.WaitGroup
+	numGoroutines := 10
 
-		for i := 0; i < numGoroutines; i++ {
-			wg.Add(1)
-			go func(id int) {
-				defer wg.Done()
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			busySimulateContention(t, id, &successCount, &failCount)
+		}(i)
+	}
 
-				handler := BusyTimeout(50 * time.Millisecond)
-				count := 0
-				retried := false
+	wg.Wait()
 
-				// Simulate trying to acquire a lock
-				for {
-					// Randomly succeed or fail to simulate contention
-					if count > 0 {
-						retried = true
-					}
-
-					// Simulate success after a few retries
-					if count >= 2 {
-						successCount.Add(1)
-						break
-					}
-
-					if !handler.Busy(count) {
-						failCount.Add(1)
-						break
-					}
-					count++
-				}
-
-				if retried && count >= 2 {
-					// Successfully retried
-					t.Logf("Goroutine %d succeeded after %d retries", id, count)
-				}
-			}(i)
-		}
-
-		wg.Wait()
-
-		total := successCount.Load() + failCount.Load()
-		if total != int32(numGoroutines) {
-			t.Errorf("Expected %d total operations, got %d", numGoroutines, total)
-		}
-
-		t.Logf("Success: %d, Failed: %d", successCount.Load(), failCount.Load())
-	})
+	total := successCount.Load() + failCount.Load()
+	if total != int32(numGoroutines) {
+		t.Errorf("Expected %d total operations, got %d", numGoroutines, total)
+	}
+	t.Logf("Success: %d, Failed: %d", successCount.Load(), failCount.Load())
 }
 
 // TestBusyHandlerEdgeCases tests edge cases and boundary conditions

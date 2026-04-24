@@ -299,40 +299,10 @@ func TestIndexCursor_ClimbToNextParentComplete(t *testing.T) {
 // TestMerge_ExtractCellData tests cell extraction during merge (71.4% -> higher)
 func TestMerge_ExtractCellData(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Create pages with cells
-	for i := int64(1); i <= 95; i++ {
-		err := cursor.Insert(i, make([]byte, 18))
-		if err != nil {
-			break
-		}
-	}
-
-	// Delete to trigger merge operations
-	for i := int64(30); i <= 65; i++ {
-		cursor.SeekRowid(i)
-		if cursor.IsValid() {
-			cursor.Delete()
-		}
-	}
-
-	// Attempt merge
-	cursor.SeekRowid(40)
-	if cursor.IsValid() && cursor.Depth > 0 {
-		merged, err := cursor.MergePage()
-		if err != nil {
-			t.Logf("MergePage() error = %v", err)
-		} else {
-			t.Logf("Merge result: %v (extractCellData tested)", merged)
-		}
-	}
+	bt, cursor := setupBtreeWithRows(t, 512, 1, 95, 18)
+	deleteRowRange(cursor, 30, 65)
+	tryMergeAtPosition(cursor, 40) //nolint:errcheck
+	_ = bt
 }
 
 // TestMerge_FindSiblingPages tests sibling finding (62.5% -> higher)
@@ -387,117 +357,28 @@ func findSiblingTryMerge(t *testing.T, cursor *BtCursor, positions []int64) {
 // TestMerge_LoadPageHeaders tests header loading during merge (69.2% -> higher)
 func TestMerge_LoadPageHeaders(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
+	_, cursor := setupBtreeWithRows(t, 512, 1, 100, 20)
+	deleteRowRange(cursor, 35, 65)
 
-	cursor := NewCursor(bt, rootPage)
-
-	// Build tree
-	for i := int64(1); i <= 100; i++ {
-		err := cursor.Insert(i, make([]byte, 20))
-		if err != nil {
-			break
-		}
-	}
-
-	// Delete to make underfull
-	for i := int64(35); i <= 65; i++ {
-		cursor.SeekRowid(i)
-		if cursor.IsValid() {
-			cursor.Delete()
-		}
-	}
-
-	// Multiple merge attempts
 	for _, rowid := range []int64{40, 45, 50, 55} {
-		cursor.SeekRowid(rowid)
-		if cursor.IsValid() && cursor.Depth > 0 {
-			cursor.MergePage()
-		}
+		tryMergeAtPosition(cursor, rowid) //nolint:errcheck
 	}
-
-	t.Log("Merge attempts completed (loadPageHeaders)")
 }
 
 // TestMerge_MoveRightToLeft tests cell movement (63.6% -> higher)
 func TestMerge_MoveRightToLeft(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Create imbalanced pages
-	for i := int64(1); i <= 105; i++ {
-		err := cursor.Insert(i, make([]byte, 17))
-		if err != nil {
-			break
-		}
-	}
-
-	// Delete from left side
-	for i := int64(10); i <= 40; i++ {
-		cursor.SeekRowid(i)
-		if cursor.IsValid() {
-			cursor.Delete()
-		}
-	}
-
-	// Try to redistribute (may move cells right to left)
-	cursor.SeekRowid(25)
-	if cursor.IsValid() && cursor.Depth > 0 {
-		merged, err := cursor.MergePage()
-		if err != nil {
-			t.Logf("MergePage() error = %v", err)
-		} else {
-			t.Logf("Merge/redistribute result: %v (moveRightToLeft)", merged)
-		}
-	}
+	_, cursor := setupBtreeWithRows(t, 512, 1, 105, 17)
+	deleteRowRange(cursor, 10, 40)
+	tryMergeAtPosition(cursor, 25) //nolint:errcheck
 }
 
 // TestMerge_MoveLeftToRight tests cell movement other direction (66.7% -> higher)
 func TestMerge_MoveLeftToRight(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Create imbalanced pages
-	for i := int64(1); i <= 105; i++ {
-		err := cursor.Insert(i, make([]byte, 17))
-		if err != nil {
-			break
-		}
-	}
-
-	// Delete from right side
-	for i := int64(70); i <= 100; i++ {
-		cursor.SeekRowid(i)
-		if cursor.IsValid() {
-			cursor.Delete()
-		}
-	}
-
-	// Try to redistribute (may move cells left to right)
-	cursor.SeekRowid(85)
-	if cursor.IsValid() && cursor.Depth > 0 {
-		merged, err := cursor.MergePage()
-		if err != nil {
-			t.Logf("MergePage() error = %v", err)
-		} else {
-			t.Logf("Merge/redistribute result: %v (moveLeftToRight)", merged)
-		}
-	}
+	_, cursor := setupBtreeWithRows(t, 512, 1, 105, 17)
+	deleteRowRange(cursor, 70, 100)
+	tryMergeAtPosition(cursor, 85) //nolint:errcheck
 }
 
 // TestMerge_GetChildPageAt tests child page retrieval (77.8% -> higher)

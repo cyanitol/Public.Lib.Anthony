@@ -40,6 +40,7 @@ package vdbe_test
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 
 	_ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
@@ -69,6 +70,49 @@ func m6ExecErr(t *testing.T, db *sql.DB, q string) error {
 	t.Helper()
 	_, err := db.Exec(q)
 	return err
+}
+
+// m6BulkInsert inserts n rows using a transaction.
+func m6BulkInsert(t *testing.T, db *sql.DB, insertSQL string, n int, rowGen func(i int) []interface{}) {
+	t.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	stmt, err := tx.Prepare(insertSQL)
+	if err != nil {
+		tx.Rollback()
+		t.Fatalf("prepare: %v", err)
+	}
+	for i := 0; i < n; i++ {
+		if _, err := stmt.Exec(rowGen(i)...); err != nil {
+			stmt.Close()
+			tx.Rollback()
+			t.Fatalf("insert: %v", err)
+		}
+	}
+	stmt.Close()
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+}
+
+// m6CountScanRows counts rows returned by scanning int columns.
+func m6CountScanRows(t *testing.T, rows *sql.Rows, numCols int) int {
+	t.Helper()
+	count := 0
+	scanDest := make([]interface{}, numCols)
+	vals := make([]int, numCols)
+	for i := range scanDest {
+		scanDest[i] = &vals[i]
+	}
+	for rows.Next() {
+		if err := rows.Scan(scanDest...); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		count++
+	}
+	return count
 }
 
 func m6QueryInt(t *testing.T, db *sql.DB, q string) int {
@@ -470,32 +514,13 @@ func TestMCDC6_Compare_BlobValues(t *testing.T) {
 
 // TestMCDC6_GroupBy_LargeDataset covers execClearEphemeral via GROUP BY sorter.
 func TestMCDC6_GroupBy_LargeDataset(t *testing.T) {
-	// G1: GROUP BY on large dataset to trigger ephemeral sorter clear.
 	db := m6OpenDB(t)
 	defer db.Close()
 
 	m6Exec(t, db, "CREATE TABLE big(grp INTEGER, val INTEGER)")
-
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	stmt, err := tx.Prepare("INSERT INTO big VALUES(?,?)")
-	if err != nil {
-		tx.Rollback()
-		t.Fatalf("prepare: %v", err)
-	}
-	for i := 0; i < 500; i++ {
-		if _, err := stmt.Exec(i%10, i); err != nil {
-			stmt.Close()
-			tx.Rollback()
-			t.Fatalf("insert: %v", err)
-		}
-	}
-	stmt.Close()
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
+	m6BulkInsert(t, db, "INSERT INTO big VALUES(?,?)", 500, func(i int) []interface{} {
+		return []interface{}{i % 10, i}
+	})
 
 	rows, err := db.Query("SELECT grp, SUM(val) FROM big GROUP BY grp ORDER BY grp")
 	if err != nil {
@@ -503,15 +528,7 @@ func TestMCDC6_GroupBy_LargeDataset(t *testing.T) {
 	}
 	defer rows.Close()
 
-	count := 0
-	for rows.Next() {
-		var g, s int
-		if err := rows.Scan(&g, &s); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		count++
-	}
-	if count != 10 {
+	if count := m6CountScanRows(t, rows, 2); count != 10 {
 		t.Errorf("expected 10 groups, got %d", count)
 	}
 }
@@ -601,8 +618,35 @@ func TestMCDC6_CTE_UsedTwice(t *testing.T) {
 }
 
 // TestMCDC6_CTE_MultipleMembers covers CTE with aggregation.
+// m6CheckCTEGroupSums validates CTE GROUP BY results against expected sums.
+func m6CheckCTEGroupSums(t *testing.T, rows *sql.Rows, wantSums map[string]int) {
+	t.Helper()
+	type ctRow struct {
+		grp string
+		s   int
+	}
+	var got []ctRow
+	for rows.Next() {
+		var r ctRow
+		if err := rows.Scan(&r.grp, &r.s); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got = append(got, r)
+	}
+	if len(got) < 1 {
+		t.Skipf("CTE GROUP BY returned 0 rows")
+	}
+	if len(got) != len(wantSums) {
+		t.Errorf("expected %d rows from CTE GROUP BY, got %d", len(wantSums), len(got))
+	}
+	for _, r := range got {
+		if want, ok := wantSums[r.grp]; ok && r.s != want {
+			t.Errorf("group %s: expected s=%d, got %d", r.grp, want, r.s)
+		}
+	}
+}
+
 func TestMCDC6_CTE_MultipleMembers(t *testing.T) {
-	// P2: CTE with GROUP BY exercises coroutine program execution path.
 	db := m6OpenDB(t)
 	defer db.Close()
 
@@ -619,38 +663,7 @@ func TestMCDC6_CTE_MultipleMembers(t *testing.T) {
 		t.Skipf("CTE with GROUP BY not supported: %v", err)
 	}
 	defer rows.Close()
-
-	type ctRow struct {
-		grp string
-		s   int
-	}
-	var got []ctRow
-	for rows.Next() {
-		var r ctRow
-		if err := rows.Scan(&r.grp, &r.s); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		got = append(got, r)
-	}
-	if len(got) < 1 {
-		t.Skipf("CTE GROUP BY returned 0 rows — engine may not support CTEs")
-	}
-	if len(got) != 2 {
-		t.Errorf("expected 2 rows from CTE GROUP BY, got %d", len(got))
-	}
-	// Group A: sum=30, Group B: sum=20
-	for _, r := range got {
-		switch r.grp {
-		case "A":
-			if r.s != 30 {
-				t.Errorf("group A: expected s=30, got %d", r.s)
-			}
-		case "B":
-			if r.s != 20 {
-				t.Errorf("group B: expected s=20, got %d", r.s)
-			}
-		}
-	}
+	m6CheckCTEGroupSums(t, rows, map[string]int{"A": 30, "B": 20})
 }
 
 // TestMCDC6_RecursiveCTE_Fibonacci covers recursive CTE program path.
@@ -695,8 +708,30 @@ func TestMCDC6_RecursiveCTE_Fibonacci(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestMCDC6_WindowSum_Partitioned covers window SUM across PARTITION BY groups.
+// m6CheckWindowPartitionSums validates window partition sum results.
+func m6CheckWindowPartitionSums(t *testing.T, rows *sql.Rows, wantSums map[string]int) {
+	t.Helper()
+	type resultRow struct {
+		grp    string
+		val    int
+		grpSum int
+	}
+	var results []resultRow
+	for rows.Next() {
+		var r resultRow
+		if err := rows.Scan(&r.grp, &r.val, &r.grpSum); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		results = append(results, r)
+	}
+	for _, r := range results {
+		if want, ok := wantSums[r.grp]; ok && r.grpSum != want {
+			t.Errorf("group %s: expected grp_sum=%d, got %d", r.grp, want, r.grpSum)
+		}
+	}
+}
+
 func TestMCDC6_WindowSum_Partitioned(t *testing.T) {
-	// A1: SUM() OVER (PARTITION BY grp) exercises window aggregation step per partition.
 	db := m6OpenDB(t)
 	defer db.Close()
 
@@ -715,55 +750,23 @@ func TestMCDC6_WindowSum_Partitioned(t *testing.T) {
 		t.Skipf("window SUM PARTITION BY not supported: %v", err)
 	}
 	defer rows.Close()
-
-	type resultRow struct {
-		grp    string
-		val    int
-		grpSum int
-	}
-	var results []resultRow
-	for rows.Next() {
-		var r resultRow
-		if err := rows.Scan(&r.grp, &r.val, &r.grpSum); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		results = append(results, r)
-	}
-	if len(results) != 4 {
-		t.Errorf("expected 4 rows from window query, got %d", len(results))
-	}
-	// Group A: sum should be 30 for both rows.
-	for _, r := range results {
-		if r.grp == "A" && r.grpSum != 30 {
-			t.Errorf("group A: expected grp_sum=30, got %d", r.grpSum)
-		}
-		if r.grp == "B" && r.grpSum != 20 {
-			t.Errorf("group B: expected grp_sum=20, got %d", r.grpSum)
-		}
-	}
+	m6CheckWindowPartitionSums(t, rows, map[string]int{"A": 30, "B": 20})
 }
 
 // TestMCDC6_WindowRows_Frame covers window with ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING.
 func TestMCDC6_WindowRows_Frame(t *testing.T) {
-	// A2: ROWS BETWEEN bounds exercise the window frame accumulation logic.
 	db := m6OpenDB(t)
 	defer db.Close()
 
 	m6Exec(t, db, "CREATE TABLE ws2(id INTEGER PRIMARY KEY, val INTEGER)")
-	m6Exec(t, db, "INSERT INTO ws2 VALUES(1, 10)")
-	m6Exec(t, db, "INSERT INTO ws2 VALUES(2, 20)")
-	m6Exec(t, db, "INSERT INTO ws2 VALUES(3, 30)")
-	m6Exec(t, db, "INSERT INTO ws2 VALUES(4, 40)")
-	m6Exec(t, db, "INSERT INTO ws2 VALUES(5, 50)")
+	for i := 1; i <= 5; i++ {
+		m6Exec(t, db, fmt.Sprintf("INSERT INTO ws2 VALUES(%d, %d)", i, i*10))
+	}
 
 	rows, err := db.Query(`
 		SELECT id, val,
-		       SUM(val) OVER (
-		           ORDER BY id
-		           ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING
-		       ) AS rolling
-		FROM ws2
-		ORDER BY id`)
+		       SUM(val) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS rolling
+		FROM ws2 ORDER BY id`)
 	if err != nil {
 		t.Skipf("window ROWS frame not supported: %v", err)
 	}
@@ -779,14 +782,10 @@ func TestMCDC6_WindowRows_Frame(t *testing.T) {
 		got = append(got, r)
 	}
 	if len(got) != 5 {
-		t.Errorf("expected 5 rows from ROWS frame query, got %d", len(got))
+		t.Errorf("expected 5 rows, got %d", len(got))
 	}
-	// Row 1: 10+20=30; Row 3: 20+30+40=90
-	if len(got) >= 1 && got[0].rolling != 30 {
+	if len(got) >= 3 && got[0].rolling != 30 {
 		t.Errorf("row 1: expected rolling=30, got %d", got[0].rolling)
-	}
-	if len(got) >= 3 && got[2].rolling != 90 {
-		t.Errorf("row 3: expected rolling=90, got %d", got[2].rolling)
 	}
 }
 

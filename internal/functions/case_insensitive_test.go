@@ -29,25 +29,24 @@ func TestCaseInsensitiveLookup(t *testing.T) {
 				t.Errorf("Lookup(%q) failed - function not found", tt.funcName)
 				return
 			}
-
-			// Test that the function actually works
-			var result Value
-			var err error
-
-			// Normalize the function name to lowercase for comparison
-			normalizedName := tt.funcName
-			if len(normalizedName) >= 5 && (normalizedName[:5] == "upper" || normalizedName[:5] == "UPPER" || normalizedName[:5] == "UpPeR") {
-				result, err = fn.Call([]Value{NewTextValue("hello")})
-				if err != nil {
-					t.Errorf("Call(%q) failed: %v", tt.funcName, err)
-					return
-				}
-				expected := "HELLO"
-				if result.AsString() != expected {
-					t.Errorf("Call(%q, 'hello') = %q, want %q", tt.funcName, result.AsString(), expected)
-				}
-			}
+			verifyCaseInsensitiveUpperLookup(t, fn, tt.funcName)
 		})
+	}
+}
+
+// verifyCaseInsensitiveUpperLookup tests upper function variants found by Lookup.
+func verifyCaseInsensitiveUpperLookup(t *testing.T, fn Function, funcName string) {
+	t.Helper()
+	normalizedName := funcName
+	if len(normalizedName) >= 5 && (normalizedName[:5] == "upper" || normalizedName[:5] == "UPPER" || normalizedName[:5] == "UpPeR") {
+		result, err := fn.Call([]Value{NewTextValue("hello")})
+		if err != nil {
+			t.Errorf("Call(%q) failed: %v", funcName, err)
+			return
+		}
+		if result.AsString() != "HELLO" {
+			t.Errorf("Call(%q, 'hello') = %q, want %q", funcName, result.AsString(), "HELLO")
+		}
 	}
 }
 

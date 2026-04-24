@@ -14,12 +14,9 @@ import (
 // parseQueryParameters — exercised via ParseDSN with query strings
 // ---------------------------------------------------------------------------
 
-// TestDSNCoverage_parseQueryParameters tests the parseQueryParameters function
-// through ParseDSN with a rich set of query parameters.
-func TestDSNCoverage_parseQueryParameters(t *testing.T) {
-	// All parameters combined to walk through parseQueryParameters,
-	// parseParameter, parseNumericParameter, parseBoolParameter2, and
-	// parseSpecialParameter in a single call.
+// dsnCoverageParseAll parses the full DSN used by the parseQueryParameters tests.
+func dsnCoverageParseAll(t *testing.T) *driver.DriverConfig {
+	t.Helper()
 	dsn := "file.db?journal_mode=wal&synchronous=normal&cache_size=200" +
 		"&page_size=4096&wal_autocheckpoint=1000&max_page_count=50000" +
 		"&busy_timeout=5000&query_timeout=2000" +
@@ -31,8 +28,12 @@ func TestDSNCoverage_parseQueryParameters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseDSN error: %v", err)
 	}
+	return parsed.Config
+}
 
-	cfg := parsed.Config
+// TestDSNCoverage_parseQueryParameters_PagerNumerics checks pager numeric params.
+func TestDSNCoverage_parseQueryParameters_PagerNumerics(t *testing.T) {
+	cfg := dsnCoverageParseAll(t)
 	if cfg.Pager.JournalMode != "wal" {
 		t.Errorf("JournalMode want wal, got %s", cfg.Pager.JournalMode)
 	}
@@ -51,12 +52,22 @@ func TestDSNCoverage_parseQueryParameters(t *testing.T) {
 	if cfg.Pager.MaxPageCount != 50000 {
 		t.Errorf("MaxPageCount want 50000, got %d", cfg.Pager.MaxPageCount)
 	}
+}
+
+// TestDSNCoverage_parseQueryParameters_Timeouts checks timeout params.
+func TestDSNCoverage_parseQueryParameters_Timeouts(t *testing.T) {
+	cfg := dsnCoverageParseAll(t)
 	if cfg.Pager.BusyTimeout != 5000*time.Millisecond {
 		t.Errorf("BusyTimeout want 5s, got %v", cfg.Pager.BusyTimeout)
 	}
 	if cfg.QueryTimeout != 2000*time.Millisecond {
 		t.Errorf("QueryTimeout want 2s, got %v", cfg.QueryTimeout)
 	}
+}
+
+// TestDSNCoverage_parseQueryParameters_BoolsAndStrings checks boolean and string params.
+func TestDSNCoverage_parseQueryParameters_BoolsAndStrings(t *testing.T) {
+	cfg := dsnCoverageParseAll(t)
 	if !cfg.EnableForeignKeys {
 		t.Error("EnableForeignKeys want true")
 	}

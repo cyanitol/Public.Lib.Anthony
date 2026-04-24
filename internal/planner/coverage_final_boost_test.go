@@ -278,17 +278,21 @@ func assertTableScanResult(t *testing.T, result, tableName string, expectScan, e
 	t.Helper()
 	if result == "" {
 		t.Error("formatTableScan returned empty string")
+		return
 	}
 	if !strings.Contains(result, tableName) {
 		t.Errorf("Expected result to contain table name '%s', got '%s'", tableName, result)
 	}
+	assertScanOrSearch(t, result, expectScan, expectIndex, where)
+}
+
+func assertScanOrSearch(t *testing.T, result string, expectScan, expectIndex bool, where parser.Expression) {
+	t.Helper()
 	if expectScan && !strings.Contains(result, "SCAN") {
 		t.Errorf("Expected result to contain 'SCAN', got '%s'", result)
 	}
-	if expectIndex && where != nil {
-		if !strings.Contains(result, "SEARCH") && !strings.Contains(result, "SCAN") {
-			t.Errorf("Expected result to contain 'SEARCH' or 'SCAN', got '%s'", result)
-		}
+	if expectIndex && where != nil && !strings.Contains(result, "SEARCH") && !strings.Contains(result, "SCAN") {
+		t.Errorf("Expected result to contain 'SEARCH' or 'SCAN', got '%s'", result)
 	}
 }
 
@@ -676,7 +680,6 @@ func TestEstimateIndexScanEdgeCases(t *testing.T) {
 func TestExplainGenerationWithMultipleRoots(t *testing.T) {
 	plan := NewExplainPlan()
 
-	// Add multiple root nodes
 	root1 := plan.AddNode(nil, "QUERY PLAN 1")
 	root2 := plan.AddNode(nil, "QUERY PLAN 2")
 
@@ -687,35 +690,27 @@ func TestExplainGenerationWithMultipleRoots(t *testing.T) {
 		t.Errorf("Expected 2 roots, got %d", len(plan.Roots))
 	}
 
-	if len(root1.Children) != 1 {
-		t.Errorf("Expected root1 to have 1 child, got %d", len(root1.Children))
+	assertChildCount(t, root1, 1, "root1")
+	assertChildCount(t, root2, 1, "root2")
+
+	if child1.Level != 1 || child2.Level != 1 {
+		t.Errorf("Expected children at level 1, got child1=%d child2=%d", child1.Level, child2.Level)
 	}
 
-	if len(root2.Children) != 1 {
-		t.Errorf("Expected root2 to have 1 child, got %d", len(root2.Children))
-	}
-
-	if child1.Level != 1 {
-		t.Errorf("Expected child1 level 1, got %d", child1.Level)
-	}
-
-	if child2.Level != 1 {
-		t.Errorf("Expected child2 level 1, got %d", child2.Level)
-	}
-
-	// Test table format includes both trees
-	rows := plan.FormatAsTable()
-	if len(rows) < 4 {
+	if rows := plan.FormatAsTable(); len(rows) < 4 {
 		t.Errorf("Expected at least 4 rows, got %d", len(rows))
 	}
 
-	// Test text format includes both trees
 	text := plan.FormatAsText()
-	if !strings.Contains(text, "QUERY PLAN 1") {
-		t.Error("Expected text to contain 'QUERY PLAN 1'")
+	if !strings.Contains(text, "QUERY PLAN 1") || !strings.Contains(text, "QUERY PLAN 2") {
+		t.Errorf("Expected text to contain both QUERY PLAN 1 and 2, got:\n%s", text)
 	}
-	if !strings.Contains(text, "QUERY PLAN 2") {
-		t.Error("Expected text to contain 'QUERY PLAN 2'")
+}
+
+func assertChildCount(t *testing.T, node *ExplainNode, want int, label string) {
+	t.Helper()
+	if len(node.Children) != want {
+		t.Errorf("Expected %s to have %d child(ren), got %d", label, want, len(node.Children))
 	}
 }
 

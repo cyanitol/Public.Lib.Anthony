@@ -86,6 +86,16 @@ func TestMemoryPagerEndRead(t *testing.T) {
 }
 
 // TestMemoryPagerVacuum tests Vacuum
+// mpmAllocatePages allocates n pages in the memory pager.
+func mpmAllocatePages(t *testing.T, mp *MemoryPager, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		if _, err := mp.AllocatePage(); err != nil {
+			t.Fatalf("AllocatePage failed: %v", err)
+		}
+	}
+}
+
 func TestMemoryPagerVacuum(t *testing.T) {
 	t.Parallel()
 	mp, err := OpenMemory(4096)
@@ -94,29 +104,19 @@ func TestMemoryPagerVacuum(t *testing.T) {
 	}
 	defer mp.Close()
 
-	// Allocate and free some pages
-	for i := 0; i < 10; i++ {
-		if _, err := mp.AllocatePage(); err != nil {
-			t.Fatalf("AllocatePage failed: %v", err)
-		}
-	}
-
+	mpmAllocatePages(t, mp, 10)
 	if err := mp.Commit(); err != nil {
 		t.Fatalf("Commit failed: %v", err)
 	}
 
-	// Free half the pages
 	for i := Pgno(5); i <= 10; i++ {
 		if err := mp.FreePage(i); err != nil {
 			t.Fatalf("FreePage failed: %v", err)
 		}
 	}
-
 	if err := mp.Commit(); err != nil {
 		t.Fatalf("Commit failed: %v", err)
 	}
-
-	// Vacuum should succeed (or be no-op for memory pager)
 	if err := mp.Vacuum(nil); err != nil {
 		t.Errorf("Vacuum failed: %v", err)
 	}

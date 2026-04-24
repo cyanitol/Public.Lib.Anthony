@@ -7,50 +7,43 @@ import (
 
 // TestLowCoverageCalculateLocalPayload exercises the uncovered branches of
 // calculateLocalPayload in cell.go.
-func TestBtreeLowCoverageCalculateLocalPayload(t *testing.T) {
+func TestBtreeLowCoverageCalculateLocalPayload_EdgeCases(t *testing.T) {
 	t.Parallel()
-
 	// usableSize < 4 → early return of minLocal (clamped to 0)
 	got := calculateLocalPayload(100, 0, 10, 3)
 	if got != 0 {
 		t.Errorf("usableSize<4: got %d, want 0", got)
 	}
-
 	// payloadSize < minLocal → early return of minLocal
 	got = calculateLocalPayload(5, 10, 50, 512)
 	if got != 10 {
 		t.Errorf("payloadSize<minLocal: got %d, want 10", got)
 	}
+}
 
-	// surplus <= maxLocal → return surplus
-	// usableSize=512: maxLocal=477, minLocal=(500*32/255-23)=39
+func TestBtreeLowCoverageCalculateLocalPayload_Surplus(t *testing.T) {
+	t.Parallel()
 	usableSize := uint32(512)
 	maxLocal := calculateMaxLocal(usableSize, true)
 	minLocal := calculateMinLocal(usableSize, true)
 	payloadSize := minLocal + 1
 	surplus := minLocal + (payloadSize-minLocal)%(usableSize-4)
-	got = calculateLocalPayload(payloadSize, minLocal, maxLocal, usableSize)
+	got := calculateLocalPayload(payloadSize, minLocal, maxLocal, usableSize)
 	if surplus <= maxLocal && got != uint16(surplus) {
 		t.Errorf("surplus<=maxLocal: got %d, want %d", got, surplus)
 	}
 
 	// surplus > maxLocal → return minLocal
-	// Choose payloadSize so surplus exceeds maxLocal
-	// surplus = minLocal + (payload-minLocal) % (usableSize-4)
-	// We want surplus > maxLocal = usableSize-35
-	// Make (payload-minLocal) % (usableSize-4) > maxLocal-minLocal
-	usableSize = uint32(512)
-	maxLocal = calculateMaxLocal(usableSize, true)
-	minLocal = calculateMinLocal(usableSize, true)
-	// maxLocal - minLocal + 1 pushes surplus just over maxLocal
 	excess := maxLocal - minLocal + 1
 	payloadSize = minLocal + excess
 	got = calculateLocalPayload(payloadSize, minLocal, maxLocal, usableSize)
 	if got != uint16(minLocal) {
 		t.Errorf("surplus>maxLocal: got %d, want %d (minLocal)", got, minLocal)
 	}
+}
 
-	// Various usable sizes - confirm result is always <= maxLocal for each
+func TestBtreeLowCoverageCalculateLocalPayload_MultiSize(t *testing.T) {
+	t.Parallel()
 	for _, us := range []uint32{512, 1024, 4096} {
 		ml := calculateMaxLocal(us, true)
 		mn := calculateMinLocal(us, true)
@@ -59,12 +52,11 @@ func TestBtreeLowCoverageCalculateLocalPayload(t *testing.T) {
 			t.Errorf("usableSize=%d: result %d exceeds maxLocal %d", us, result, ml)
 		}
 	}
-
-	// boundary: payloadSize == minLocal (should return minLocal via early branch)
-	usableSize = uint32(1024)
-	maxLocal = calculateMaxLocal(usableSize, true)
-	minLocal = calculateMinLocal(usableSize, true)
-	got = calculateLocalPayload(minLocal, minLocal, maxLocal, usableSize)
+	// boundary: payloadSize == minLocal
+	usableSize := uint32(1024)
+	maxLocal := calculateMaxLocal(usableSize, true)
+	minLocal := calculateMinLocal(usableSize, true)
+	got := calculateLocalPayload(minLocal, minLocal, maxLocal, usableSize)
 	if got != uint16(minLocal) {
 		t.Errorf("payloadSize==minLocal: got %d, want %d", got, minLocal)
 	}
@@ -111,62 +103,48 @@ func TestBtreeLowCoverageEnterPage(t *testing.T) {
 
 // TestBtreeLowCoverageTryLoadCell exercises tryLoadCell branches: normal index,
 // idx >= NumCells, idx < 0, and empty page.
-func TestBtreeLowCoverageTryLoadCell(t *testing.T) {
+func TestBtreeLowCoverageTryLoadCell_ValidIndex(t *testing.T) {
 	t.Parallel()
-
 	bt, cursor := setupBtreeWithRows(t, 4096, 1, 50, 10)
-	_ = bt
-
-	// Seek to a valid position so we have CurrentPage, CurrentHeader, etc.
 	found, err := cursor.SeekRowid(25)
 	if err != nil || !found {
 		t.Skipf("SeekRowid(25) not found: %v", err)
 	}
-
 	pageData, err := bt.GetPage(cursor.CurrentPage)
 	if err != nil {
 		t.Fatalf("GetPage: %v", err)
 	}
 	header := cursor.CurrentHeader
 
-	// Normal valid index
 	cursor.tryLoadCell(pageData, header, 0)
 	if cursor.CurrentCell == nil {
 		t.Error("tryLoadCell(0) set CurrentCell to nil unexpectedly")
 	}
-
-	// idx >= NumCells → clamp to last cell
 	cursor.tryLoadCell(pageData, header, int(header.NumCells)+5)
 	if cursor.CurrentCell == nil {
 		t.Error("tryLoadCell(oversized) set CurrentCell to nil")
 	}
-
-	// idx < 0 → clamp to 0
 	cursor.tryLoadCell(pageData, header, -3)
 	if cursor.CurrentCell == nil {
 		t.Error("tryLoadCell(-3) set CurrentCell to nil")
 	}
+}
 
-	// Empty page header (NumCells == 0) with idx >= 0
-	bt2 := NewBtree(4096)
-	rootPage2, err2 := bt2.CreateTable()
-	if err2 != nil {
-		t.Fatalf("CreateTable: %v", err2)
+func TestBtreeLowCoverageTryLoadCell_EmptyPage(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(4096)
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
 	}
-	emptyData, err2 := bt2.GetPage(rootPage2)
-	if err2 != nil {
-		t.Fatalf("GetPage empty: %v", err2)
-	}
-	emptyHeader, err2 := ParsePageHeader(emptyData, rootPage2)
-	if err2 != nil {
-		t.Fatalf("ParsePageHeader empty: %v", err2)
-	}
+	emptyData, _ := bt.GetPage(rootPage)
+	emptyHeader, _ := ParsePageHeader(emptyData, rootPage)
+	cursor := NewCursor(bt, rootPage)
+
 	cursor.tryLoadCell(emptyData, emptyHeader, 0)
 	if cursor.CurrentCell != nil {
 		t.Error("tryLoadCell on empty page should set CurrentCell to nil")
 	}
-
-	// Empty page with idx < 0
 	cursor.tryLoadCell(emptyData, emptyHeader, -1)
 	if cursor.CurrentCell != nil {
 		t.Error("tryLoadCell(-1) on empty page should set CurrentCell to nil")

@@ -55,6 +55,17 @@ func TestExplainPlanChildren(t *testing.T) {
 	}
 }
 
+// assertExplainRow checks a single FormatAsTable row's ID and parent.
+func assertExplainRow(t *testing.T, row []interface{}, wantID, wantParent int) {
+	t.Helper()
+	if row[0].(int) != wantID {
+		t.Errorf("Expected ID %d, got %d", wantID, row[0])
+	}
+	if row[1].(int) != wantParent {
+		t.Errorf("Expected Parent %d, got %d", wantParent, row[1])
+	}
+}
+
 // TestExplainPlanFormatAsTable tests table formatting.
 func TestExplainPlanFormatAsTable(t *testing.T) {
 	plan := NewExplainPlan()
@@ -68,32 +79,15 @@ func TestExplainPlanFormatAsTable(t *testing.T) {
 		t.Errorf("Expected 2 rows, got %d", len(rows))
 	}
 
-	// Check first row (root)
-	row0 := rows[0]
-	if row0[0].(int) != 0 {
-		t.Errorf("Expected row 0 ID to be 0, got %d", row0[0])
-	}
-	if row0[1].(int) != -1 {
-		t.Errorf("Expected row 0 Parent to be -1, got %d", row0[1])
-	}
-	if !strings.Contains(row0[3].(string), "QUERY PLAN") {
-		t.Errorf("Expected row 0 Detail to contain 'QUERY PLAN', got '%s'", row0[3])
+	assertExplainRow(t, rows[0], 0, -1)
+	if !strings.Contains(rows[0][3].(string), "QUERY PLAN") {
+		t.Errorf("Expected row 0 Detail to contain 'QUERY PLAN', got '%s'", rows[0][3])
 	}
 
-	// Check second row (child with indentation)
-	row1 := rows[1]
-	if row1[0].(int) != 1 {
-		t.Errorf("Expected row 1 ID to be 1, got %d", row1[0])
-	}
-	if row1[1].(int) != 0 {
-		t.Errorf("Expected row 1 Parent to be 0, got %d", row1[1])
-	}
-	detail := row1[3].(string)
-	if !strings.HasPrefix(detail, "  ") {
-		t.Errorf("Expected row 1 Detail to be indented, got '%s'", detail)
-	}
-	if !strings.Contains(detail, "SCAN table1") {
-		t.Errorf("Expected row 1 Detail to contain 'SCAN table1', got '%s'", detail)
+	assertExplainRow(t, rows[1], 1, 0)
+	detail := rows[1][3].(string)
+	if !strings.HasPrefix(detail, "  ") || !strings.Contains(detail, "SCAN table1") {
+		t.Errorf("Expected row 1 Detail to be indented with 'SCAN table1', got '%s'", detail)
 	}
 }
 

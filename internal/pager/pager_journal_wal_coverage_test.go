@@ -333,6 +333,24 @@ func TestPagerJournalWAL_JournalZeroHeader(t *testing.T) {
 // TestPagerJournalWAL_FlushAndEvictDirtyPages exercises
 // MemoryPager.flushAndEvictDirtyPages by filling a tiny cache with dirty
 // pages so that getLocked triggers the flush path.
+// pjwAllocAndDirty allocates a page, gets it, marks it dirty, and puts it back.
+func pjwAllocAndDirty(t *testing.T, mp *MemoryPager) Pgno {
+	t.Helper()
+	pgno, err := mp.AllocatePage()
+	if err != nil {
+		t.Fatalf("AllocatePage: %v", err)
+	}
+	pg, err := mp.Get(pgno)
+	if err != nil {
+		t.Fatalf("Get(%d): %v", pgno, err)
+	}
+	if err := mp.Write(pg); err != nil {
+		t.Fatalf("Write(%d): %v", pgno, err)
+	}
+	mp.Put(pg)
+	return pgno
+}
+
 func TestPagerJournalWAL_FlushAndEvictDirtyPages(t *testing.T) {
 	t.Parallel()
 
@@ -342,13 +360,11 @@ func TestPagerJournalWAL_FlushAndEvictDirtyPages(t *testing.T) {
 	}
 	defer mp.Close()
 
-	// Replace the default large cache with a cache that holds only 2 pages.
 	smallCache := NewPageCache(4096, 2)
 	mp.mu.Lock()
 	mp.cache = smallCache
 	mp.mu.Unlock()
 
-	// Begin a write transaction and dirty 2 pages to fill the tiny cache.
 	if err := mp.BeginWrite(); err != nil {
 		t.Fatalf("BeginWrite: %v", err)
 	}
@@ -362,22 +378,9 @@ func TestPagerJournalWAL_FlushAndEvictDirtyPages(t *testing.T) {
 	}
 	mp.Put(pg1)
 
-	// Allocate page 2 and dirty it to occupy the second cache slot.
-	pgno2, err := mp.AllocatePage()
-	if err != nil {
-		t.Fatalf("AllocatePage: %v", err)
-	}
-	pg2, err := mp.Get(pgno2)
-	if err != nil {
-		t.Fatalf("Get(%d): %v", pgno2, err)
-	}
-	if err := mp.Write(pg2); err != nil {
-		t.Fatalf("Write(%d): %v", pgno2, err)
-	}
-	mp.Put(pg2)
+	pjwAllocAndDirty(t, mp)
 
-	// Allocating and reading a third page forces a cache-full condition.
-	// getLocked will call flushAndEvictDirtyPages to make room.
+	// Third page forces cache-full -> flushAndEvictDirtyPages.
 	pgno3, err := mp.AllocatePage()
 	if err != nil {
 		t.Fatalf("AllocatePage: %v", err)

@@ -677,51 +677,34 @@ func TestPrevViaParent_FullBackwardMultiLevel(t *testing.T) {
 // TestCursorMerge3Coverage_MergeAfterManyDeletes triggers loadMergePages via
 // the normal MergePage path by inserting many rows and then deleting most of
 // them so pages become underfull.
-func TestCursorMerge3Coverage_MergeAfterManyDeletes(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
-	}
-
-	// Insert 200 rows.
-	cur := NewCursor(bt, rootPage)
-	for i := int64(1); i <= 200; i++ {
-		if insertErr := cur.Insert(i, []byte("payload-data-30")); insertErr != nil {
-			t.Fatalf("Insert(%d): %v", i, insertErr)
-		}
-	}
-	root := cur.RootPage
-
-	// Verify we have data before deletions.
-	before := countForward(NewCursor(bt, root))
-	if before == 0 {
-		t.Skip("no rows inserted")
-	}
-
-	// Delete the first 150 rows using a fresh cursor each time to track the
-	// current root page (which may change due to merges).
-	for i := int64(1); i <= 150; i++ {
-		delCur := NewCursor(bt, root)
-		found, findErr := delCur.SeekRowid(i)
-		if findErr == nil && found {
-			delCur.Delete()
-		}
-	}
-
-	// Attempt merge on the remaining rows to exercise loadMergePages.
+// tryMergeRange seeks to rows in [start, end] and calls MergePage at depth > 0.
+func tryMergeRange(bt *Btree, root uint32, start, end int64) int {
 	mergeCount := 0
-	for i := int64(151); i <= 200; i++ {
-		mergeCur := NewCursor(bt, root)
-		found, findErr := mergeCur.SeekRowid(i)
-		if findErr == nil && found && mergeCur.Depth > 0 {
-			merged, mergeErr := mergeCur.MergePage()
+	for i := start; i <= end; i++ {
+		cur := NewCursor(bt, root)
+		found, err := cur.SeekRowid(i)
+		if err == nil && found && cur.Depth > 0 {
+			merged, mergeErr := cur.MergePage()
 			if mergeErr == nil && merged {
 				mergeCount++
 			}
 		}
 	}
+	return mergeCount
+}
+
+func TestCursorMerge3Coverage_MergeAfterManyDeletes(t *testing.T) {
+	t.Parallel()
+	bt, cur := setupBtreeWithRows(t, 4096, 1, 200, 15)
+	root := cur.RootPage
+
+	before := countForward(NewCursor(bt, root))
+	if before == 0 {
+		t.Skip("no rows inserted")
+	}
+
+	deleteRowRange(NewCursor(bt, root), 1, 150)
+	mergeCount := tryMergeRange(bt, root, 151, 200)
 	t.Logf("loadMergePages triggered via %d merges (rows remaining: %d)",
 		mergeCount, countForward(NewCursor(bt, root)))
 }

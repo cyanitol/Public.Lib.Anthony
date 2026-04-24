@@ -2,12 +2,33 @@
 package planner
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/parser"
 )
 
 // Tests for planner.go functions with 0% coverage
+
+// assertEquivTerm checks the cursor, column, and standard fields of an equiv term.
+func assertEquivTerm(t *testing.T, term *WhereTerm, wantCursor, wantColumn int) {
+	t.Helper()
+	if term == nil {
+		t.Fatal("createEquivTerm returned nil")
+	}
+	if term.LeftCursor != wantCursor {
+		t.Errorf("Expected LeftCursor=%d, got %d", wantCursor, term.LeftCursor)
+	}
+	if term.LeftColumn != wantColumn {
+		t.Errorf("Expected LeftColumn=%d, got %d", wantColumn, term.LeftColumn)
+	}
+	if term.Operator != WO_EQ {
+		t.Errorf("Expected operator WO_EQ, got %d", term.Operator)
+	}
+	if term.Flags != TERM_VIRTUAL {
+		t.Errorf("Expected TERM_VIRTUAL flag, got %d", term.Flags)
+	}
+}
 
 func TestCreateEquivTerm(t *testing.T) {
 	p := NewPlanner()
@@ -25,33 +46,8 @@ func TestCreateEquivTerm(t *testing.T) {
 		Parent:      -1,
 	}
 
-	// Test creating equivalent term with cursor.column format
-	equivKey := "1.2"
-	newTerm := p.createEquivTerm(originalTerm, equivKey)
-
-	if newTerm == nil {
-		t.Fatal("createEquivTerm returned nil")
-	}
-
-	if newTerm.LeftCursor != 1 {
-		t.Errorf("Expected LeftCursor=1, got %d", newTerm.LeftCursor)
-	}
-
-	if newTerm.LeftColumn != 2 {
-		t.Errorf("Expected LeftColumn=2, got %d", newTerm.LeftColumn)
-	}
-
-	if newTerm.Operator != WO_EQ {
-		t.Errorf("Expected operator WO_EQ, got %d", newTerm.Operator)
-	}
-
-	if newTerm.Flags != TERM_VIRTUAL {
-		t.Errorf("Expected TERM_VIRTUAL flag, got %d", newTerm.Flags)
-	}
-
-	if newTerm.Parent != -1 {
-		t.Errorf("Expected Parent=-1, got %d", newTerm.Parent)
-	}
+	newTerm := p.createEquivTerm(originalTerm, "1.2")
+	assertEquivTerm(t, newTerm, 1, 2)
 
 	// Test with different cursor and column
 	equivKey2 := "5.10"
@@ -334,23 +330,15 @@ func TestCreateMaterializedSubqueryTable(t *testing.T) {
 func TestAndExprString(t *testing.T) {
 	// Test with no terms
 	and1 := &AndExpr{Terms: []Expr{}}
-	str1 := and1.String()
-	if str1 != "()" {
+	if str1 := and1.String(); str1 != "()" {
 		t.Errorf("Expected '()', got '%s'", str1)
 	}
 
 	// Test with one term
-	and2 := &AndExpr{
-		Terms: []Expr{
-			&ColumnExpr{Table: "users", Column: "id"},
-		},
-	}
+	and2 := &AndExpr{Terms: []Expr{&ColumnExpr{Table: "users", Column: "id"}}}
 	str2 := and2.String()
-	if str2 == "" {
-		t.Error("AndExpr.String() should not be empty")
-	}
-	if str2[0] != '(' || str2[len(str2)-1] != ')' {
-		t.Error("AndExpr.String() should be wrapped in parentheses")
+	if str2 == "" || str2[0] != '(' || str2[len(str2)-1] != ')' {
+		t.Errorf("AndExpr.String() should be non-empty and wrapped in parens, got '%s'", str2)
 	}
 
 	// Test with multiple terms
@@ -361,44 +349,23 @@ func TestAndExprString(t *testing.T) {
 			&ValueExpr{Value: "test"},
 		},
 	}
-	str3 := and3.String()
-	if str3 == "" {
-		t.Error("AndExpr.String() with multiple terms should not be empty")
-	}
-
-	// Should contain " AND "
-	hasAnd := false
-	for i := 0; i < len(str3)-4; i++ {
-		if str3[i:i+5] == " AND " {
-			hasAnd = true
-			break
-		}
-	}
-	if !hasAnd {
-		t.Error("AndExpr.String() should contain ' AND '")
+	if str3 := and3.String(); !strings.Contains(str3, " AND ") {
+		t.Errorf("AndExpr.String() should contain ' AND ', got '%s'", str3)
 	}
 }
 
 func TestOrExprString(t *testing.T) {
 	// Test with no terms
 	or1 := &OrExpr{Terms: []Expr{}}
-	str1 := or1.String()
-	if str1 != "()" {
+	if str1 := or1.String(); str1 != "()" {
 		t.Errorf("Expected '()', got '%s'", str1)
 	}
 
 	// Test with one term
-	or2 := &OrExpr{
-		Terms: []Expr{
-			&ColumnExpr{Table: "users", Column: "status"},
-		},
-	}
+	or2 := &OrExpr{Terms: []Expr{&ColumnExpr{Table: "users", Column: "status"}}}
 	str2 := or2.String()
-	if str2 == "" {
-		t.Error("OrExpr.String() should not be empty")
-	}
-	if str2[0] != '(' || str2[len(str2)-1] != ')' {
-		t.Error("OrExpr.String() should be wrapped in parentheses")
+	if str2 == "" || str2[0] != '(' || str2[len(str2)-1] != ')' {
+		t.Errorf("OrExpr.String() should be non-empty and wrapped in parens, got '%s'", str2)
 	}
 
 	// Test with multiple terms
@@ -409,21 +376,8 @@ func TestOrExprString(t *testing.T) {
 			&ValueExpr{Value: "pending"},
 		},
 	}
-	str3 := or3.String()
-	if str3 == "" {
-		t.Error("OrExpr.String() with multiple terms should not be empty")
-	}
-
-	// Should contain " OR "
-	hasOr := false
-	for i := 0; i < len(str3)-3; i++ {
-		if str3[i:i+4] == " OR " {
-			hasOr = true
-			break
-		}
-	}
-	if !hasOr {
-		t.Error("OrExpr.String() should contain ' OR '")
+	if str3 := or3.String(); !strings.Contains(str3, " OR ") {
+		t.Errorf("OrExpr.String() should contain ' OR ', got '%s'", str3)
 	}
 }
 

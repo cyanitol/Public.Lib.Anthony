@@ -143,44 +143,9 @@ func TestDropInteriorChildren(t *testing.T) {
 // TestBalanceOverfullCondition tests handleOverfullPage in balance
 func TestBalanceOverfullCondition(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
+	_, cursor := setupBtreeWithRows(t, 4096, 1, 20, 2000)
 
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable failed: %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Insert large entries to create overfull condition
-	largePayload := make([]byte, 2000)
-	for i := range largePayload {
-		largePayload[i] = byte(i % 256)
-	}
-
-	for i := 1; i <= 20; i++ {
-		err := cursor.Insert(int64(i), largePayload)
-		if err != nil {
-			t.Fatalf("Insert(%d) failed: %v", i, err)
-		}
-	}
-
-	// Verify tree structure is maintained
-	cursor2 := NewCursor(bt, rootPage)
-	err = cursor2.MoveToFirst()
-	if err != nil {
-		t.Fatalf("MoveToFirst failed: %v", err)
-	}
-
-	count := 0
-	for cursor2.IsValid() {
-		count++
-		err = cursor2.Next()
-		if err != nil {
-			break
-		}
-	}
-
+	count := countForward(NewCursor(cursor.Btree, cursor.RootPage))
 	if count < 1 {
 		t.Errorf("Found %d entries, want at least 1", count)
 	}
@@ -209,40 +174,13 @@ func TestBalanceUnderfullCondition(t *testing.T) {
 // TestMergeOperations tests merge-related operations
 func TestMergeOperations(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
+	bt, cursor := setupBtreeWithRows(t, 4096, 1, 200, 100)
+	deleteRowRange(NewCursor(bt, cursor.RootPage), 100, 150)
 
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable failed: %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Create interior page structure
-	for i := 1; i <= 200; i++ {
-		payload := make([]byte, 100)
-		err := cursor.Insert(int64(i), payload)
-		if err != nil {
-			t.Fatalf("Insert(%d) failed: %v", i, err)
-		}
-	}
-
-	// Delete to trigger merge operations
-	cursor2 := NewCursor(bt, rootPage)
-	for i := 100; i <= 150; i++ {
-		found, err := cursor2.SeekRowid(int64(i))
-		if err == nil && found {
-			cursor2.Delete()
-		}
-	}
-
-	// Verify structure
-	cursor3 := NewCursor(bt, rootPage)
-	err = cursor3.MoveToFirst()
-	if err != nil {
+	cursor3 := NewCursor(bt, cursor.RootPage)
+	if err := cursor3.MoveToFirst(); err != nil {
 		t.Fatalf("MoveToFirst after merge failed: %v", err)
 	}
-
 	if !cursor3.IsValid() {
 		t.Error("Cursor should be valid after merge operations")
 	}

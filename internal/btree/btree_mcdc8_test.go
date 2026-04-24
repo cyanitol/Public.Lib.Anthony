@@ -224,20 +224,8 @@ func TestMCDC8_MarkPagesAsDirty_SecondPageError(t *testing.T) {
 
 func TestMCDC8_Delete_AtFirstCell(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
-	root, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
-	}
-	c := NewCursor(bt, root)
-	payload := make([]byte, 20)
-	for i := int64(1); i <= 5; i++ {
-		if err := c.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-	}
+	_, c := setupBtreeWithRows(t, 4096, 1, 5, 20)
 
-	// Seek to first cell (index 0) then delete it.
 	found, err := c.SeekRowid(1)
 	if err != nil || !found {
 		t.Fatalf("SeekRowid(1): found=%v err=%v", found, err)
@@ -248,7 +236,6 @@ func TestMCDC8_Delete_AtFirstCell(t *testing.T) {
 	if err := c.Delete(); err != nil {
 		t.Fatalf("Delete(): %v", err)
 	}
-	// After deleting index 0, CurrentIndex == -1, CurrentCell == nil.
 	if c.CurrentCell != nil {
 		t.Error("expected CurrentCell == nil after deleting index-0 cell")
 	}
@@ -260,48 +247,12 @@ func TestMCDC8_Delete_AtFirstCell(t *testing.T) {
 
 func TestMCDC8_Delete_MiddleAndLast(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
-	root, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
-	}
-	c := NewCursor(bt, root)
-	payload := make([]byte, 20)
-	for i := int64(1); i <= 10; i++ {
-		if err := c.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-	}
+	_, c := setupBtreeWithRows(t, 4096, 1, 10, 20)
 
-	// Delete middle row (key=5).
-	found, err := c.SeekRowid(5)
-	if err != nil || !found {
-		t.Fatalf("SeekRowid(5): found=%v err=%v", found, err)
-	}
-	if err := c.Delete(); err != nil {
-		t.Fatalf("Delete(5): %v", err)
-	}
+	seekAndDelete(c, 5)  //nolint:errcheck
+	seekAndDelete(c, 10) //nolint:errcheck
 
-	// Delete last row (key=10).
-	found, err = c.SeekRowid(10)
-	if err != nil || !found {
-		t.Fatalf("SeekRowid(10): found=%v err=%v", found, err)
-	}
-	if err := c.Delete(); err != nil {
-		t.Fatalf("Delete(10): %v", err)
-	}
-
-	// Verify only 8 rows remain.
-	count := 0
-	if err := c.MoveToFirst(); err != nil {
-		t.Fatalf("MoveToFirst: %v", err)
-	}
-	for c.State == CursorValid {
-		count++
-		if err := c.Next(); err != nil {
-			break
-		}
-	}
+	count := countForward(c)
 	if count != 8 {
 		t.Errorf("expected 8 rows after 2 deletes, got %d", count)
 	}
@@ -313,50 +264,15 @@ func TestMCDC8_Delete_MiddleAndLast(t *testing.T) {
 
 func TestMCDC8_Delete_MultiLevelTree(t *testing.T) {
 	t.Parallel()
-	// Small pages to force multi-level tree.
-	bt := NewBtree(512)
-	root, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
-	}
-	c := NewCursor(bt, root)
-	payload := make([]byte, 30)
-	for i := int64(1); i <= 60; i++ {
-		binary.BigEndian.PutUint64(payload, uint64(i))
-		if err := c.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-	}
-
+	bt, c := setupBtreeWithRows(t, 512, 1, 60, 30)
 	finalRoot := c.RootPage
+
 	c2 := NewCursor(bt, finalRoot)
-
-	// Delete several rows spread across the tree.
 	for _, key := range []int64{1, 15, 30, 45, 60} {
-		found, err := c2.SeekRowid(key)
-		if err != nil {
-			t.Fatalf("SeekRowid(%d): %v", key, err)
-		}
-		if !found {
-			continue
-		}
-		if err := c2.Delete(); err != nil {
-			t.Fatalf("Delete(%d): %v", key, err)
-		}
+		seekAndDelete(c2, key) //nolint:errcheck
 	}
 
-	// Scan all remaining rows.
-	c3 := NewCursor(bt, finalRoot)
-	count := 0
-	if err := c3.MoveToFirst(); err != nil {
-		t.Fatalf("MoveToFirst: %v", err)
-	}
-	for c3.State == CursorValid {
-		count++
-		if err := c3.Next(); err != nil {
-			break
-		}
-	}
+	count := countForward(NewCursor(bt, finalRoot))
 	if count != 55 {
 		t.Errorf("expected 55 rows, got %d", count)
 	}
@@ -458,48 +374,24 @@ func TestMCDC8_AdvanceWithinPage_MultiCell(t *testing.T) {
 
 func TestMCDC8_ClearTableData_InteriorRoot(t *testing.T) {
 	t.Parallel()
-	// Build a multi-level tree then clear it.
-	bt := NewBtree(512)
-	root, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
-	}
-	c := NewCursor(bt, root)
-	payload := make([]byte, 30)
-	for i := int64(1); i <= 80; i++ {
-		binary.BigEndian.PutUint64(payload, uint64(i))
-		if err := c.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-	}
+	bt, c := setupBtreeWithRows(t, 512, 1, 80, 30)
 	finalRoot := c.RootPage
+	requireInteriorRoot(t, bt, finalRoot)
 
-	// Verify root is interior before clearing.
-	pageData, err := bt.GetPage(finalRoot)
-	if err != nil {
-		t.Fatalf("GetPage(root): %v", err)
-	}
-	hdr, _ := ParsePageHeader(pageData, finalRoot)
-	if !hdr.IsInterior {
-		t.Skip("root is still a leaf — not enough rows for interior root")
-	}
-
-	// ClearTableData on an interior root exercises dropInteriorChildren.
 	if err := bt.ClearTableData(finalRoot); err != nil {
 		t.Fatalf("ClearTableData: %v", err)
 	}
 
-	// Root should now be an empty leaf.
-	pageData2, err := bt.GetPage(finalRoot)
+	pageData, err := bt.GetPage(finalRoot)
 	if err != nil {
 		t.Fatalf("GetPage(root) after clear: %v", err)
 	}
-	hdr2, _ := ParsePageHeader(pageData2, finalRoot)
-	if hdr2.IsInterior {
+	hdr, _ := ParsePageHeader(pageData, finalRoot)
+	if hdr.IsInterior {
 		t.Error("expected leaf page after ClearTableData")
 	}
-	if hdr2.NumCells != 0 {
-		t.Errorf("expected 0 cells after clear, got %d", hdr2.NumCells)
+	if hdr.NumCells != 0 {
+		t.Errorf("expected 0 cells after clear, got %d", hdr.NumCells)
 	}
 }
 

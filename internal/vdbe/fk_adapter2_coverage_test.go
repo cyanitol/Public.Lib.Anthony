@@ -1255,6 +1255,39 @@ func TestFKExtractPrimaryKeyValuesViaUpdate(t *testing.T) {
 
 // TestFKDataIntegrityAfterCascadeUpdate verifies data is correctly preserved
 // after a cascade UPDATE that rewrites rows via replaceRow / replaceRowWithoutRowID.
+// fk2CheckChildRows scans child rows and verifies expected pid and labels.
+func fk2CheckChildRows(t *testing.T, rows *sql.Rows, wantPid int64, wantLabels []string) {
+	t.Helper()
+	type childRow struct {
+		id    int64
+		pid   int64
+		label string
+		score float64
+	}
+	var got []childRow
+	for rows.Next() {
+		var r childRow
+		if err := rows.Scan(&r.id, &r.pid, &r.label, &r.score); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got = append(got, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	if len(got) != len(wantLabels) {
+		t.Fatalf("expected %d rows, got %d", len(wantLabels), len(got))
+	}
+	for i, r := range got {
+		if r.pid != wantPid {
+			t.Errorf("row id=%d: expected pid=%d, got %d", r.id, wantPid, r.pid)
+		}
+		if r.label != wantLabels[i] {
+			t.Errorf("row %d: expected label=%q, got %q", i, wantLabels[i], r.label)
+		}
+	}
+}
+
 func TestFKDataIntegrityAfterCascadeUpdate(t *testing.T) {
 	t.Parallel()
 	db := fk2OpenDB(t)
@@ -1276,36 +1309,7 @@ func TestFKDataIntegrityAfterCascadeUpdate(t *testing.T) {
 		t.Fatalf("query child rows: %v", err)
 	}
 	defer rows.Close()
-
-	type childRow struct {
-		id    int64
-		pid   int64
-		label string
-		score float64
-	}
-	var got []childRow
-	for rows.Next() {
-		var r childRow
-		if err := rows.Scan(&r.id, &r.pid, &r.label, &r.score); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		got = append(got, r)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows.Err: %v", err)
-	}
-
-	if len(got) != 2 {
-		t.Fatalf("expected 2 rows, got %d", len(got))
-	}
-	for _, r := range got {
-		if r.pid != 200 {
-			t.Errorf("row id=%d: expected pid=200, got %d", r.id, r.pid)
-		}
-	}
-	if got[0].label != "label-a" || got[1].label != "label-b" {
-		t.Errorf("label data corrupted after cascade update: %v", got)
-	}
+	fk2CheckChildRows(t, rows, 200, []string{"label-a", "label-b"})
 }
 
 // ---------------------------------------------------------------------------

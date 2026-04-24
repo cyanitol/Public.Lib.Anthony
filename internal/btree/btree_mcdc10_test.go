@@ -148,10 +148,9 @@ func insertAndGetRoot(t *testing.T, n int) (*Btree, uint32) {
 // side to trigger underflow → mergeOrRedistribute.
 // ---------------------------------------------------------------------------
 
-func TestMCDC10_MergeOrRedistribute_TriggerViaDelete(t *testing.T) {
-	t.Parallel()
-	bt, root := insertAndGetRoot(t, 30)
-
+// requireInteriorRoot gets page header and skips if root is leaf.
+func requireInteriorRoot(t *testing.T, bt *Btree, root uint32) {
+	t.Helper()
 	pageData, err := bt.GetPage(root)
 	if err != nil {
 		t.Fatalf("GetPage(root): %v", err)
@@ -161,41 +160,42 @@ func TestMCDC10_MergeOrRedistribute_TriggerViaDelete(t *testing.T) {
 		t.Fatalf("ParsePageHeader: %v", err)
 	}
 	if !hdr.IsInterior {
-		t.Skip("root is leaf — not enough rows for multi-level tree")
+		t.Skip("root is leaf — need interior root")
 	}
+}
 
-	c := NewCursor(bt, root)
-
-	// Delete the first 10 rows to trigger left-side underflow → merge/redistribute.
-	for key := int64(1); key <= 10; key++ {
+// deleteRowsWithMerge deletes rows by key and calls MergePage after each.
+func deleteRowsWithMerge(c *BtCursor, keys []int64) int {
+	deleted := 0
+	for _, key := range keys {
 		found, err := c.SeekRowid(key)
-		if err != nil {
-			t.Fatalf("SeekRowid(%d): %v", key, err)
-		}
-		if !found {
+		if err != nil || !found {
 			continue
 		}
 		if err := c.Delete(); err != nil {
-			t.Fatalf("Delete(%d): %v", key, err)
+			continue
 		}
-		// After delete, call MergePage to trigger merge/redistribute logic.
+		deleted++
 		if c.State == CursorValid && c.Depth > 0 {
 			_, _ = c.MergePage()
 		}
 	}
+	return deleted
+}
 
-	// Verify remaining rows are accessible.
-	c2 := NewCursor(bt, root)
-	if err := c2.MoveToFirst(); err != nil {
-		t.Fatalf("MoveToFirst: %v", err)
+func TestMCDC10_MergeOrRedistribute_TriggerViaDelete(t *testing.T) {
+	t.Parallel()
+	bt, root := insertAndGetRoot(t, 30)
+	requireInteriorRoot(t, bt, root)
+
+	c := NewCursor(bt, root)
+	keys := make([]int64, 10)
+	for i := range keys {
+		keys[i] = int64(i + 1)
 	}
-	count := 0
-	for c2.State == CursorValid {
-		count++
-		if err := c2.Next(); err != nil {
-			break
-		}
-	}
+	deleteRowsWithMerge(c, keys)
+
+	count := countForward(NewCursor(bt, root))
 	if count == 0 {
 		t.Error("expected at least one row remaining")
 	}
@@ -282,31 +282,14 @@ func TestMCDC10_MergePage_RightmostSibling(t *testing.T) {
 func TestMCDC10_RedistributeSiblings_RightToLeft(t *testing.T) {
 	t.Parallel()
 	bt, root := insertAndGetRoot(t, 28)
-
-	pageData, _ := bt.GetPage(root)
-	hdr, _ := ParsePageHeader(pageData, root)
-	if !hdr.IsInterior {
-		t.Skip("root is leaf — need interior root")
-	}
+	requireInteriorRoot(t, bt, root)
 
 	c := NewCursor(bt, root)
-	// Delete the first several rows (left side of tree).
-	deleted := 0
-	for key := int64(1); key <= 8; key++ {
-		found, err := c.SeekRowid(key)
-		if err != nil || !found {
-			continue
-		}
-		if err := c.Delete(); err != nil {
-			t.Logf("Delete(%d): %v", key, err)
-			continue
-		}
-		deleted++
-		if c.State == CursorValid && c.Depth > 0 {
-			_, _ = c.MergePage()
-		}
+	keys := make([]int64, 8)
+	for i := range keys {
+		keys[i] = int64(i + 1)
 	}
-
+	deleted := deleteRowsWithMerge(c, keys)
 	if deleted == 0 {
 		t.Skip("no rows deleted")
 	}
@@ -322,31 +305,11 @@ func TestMCDC10_RedistributeSiblings_RightToLeft(t *testing.T) {
 func TestMCDC10_RedistributeSiblings_LeftToRight(t *testing.T) {
 	t.Parallel()
 	bt, root := insertAndGetRoot(t, 28)
-
-	pageData, _ := bt.GetPage(root)
-	hdr, _ := ParsePageHeader(pageData, root)
-	if !hdr.IsInterior {
-		t.Skip("root is leaf — need interior root")
-	}
+	requireInteriorRoot(t, bt, root)
 
 	c := NewCursor(bt, root)
-	// Delete from the right side of the tree.
-	deleted := 0
-	for key := int64(28); key >= 21; key-- {
-		found, err := c.SeekRowid(key)
-		if err != nil || !found {
-			continue
-		}
-		if err := c.Delete(); err != nil {
-			t.Logf("Delete(%d): %v", key, err)
-			continue
-		}
-		deleted++
-		if c.State == CursorValid && c.Depth > 0 {
-			_, _ = c.MergePage()
-		}
-	}
-
+	keys := []int64{28, 27, 26, 25, 24, 23, 22, 21}
+	deleted := deleteRowsWithMerge(c, keys)
 	if deleted == 0 {
 		t.Skip("no rows deleted")
 	}
@@ -361,46 +324,17 @@ func TestMCDC10_RedistributeSiblings_LeftToRight(t *testing.T) {
 
 func TestMCDC10_UpdateParentAfterMerge(t *testing.T) {
 	t.Parallel()
-	// Use a slightly larger page to make merges easier to trigger
-	// but small enough to still split.
-	bt := NewBtree(512)
-	root, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
-	}
+	bt, root := insertAndGetRoot(t, 20)
+	requireInteriorRoot(t, bt, root)
+
 	c := NewCursor(bt, root)
-	payload := make([]byte, 20)
-	for i := int64(1); i <= 20; i++ {
-		binary.BigEndian.PutUint64(payload, uint64(i))
-		if err := c.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
+	keys := make([]int64, 10)
+	for i := range keys {
+		keys[i] = int64(i + 1)
 	}
-	finalRoot := c.RootPage
+	deleteRowsWithMerge(c, keys)
 
-	pageData, _ := bt.GetPage(finalRoot)
-	hdr, _ := ParsePageHeader(pageData, finalRoot)
-	if !hdr.IsInterior {
-		t.Skip("root is leaf — need interior root for merge test")
-	}
-
-	c2 := NewCursor(bt, finalRoot)
-	// Delete enough rows to trigger a merge.
-	for key := int64(1); key <= 10; key++ {
-		found, err := c2.SeekRowid(key)
-		if err != nil || !found {
-			continue
-		}
-		if err := c2.Delete(); err != nil {
-			continue
-		}
-		if c2.State == CursorValid && c2.Depth > 0 {
-			_, _ = c2.MergePage()
-		}
-	}
-
-	// Verify tree still scannable.
-	c3 := NewCursor(bt, finalRoot)
+	c3 := NewCursor(bt, root)
 	if err := c3.MoveToFirst(); err != nil {
 		t.Fatalf("MoveToFirst: %v", err)
 	}
@@ -671,39 +605,10 @@ func TestMCDC10_AdvanceWithinPage_MultiCell(t *testing.T) {
 
 func TestMCDC10_LoadParentPage_MultiLevel(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(512)
-	root, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
-	}
-	c := NewCursor(bt, root)
-	payload := make([]byte, 40)
-	for i := int64(1); i <= 30; i++ {
-		binary.BigEndian.PutUint64(payload, uint64(i))
-		if err := c.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-	}
+	bt, root := insertAndGetRoot(t, 30)
+	requireInteriorRoot(t, bt, root)
 
-	finalRoot := c.RootPage
-	pageData, _ := bt.GetPage(finalRoot)
-	hdr, _ := ParsePageHeader(pageData, finalRoot)
-	if !hdr.IsInterior {
-		t.Skip("root is leaf — loadParentPage not exercised")
-	}
-
-	// Traverse all rows; loadParentPage is called when cursor crosses page boundaries.
-	c2 := NewCursor(bt, finalRoot)
-	if err := c2.MoveToFirst(); err != nil {
-		t.Fatalf("MoveToFirst: %v", err)
-	}
-	count := 1
-	for {
-		if err := c2.Next(); err != nil {
-			break
-		}
-		count++
-	}
+	count := countForward(NewCursor(bt, root))
 	if count != 30 {
 		t.Errorf("expected 30 rows, got %d", count)
 	}
@@ -941,36 +846,14 @@ func TestMCDC10_MergePage_MarkDirtyError(t *testing.T) {
 func TestMCDC10_Delete_MultiLevel_Sequence(t *testing.T) {
 	t.Parallel()
 	bt, root := insertAndGetRoot(t, 25)
-
-	pageData, _ := bt.GetPage(root)
-	hdr, _ := ParsePageHeader(pageData, root)
-	if !hdr.IsInterior {
-		t.Skip("root is leaf — need multi-level tree")
-	}
+	requireInteriorRoot(t, bt, root)
 
 	c := NewCursor(bt, root)
-	// Delete alternating rows to exercise different sibling configurations.
-	keysToDelete := []int64{2, 5, 8, 11, 14, 17, 20, 23}
-	deleted := 0
-	for _, key := range keysToDelete {
-		found, err := c.SeekRowid(key)
-		if err != nil || !found {
-			continue
-		}
-		if err := c.Delete(); err != nil {
-			continue
-		}
-		deleted++
-		if c.State == CursorValid && c.Depth > 0 {
-			_, _ = c.MergePage()
-		}
-	}
-
+	deleted := deleteRowsWithMerge(c, []int64{2, 5, 8, 11, 14, 17, 20, 23})
 	if deleted == 0 {
 		t.Error("expected to delete at least one row")
 	}
 
-	// Verify tree consistency.
 	c2 := NewCursor(bt, root)
 	if err := c2.MoveToFirst(); err != nil {
 		t.Fatalf("MoveToFirst: %v", err)

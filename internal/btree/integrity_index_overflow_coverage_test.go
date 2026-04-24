@@ -733,31 +733,11 @@ func TestGetCompletePayload_WithOverflow(t *testing.T) {
 		t.Fatalf("CreateTable: %v", err)
 	}
 	cursor := NewCursor(bt, rootPage)
-
-	// 5000 bytes triggers overflow with 4096-byte pages.
-	payload := make([]byte, 5000)
-	for i := range payload {
-		payload[i] = byte(i % 199)
-	}
+	payload := makeSequentialPayload(5000)
 	if err := cursor.Insert(1, payload); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
-
-	found, err := cursor.SeekRowid(1)
-	if err != nil || !found {
-		t.Fatalf("SeekRowid failed: err=%v found=%v", err, found)
-	}
-
-	complete, err := cursor.GetCompletePayload()
-	if err != nil {
-		t.Fatalf("GetCompletePayload: %v", err)
-	}
-	if len(complete) != len(payload) {
-		t.Errorf("payload length mismatch: got %d, want %d", len(complete), len(payload))
-	}
-	if !bytes.Equal(complete, payload) {
-		t.Error("retrieved payload does not match inserted payload")
-	}
+	verifyPayloadRoundtrip(t, cursor, 1, payload)
 }
 
 // TestEncodeDecodeIndexPayload_Roundtrip exercises encodeIndexPayload and parseIndexPayload

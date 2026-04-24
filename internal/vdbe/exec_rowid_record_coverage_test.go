@@ -297,40 +297,34 @@ func TestExecRowidRecord_DeferredSeekMultipleMatches(t *testing.T) {
 // TestExecRowidRecord_ParseRecordColumnHeaderManyColumns exercises
 // parseRecordColumnHeader with a table that has many columns of varying types,
 // ensuring the header with many serial-type entries is parsed correctly.
-func TestExecRowidRecord_ParseRecordColumnHeaderManyColumns(t *testing.T) {
+func TestExecRowidRecord_ParseRecordColumnHeaderManyColumns_Setup(t *testing.T) {
 	db := rrOpenDB(t)
 	rrExec(t, db, `CREATE TABLE hdr (
-		a INTEGER PRIMARY KEY,
-		b INTEGER,
-		c TEXT,
-		d REAL,
-		e BLOB,
-		f INTEGER,
-		g TEXT,
-		h BLOB
+		a INTEGER PRIMARY KEY, b INTEGER, c TEXT, d REAL,
+		e BLOB, f INTEGER, g TEXT, h BLOB
 	)`)
 
-	b100 := make([]byte, 100) // serial type = 212, needs 2-byte varint
+	b100 := make([]byte, 100)
 	for i := range b100 {
 		b100[i] = byte(i % 256)
 	}
-	s80 := strings.Repeat("z", 80) // serial type = 173, needs 2-byte varint
-
+	s80 := strings.Repeat("z", 80)
 	rrExec(t, db, `INSERT INTO hdr VALUES(1, 999, ?, 2.71, ?, -42, ?, ?)`,
 		s80, b100, "short", []byte{0xAB, 0xCD})
 
-	var bVal int64
-	var cVal string
+	var bVal, fVal int64
+	var cVal, gVal string
 	var dVal float64
-	var eVal []byte
-	var fVal int64
-	var gVal string
-	var hVal []byte
-
+	var eVal, hVal []byte
 	if err := db.QueryRow(`SELECT b,c,d,e,f,g,h FROM hdr WHERE a=1`).
 		Scan(&bVal, &cVal, &dVal, &eVal, &fVal, &gVal, &hVal); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
+	rrCheckManyColumns(t, bVal, cVal, dVal, eVal, fVal, gVal, hVal)
+}
+
+func rrCheckManyColumns(t *testing.T, bVal int64, cVal string, dVal float64, eVal []byte, fVal int64, gVal string, hVal []byte) {
+	t.Helper()
 	if bVal != 999 {
 		t.Errorf("b: want 999, got %d", bVal)
 	}

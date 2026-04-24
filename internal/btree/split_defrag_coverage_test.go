@@ -9,60 +9,41 @@ import (
 // several to create fragmented free space, then inserts more rows to trigger a
 // leaf split. The split calls redistributeLeafCells -> defragmentBothPages ->
 // Defragment on both the left and right pages produced by the split.
+// deleteEveryNth deletes every n-th row in [start, end] using seekAndDelete.
+func deleteEveryNth(bt *Btree, root uint32, start, end, step int64) uint32 {
+	cur := NewCursor(bt, root)
+	for i := start; i <= end; i += step {
+		seekAndDelete(cur, i) //nolint:errcheck
+		cur = NewCursor(bt, root)
+	}
+	return root
+}
+
+// insertRowsWithReset inserts rows [start, end] with given payload, re-creating cursor after each.
+func insertRowsWithReset(t *testing.T, bt *Btree, root uint32, start, end int64, payload []byte) uint32 {
+	t.Helper()
+	cursor := NewCursor(bt, root)
+	for i := start; i <= end; i++ {
+		if err := cursor.Insert(i, payload); err != nil {
+			t.Fatalf("Insert(%d): %v", i, err)
+		}
+		cursor = NewCursor(bt, cursor.RootPage)
+	}
+	return cursor.RootPage
+}
+
 func TestDefrag_LeafSplitAfterFragmentation(t *testing.T) {
 	t.Parallel()
-	const pageSize = 512
-	bt := NewBtree(pageSize)
-	root, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
-	}
-	cursor := NewCursor(bt, root)
+	bt, cursor := setupBtreeWithRows(t, 512, 1, 40, 48)
+	root := cursor.RootPage
 
-	// 48-byte payload: enough to fill a 512-byte page quickly.
-	payload := make([]byte, 48)
-	for i := range payload {
-		payload[i] = byte('a' + i%26)
-	}
+	deleteEveryNth(bt, root, 2, 20, 2)
+	root = insertRowsWithReset(t, bt, root, 41, 70, make([]byte, 48))
 
-	// Phase 1: insert rows to build a multi-page tree.
-	const phase1 = 40
-	for i := int64(1); i <= phase1; i++ {
-		if err := cursor.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-	}
-
-	// Phase 2: delete every other row in the lower half to fragment pages.
-	for i := int64(2); i <= phase1/2; i += 2 {
-		found, seekErr := cursor.SeekRowid(i)
-		if seekErr == nil && found {
-			cursor.Delete()
-		}
-		cursor = NewCursor(bt, cursor.RootPage)
-	}
-
-	// Phase 3: insert more rows so a leaf page fills up and splits again.
-	// The leaf being split will have fragmented space from earlier deletions,
-	// so defragmentBothPages must compact it during redistribution.
-	const phase3Start = phase1 + 1
-	const phase3End = phase1 + 30
-	root = cursor.RootPage
-	cursor = NewCursor(bt, root)
-	for i := int64(phase3Start); i <= phase3End; i++ {
-		if err := cursor.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-		cursor = NewCursor(bt, cursor.RootPage)
-	}
-
-	// Verify tree integrity: all remaining rows are accessible in order.
-	scan := NewCursor(bt, cursor.RootPage)
-	got := verifyOrderedForward(t, scan)
+	got := verifyOrderedForward(t, NewCursor(bt, root))
 	if got < 1 {
 		t.Error("expected at least one row after insert/delete/insert cycle")
 	}
-	t.Logf("rows present after fragmentation+split cycle: %d", got)
 }
 
 // TestDefrag_InteriorSplitAfterFragmentation builds a tree deep enough to
@@ -70,60 +51,16 @@ func TestDefrag_LeafSplitAfterFragmentation(t *testing.T) {
 // exercising redistributeInteriorCells -> defragmentBothPages on interior pages.
 func TestDefrag_InteriorSplitAfterFragmentation(t *testing.T) {
 	t.Parallel()
-	const pageSize = 512
-	bt := NewBtree(pageSize)
-	root, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
-	}
-	cursor := NewCursor(bt, root)
+	bt, cursor := setupBtreeWithRows(t, 512, 1, 220, 18)
+	root := cursor.RootPage
 
-	// 18-byte payload: many rows fit per leaf, requiring many leaves before
-	// interior pages overflow.
-	payload := make([]byte, 18)
-	for i := range payload {
-		payload[i] = byte('b')
-	}
+	deleteEveryNth(bt, root, 10, 100, 5)
+	root = insertRowsWithReset(t, bt, root, 221, 300, make([]byte, 18))
 
-	// Phase 1: insert enough rows for deep tree with multiple interior pages.
-	const phase1 = 220
-	for i := int64(1); i <= phase1; i++ {
-		if err := cursor.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-	}
-
-	root = cursor.RootPage
-
-	// Phase 2: delete a spread of rows to fragment interior and leaf pages.
-	del := NewCursor(bt, root)
-	for i := int64(10); i <= 100; i += 5 {
-		found, seekErr := del.SeekRowid(i)
-		if seekErr == nil && found {
-			del.Delete()
-		}
-		del = NewCursor(bt, root)
-	}
-
-	// Phase 3: insert more rows to force additional interior splits on the
-	// now-fragmented pages, triggering redistributeInteriorCells.
-	ins := NewCursor(bt, root)
-	const phase3Start = phase1 + 1
-	const phase3End = phase1 + 80
-	for i := int64(phase3Start); i <= phase3End; i++ {
-		if err := ins.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-		ins = NewCursor(bt, ins.RootPage)
-	}
-
-	// Verify the tree is intact and ordered.
-	scan := NewCursor(bt, ins.RootPage)
-	got := verifyOrderedForward(t, scan)
+	got := verifyOrderedForward(t, NewCursor(bt, root))
 	if got < 1 {
 		t.Error("expected at least one row after interior fragmentation+split")
 	}
-	t.Logf("rows present after interior fragmentation+split: %d", got)
 }
 
 // TestDefrag_VaryingPayloadSizes triggers multiple leaf splits with payloads
@@ -170,53 +107,26 @@ func TestDefrag_VaryingPayloadSizes(t *testing.T) {
 // to trigger splits on fragmented pages.
 func TestDefrag_BackwardInsertWithFragmentation(t *testing.T) {
 	t.Parallel()
-	const pageSize = 512
-	bt := NewBtree(pageSize)
+	bt := NewBtree(512)
 	root, err := bt.CreateTable()
 	if err != nil {
 		t.Fatalf("CreateTable: %v", err)
 	}
+	// Insert descending to exercise front-of-parent divider insertion.
 	cursor := NewCursor(bt, root)
-
 	payload := make([]byte, 44)
-	for i := range payload {
-		payload[i] = byte('d')
-	}
-
-	// Insert descending so dividers always go at front of parent.
-	const n = 50
-	for i := int64(n); i >= 1; i-- {
+	for i := int64(50); i >= 1; i-- {
 		if err := cursor.Insert(i, payload); err != nil {
 			t.Fatalf("Insert(%d): %v", i, err)
 		}
 	}
-
 	root = cursor.RootPage
 
-	// Delete every third row to create fragmentation.
-	del := NewCursor(bt, root)
-	for i := int64(3); i <= n; i += 3 {
-		found, seekErr := del.SeekRowid(i)
-		if seekErr == nil && found {
-			del.Delete()
-		}
-		del = NewCursor(bt, root)
-	}
+	deleteEveryNth(bt, root, 3, 50, 3)
+	root = insertRowsWithReset(t, bt, root, 51, 80, payload)
 
-	// Insert new rows (ascending) to trigger splits on fragmented pages.
-	ins := NewCursor(bt, root)
-	for i := int64(n + 1); i <= n+30; i++ {
-		if err := ins.Insert(i, payload); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-		ins = NewCursor(bt, ins.RootPage)
-	}
-
-	// Verify backward traversal also works correctly after the mixed operations.
-	scan := NewCursor(bt, ins.RootPage)
-	bwd := countBackward(scan)
+	bwd := countBackward(NewCursor(bt, root))
 	if bwd < 1 {
 		t.Error("expected rows to be accessible via backward traversal")
 	}
-	t.Logf("rows accessible backward: %d", bwd)
 }

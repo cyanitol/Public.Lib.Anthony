@@ -64,71 +64,56 @@ func makeIntRecord(v int8) []byte {
 // TestConstraints2_GetTableColumns
 // ---------------------------------------------------------------------------
 
-func TestConstraints2_GetTableColumns(t *testing.T) {
+// getTableColumnsExpectFalse is a helper that asserts getTableColumns returns (nil, false).
+func getTableColumnsExpectFalse(t *testing.T, v *VDBE, tableName, desc string) {
+	t.Helper()
+	cols, ok := v.getTableColumns(tableName)
+	if ok || cols != nil {
+		t.Errorf("expected (nil, false) %s", desc)
+	}
+}
+
+func TestConstraints2_GetTableColumns_ErrorCases(t *testing.T) {
 	t.Parallel()
 
-	t.Run("NilCtx", func(t *testing.T) {
-		v := New()
-		v.Ctx = nil
-		cols, ok := v.getTableColumns("t")
-		if ok || cols != nil {
-			t.Error("expected (nil, false) for nil ctx")
-		}
-	})
+	v := New()
+	v.Ctx = nil
+	getTableColumnsExpectFalse(t, v, "t", "for nil ctx")
 
-	t.Run("NilSchema", func(t *testing.T) {
-		v := New()
-		v.Ctx = &VDBEContext{Schema: nil}
-		cols, ok := v.getTableColumns("t")
-		if ok || cols != nil {
-			t.Error("expected (nil, false) for nil schema")
-		}
-	})
+	v = New()
+	v.Ctx = &VDBEContext{Schema: nil}
+	getTableColumnsExpectFalse(t, v, "t", "for nil schema")
 
-	t.Run("SchemaNotTableGetter", func(t *testing.T) {
-		v := New()
-		v.Ctx = &VDBEContext{Schema: struct{}{}}
-		cols, ok := v.getTableColumns("t")
-		if ok || cols != nil {
-			t.Error("expected (nil, false) when schema does not implement GetTableByName")
-		}
-	})
+	v = New()
+	v.Ctx = &VDBEContext{Schema: struct{}{}}
+	getTableColumnsExpectFalse(t, v, "t", "when schema does not implement GetTableByName")
 
-	t.Run("TableNotFound", func(t *testing.T) {
-		v := New()
-		v.Ctx = &VDBEContext{Schema: &mockSchema2{tables: map[string]interface{}{}}}
-		cols, ok := v.getTableColumns("missing")
-		if ok || cols != nil {
-			t.Error("expected (nil, false) when table not found")
-		}
-	})
+	v = New()
+	v.Ctx = &VDBEContext{Schema: &mockSchema2{tables: map[string]interface{}{}}}
+	getTableColumnsExpectFalse(t, v, "missing", "when table not found")
 
-	t.Run("TableNotTableWithColumns", func(t *testing.T) {
-		v := New()
-		v.Ctx = &VDBEContext{Schema: &mockSchema2{
-			tables: map[string]interface{}{"t": &notATableWithColumns{}},
-		}}
-		cols, ok := v.getTableColumns("t")
-		if ok || cols != nil {
-			t.Error("expected (nil, false) when table does not implement GetColumns")
-		}
-	})
+	v = New()
+	v.Ctx = &VDBEContext{Schema: &mockSchema2{
+		tables: map[string]interface{}{"t": &notATableWithColumns{}},
+	}}
+	getTableColumnsExpectFalse(t, v, "t", "when table does not implement GetColumns")
+}
 
-	t.Run("Success", func(t *testing.T) {
-		col := &mockColumn2{name: "id"}
-		tbl := &mockTable2{columns: []interface{}{col}}
-		v := New()
-		v.Ctx = &VDBEContext{Schema: &mockSchema2{
-			tables: map[string]interface{}{"t": tbl},
-		}}
-		cols, ok := v.getTableColumns("t")
-		if !ok {
-			t.Fatal("expected ok=true")
-		}
-		if len(cols) != 1 {
-			t.Errorf("expected 1 column, got %d", len(cols))
-		}
-	})
+func TestConstraints2_GetTableColumns_Success(t *testing.T) {
+	t.Parallel()
+	col := &mockColumn2{name: "id"}
+	tbl := &mockTable2{columns: []interface{}{col}}
+	v := New()
+	v.Ctx = &VDBEContext{Schema: &mockSchema2{
+		tables: map[string]interface{}{"t": tbl},
+	}}
+	cols, ok := v.getTableColumns("t")
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if len(cols) != 1 {
+		t.Errorf("expected 1 column, got %d", len(cols))
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -346,275 +331,149 @@ func TestConstraints2_GetSchemaIndexProvider(t *testing.T) {
 // TestCorrelated_ExecCorrelatedExists
 // ---------------------------------------------------------------------------
 
-func TestCorrelated_ExecCorrelatedExists(t *testing.T) {
+func TestCorrelated_ExecCorrelatedExists_Errors(t *testing.T) {
 	t.Parallel()
 
-	t.Run("P4NotFunc_ReturnsError", func(t *testing.T) {
-		v := NewTestVDBE(4)
-		instr := &Instruction{
-			P4: P4Union{P: "not a func"},
-		}
-		err := v.execCorrelatedExists(instr)
-		if err == nil {
-			t.Error("expected error when P4 is not CorrelatedExistsFunc")
-		}
-	})
+	// P4NotFunc
+	v := NewTestVDBE(4)
+	instr := &Instruction{P4: P4Union{P: "not a func"}}
+	if err := v.execCorrelatedExists(instr); err == nil {
+		t.Error("expected error when P4 is not CorrelatedExistsFunc")
+	}
 
-	t.Run("BindingRegisterOutOfRange_ReturnsError", func(t *testing.T) {
-		v := NewTestVDBE(2)
-		fn := CorrelatedExistsFunc(func(bindings []interface{}) (bool, error) {
-			return true, nil
-		})
-		instr := &Instruction{
-			P1: 0,
-			P2: 10, // Out of range — only 2 registers
-			P3: 1,
-			P4: P4Union{P: fn},
-		}
-		err := v.execCorrelatedExists(instr)
-		if err == nil {
-			t.Error("expected error when binding register is out of range")
-		}
-	})
+	// BindingRegisterOutOfRange
+	v = NewTestVDBE(2)
+	fn := CorrelatedExistsFunc(func(bindings []interface{}) (bool, error) { return true, nil })
+	instr = &Instruction{P1: 0, P2: 10, P3: 1, P4: P4Union{P: fn}}
+	if err := v.execCorrelatedExists(instr); err == nil {
+		t.Error("expected error when binding register is out of range")
+	}
 
-	t.Run("FuncReturnsError_Propagates", func(t *testing.T) {
-		v := NewTestVDBE(4)
-		fn := CorrelatedExistsFunc(func(bindings []interface{}) (bool, error) {
-			return false, errors.New("sub-query error")
-		})
-		instr := &Instruction{
-			P1: 0,
-			P2: 1,
-			P3: 0, // zero bindings
-			P4: P4Union{P: fn},
-		}
-		err := v.execCorrelatedExists(instr)
-		if err == nil {
-			t.Error("expected error propagated from CorrelatedExistsFunc")
-		}
+	// FuncReturnsError
+	v = NewTestVDBE(4)
+	fn2 := CorrelatedExistsFunc(func(bindings []interface{}) (bool, error) {
+		return false, errors.New("sub-query error")
 	})
+	instr = &Instruction{P1: 0, P2: 1, P3: 0, P4: P4Union{P: fn2}}
+	if err := v.execCorrelatedExists(instr); err == nil {
+		t.Error("expected error propagated from CorrelatedExistsFunc")
+	}
+}
 
-	t.Run("ExistsTrue_NoNegate_StoresOne", func(t *testing.T) {
-		v := NewTestVDBE(4)
-		fn := CorrelatedExistsFunc(func(bindings []interface{}) (bool, error) {
-			return true, nil
-		})
-		instr := &Instruction{
-			P1: 0,
-			P2: 1,
-			P3: 0,
-			P4: P4Union{P: fn},
-			P5: 0,
-		}
-		if err := v.execCorrelatedExists(instr); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if v.Mem[0].IntValue() != 1 {
-			t.Errorf("expected 1, got %d", v.Mem[0].IntValue())
-		}
+// correlatedExistsHelper runs execCorrelatedExists and returns the stored int value.
+func correlatedExistsHelper(t *testing.T, existsResult bool, negate uint16) int64 {
+	t.Helper()
+	v := NewTestVDBE(4)
+	fn := CorrelatedExistsFunc(func(bindings []interface{}) (bool, error) {
+		return existsResult, nil
 	})
+	instr := &Instruction{P1: 0, P2: 1, P3: 0, P4: P4Union{P: fn}, P5: negate}
+	if err := v.execCorrelatedExists(instr); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return v.Mem[0].IntValue()
+}
 
-	t.Run("ExistsTrue_Negate_StoresZero", func(t *testing.T) {
-		v := NewTestVDBE(4)
-		fn := CorrelatedExistsFunc(func(bindings []interface{}) (bool, error) {
-			return true, nil
-		})
-		instr := &Instruction{
-			P1: 0,
-			P2: 1,
-			P3: 0,
-			P4: P4Union{P: fn},
-			P5: 1, // NOT EXISTS
-		}
-		if err := v.execCorrelatedExists(instr); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if v.Mem[0].IntValue() != 0 {
-			t.Errorf("expected 0 (NOT EXISTS of true), got %d", v.Mem[0].IntValue())
-		}
-	})
+func TestCorrelated_ExecCorrelatedExists_Results(t *testing.T) {
+	t.Parallel()
 
-	t.Run("ExistsFalse_NoNegate_StoresZero", func(t *testing.T) {
-		v := NewTestVDBE(4)
-		fn := CorrelatedExistsFunc(func(bindings []interface{}) (bool, error) {
-			return false, nil
-		})
-		instr := &Instruction{
-			P1: 0,
-			P2: 1,
-			P3: 0,
-			P4: P4Union{P: fn},
-			P5: 0,
-		}
-		if err := v.execCorrelatedExists(instr); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if v.Mem[0].IntValue() != 0 {
-			t.Errorf("expected 0, got %d", v.Mem[0].IntValue())
-		}
-	})
+	if got := correlatedExistsHelper(t, true, 0); got != 1 {
+		t.Errorf("ExistsTrue_NoNegate: expected 1, got %d", got)
+	}
+	if got := correlatedExistsHelper(t, true, 1); got != 0 {
+		t.Errorf("ExistsTrue_Negate: expected 0, got %d", got)
+	}
+	if got := correlatedExistsHelper(t, false, 0); got != 0 {
+		t.Errorf("ExistsFalse_NoNegate: expected 0, got %d", got)
+	}
+	if got := correlatedExistsHelper(t, false, 1); got != 1 {
+		t.Errorf("ExistsFalse_Negate: expected 1, got %d", got)
+	}
+}
 
-	t.Run("ExistsFalse_Negate_StoresOne", func(t *testing.T) {
-		v := NewTestVDBE(4)
-		fn := CorrelatedExistsFunc(func(bindings []interface{}) (bool, error) {
-			return false, nil
-		})
-		instr := &Instruction{
-			P1: 0,
-			P2: 1,
-			P3: 0,
-			P4: P4Union{P: fn},
-			P5: 1, // NOT EXISTS
-		}
-		if err := v.execCorrelatedExists(instr); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if v.Mem[0].IntValue() != 1 {
-			t.Errorf("expected 1 (NOT EXISTS of false), got %d", v.Mem[0].IntValue())
-		}
+func TestCorrelated_ExecCorrelatedExists_WithBindings(t *testing.T) {
+	t.Parallel()
+	v := NewTestVDBE(4)
+	v.Mem[1].SetInt(42)
+	v.Mem[2].SetInt(99)
+	var gotBindings []interface{}
+	fn := CorrelatedExistsFunc(func(bindings []interface{}) (bool, error) {
+		gotBindings = bindings
+		return true, nil
 	})
-
-	t.Run("WithBindings_PassedToFunc", func(t *testing.T) {
-		v := NewTestVDBE(4)
-		v.Mem[1].SetInt(42)
-		v.Mem[2].SetInt(99)
-		var gotBindings []interface{}
-		fn := CorrelatedExistsFunc(func(bindings []interface{}) (bool, error) {
-			gotBindings = bindings
-			return true, nil
-		})
-		instr := &Instruction{
-			P1: 0,
-			P2: 1,
-			P3: 2, // two bindings from regs 1, 2
-			P4: P4Union{P: fn},
-			P5: 0,
-		}
-		if err := v.execCorrelatedExists(instr); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(gotBindings) != 2 {
-			t.Errorf("expected 2 bindings, got %d", len(gotBindings))
-		}
-	})
+	instr := &Instruction{P1: 0, P2: 1, P3: 2, P4: P4Union{P: fn}, P5: 0}
+	if err := v.execCorrelatedExists(instr); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(gotBindings) != 2 {
+		t.Errorf("expected 2 bindings, got %d", len(gotBindings))
+	}
 }
 
 // ---------------------------------------------------------------------------
 // TestCorrelated_ExecCorrelatedScalar
 // ---------------------------------------------------------------------------
 
-func TestCorrelated_ExecCorrelatedScalar(t *testing.T) {
+func TestCorrelated_ExecCorrelatedScalar_Errors(t *testing.T) {
 	t.Parallel()
 
-	t.Run("P4NotFunc_ReturnsError", func(t *testing.T) {
-		v := NewTestVDBE(4)
-		instr := &Instruction{P4: P4Union{P: 42}}
-		err := v.execCorrelatedScalar(instr)
-		if err == nil {
-			t.Error("expected error when P4 is not CorrelatedScalarFunc")
-		}
-	})
-
-	t.Run("BindingRegisterOutOfRange_ReturnsError", func(t *testing.T) {
-		v := NewTestVDBE(2)
-		fn := CorrelatedScalarFunc(func(bindings []interface{}) (interface{}, error) {
-			return int64(1), nil
-		})
-		instr := &Instruction{P1: 0, P2: 10, P3: 1, P4: P4Union{P: fn}}
-		err := v.execCorrelatedScalar(instr)
-		if err == nil {
-			t.Error("expected error for out-of-range binding register")
-		}
-	})
-
-	t.Run("FuncReturnsError_Propagates", func(t *testing.T) {
-		v := NewTestVDBE(4)
-		fn := CorrelatedScalarFunc(func(bindings []interface{}) (interface{}, error) {
-			return nil, fmt.Errorf("scalar error")
-		})
-		instr := &Instruction{P1: 0, P2: 1, P3: 0, P4: P4Union{P: fn}}
-		err := v.execCorrelatedScalar(instr)
-		if err == nil {
-			t.Error("expected error propagated from CorrelatedScalarFunc")
-		}
-	})
-
-	scalarCases := []struct {
-		name   string
-		retVal interface{}
-		check  func(t *testing.T, m *Mem)
-	}{
-		{
-			name:   "NilResult_StoresNull",
-			retVal: nil,
-			check: func(t *testing.T, m *Mem) {
-				if !m.IsNull() {
-					t.Error("expected NULL")
-				}
-			},
-		},
-		{
-			name:   "Int64Result",
-			retVal: int64(7),
-			check: func(t *testing.T, m *Mem) {
-				if !m.IsInt() || m.IntValue() != 7 {
-					t.Errorf("expected int 7, got %v", m.IntValue())
-				}
-			},
-		},
-		{
-			name:   "Float64Result",
-			retVal: float64(3.14),
-			check: func(t *testing.T, m *Mem) {
-				if !m.IsReal() {
-					t.Error("expected real")
-				}
-			},
-		},
-		{
-			name:   "StringResult",
-			retVal: "hello",
-			check: func(t *testing.T, m *Mem) {
-				if !m.IsStr() {
-					t.Error("expected string")
-				}
-			},
-		},
-		{
-			name:   "ByteSliceResult",
-			retVal: []byte{1, 2, 3},
-			check: func(t *testing.T, m *Mem) {
-				if !m.IsBlob() {
-					t.Error("expected blob")
-				}
-			},
-		},
-		{
-			name:   "UnknownType_StoresNull",
-			retVal: struct{ x int }{x: 1},
-			check: func(t *testing.T, m *Mem) {
-				if !m.IsNull() {
-					t.Error("expected NULL for unknown type")
-				}
-			},
-		},
+	v := NewTestVDBE(4)
+	instr := &Instruction{P4: P4Union{P: 42}}
+	if err := v.execCorrelatedScalar(instr); err == nil {
+		t.Error("expected error when P4 is not CorrelatedScalarFunc")
 	}
 
-	for _, tc := range scalarCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			v := NewTestVDBE(4)
-			retVal := tc.retVal
-			fn := CorrelatedScalarFunc(func(bindings []interface{}) (interface{}, error) {
-				return retVal, nil
-			})
-			instr := &Instruction{P1: 0, P2: 1, P3: 0, P4: P4Union{P: fn}}
-			if err := v.execCorrelatedScalar(instr); err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			tc.check(t, v.Mem[0])
-		})
+	v = NewTestVDBE(2)
+	fn := CorrelatedScalarFunc(func(bindings []interface{}) (interface{}, error) { return int64(1), nil })
+	instr = &Instruction{P1: 0, P2: 10, P3: 1, P4: P4Union{P: fn}}
+	if err := v.execCorrelatedScalar(instr); err == nil {
+		t.Error("expected error for out-of-range binding register")
+	}
+
+	v = NewTestVDBE(4)
+	fn2 := CorrelatedScalarFunc(func(bindings []interface{}) (interface{}, error) {
+		return nil, fmt.Errorf("scalar error")
+	})
+	instr = &Instruction{P1: 0, P2: 1, P3: 0, P4: P4Union{P: fn2}}
+	if err := v.execCorrelatedScalar(instr); err == nil {
+		t.Error("expected error propagated from CorrelatedScalarFunc")
+	}
+}
+
+// correlatedScalarHelper runs execCorrelatedScalar with the given return value.
+func correlatedScalarHelper(t *testing.T, retVal interface{}) *Mem {
+	t.Helper()
+	v := NewTestVDBE(4)
+	fn := CorrelatedScalarFunc(func(bindings []interface{}) (interface{}, error) {
+		return retVal, nil
+	})
+	instr := &Instruction{P1: 0, P2: 1, P3: 0, P4: P4Union{P: fn}}
+	if err := v.execCorrelatedScalar(instr); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return v.Mem[0]
+}
+
+func TestCorrelated_ExecCorrelatedScalar_Results(t *testing.T) {
+	t.Parallel()
+
+	if m := correlatedScalarHelper(t, nil); !m.IsNull() {
+		t.Error("nil result: expected NULL")
+	}
+	if m := correlatedScalarHelper(t, int64(7)); !m.IsInt() || m.IntValue() != 7 {
+		t.Errorf("int64 result: expected 7, got %v", m.IntValue())
+	}
+	if m := correlatedScalarHelper(t, float64(3.14)); !m.IsReal() {
+		t.Error("float64 result: expected real")
+	}
+	if m := correlatedScalarHelper(t, "hello"); !m.IsStr() {
+		t.Error("string result: expected string")
+	}
+	if m := correlatedScalarHelper(t, []byte{1, 2, 3}); !m.IsBlob() {
+		t.Error("byte slice result: expected blob")
+	}
+	if m := correlatedScalarHelper(t, struct{ x int }{x: 1}); !m.IsNull() {
+		t.Error("unknown type: expected NULL")
 	}
 }
 

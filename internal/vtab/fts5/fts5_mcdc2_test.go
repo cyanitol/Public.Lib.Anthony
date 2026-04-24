@@ -326,30 +326,30 @@ func TestMCDC_tryParsePrefixQuery(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			q, err := parser.Parse(tt.query)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Parse(%q) expected error, got nil (query type=%v)", tt.query, q)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("Parse(%q) unexpected error: %v", tt.query, err)
-			}
-			if tt.wantFound {
-				if q == nil {
-					t.Fatalf("Parse(%q) returned nil query", tt.query)
-				}
-				if q.Type != tt.wantType {
-					t.Errorf("Parse(%q).Type = %v, want %v", tt.query, q.Type, tt.wantType)
-				}
-			} else {
-				// Falls through to simple query
-				if q != nil && q.Type != QuerySimple {
-					t.Errorf("Parse(%q).Type = %v, want Simple", tt.query, q.Type)
-				}
-			}
+			assertPrefixParseResult(t, parser, tt.query, tt.wantType, tt.wantFound, tt.wantErr)
 		})
+	}
+}
+
+// assertPrefixParseResult checks the parse result for a prefix query test case.
+func assertPrefixParseResult(t *testing.T, parser *QueryParser, query string, wantType QueryType, wantFound, wantErr bool) {
+	t.Helper()
+	q, err := parser.Parse(query)
+	if wantErr {
+		if err == nil {
+			t.Errorf("Parse(%q) expected error, got nil", query)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("Parse(%q) unexpected error: %v", query, err)
+	}
+	if wantFound {
+		if q == nil || q.Type != wantType {
+			t.Errorf("Parse(%q) type = %v, want %v", query, q, wantType)
+		}
+	} else if q != nil && q.Type != QuerySimple {
+		t.Errorf("Parse(%q).Type = %v, want Simple", query, q.Type)
 	}
 }
 
@@ -433,18 +433,8 @@ func TestMCDC_TFIDFScore_Guards(t *testing.T) {
 
 	ranker := NewTFIDFRanker()
 
-	module := NewFTS5Module()
-	table, _, err := module.Create(nil, "fts5", "main", "mcdc_tfidf", []string{"content"})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	// Insert two docs: "alpha" only appears in doc 1 so IDF = log(2/1) > 0.
-	if _, err := table.Update(3, []interface{}{nil, nil, "alpha beta gamma"}); err != nil {
-		t.Fatalf("Insert doc 1: %v", err)
-	}
-	if _, err := table.Update(3, []interface{}{nil, nil, "delta epsilon"}); err != nil {
-		t.Fatalf("Insert doc 2: %v", err)
-	}
+	table := newFTS5TableForTest(t, "mcdc_tfidf", []string{"content"})
+	insertFTS5Docs(t, table, []string{"alpha beta gamma", "delta epsilon"})
 	idx := table.(*FTS5Table).index
 
 	tests := []struct {
@@ -632,21 +622,8 @@ func TestMCDC_truncateText(t *testing.T) {
 func TestMCDC_matchPrefix(t *testing.T) {
 	t.Parallel()
 
-	module := NewFTS5Module()
-	table, _, err := module.Create(nil, "fts5", "main", "mcdc_prefix", []string{"content"})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	docs := []string{
-		"hello help heft", // multiple "he*" terms
-		"world wide",      // no "he*" terms
-	}
-	for _, d := range docs {
-		if _, err := table.Update(3, []interface{}{nil, nil, d}); err != nil {
-			t.Fatalf("Insert %q: %v", d, err)
-		}
-	}
+	table := newFTS5TableForTest(t, "mcdc_prefix", []string{"content"})
+	insertFTS5Docs(t, table, []string{"hello help heft", "world wide"})
 
 	tests := []struct {
 		name      string
@@ -677,21 +654,8 @@ func TestMCDC_matchPrefix(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			cursor, err := table.Open()
-			if err != nil {
-				t.Fatalf("Open: %v", err)
-			}
-			defer cursor.Close()
-			if err := cursor.Filter(1, "", []interface{}{tt.query}); err != nil {
-				t.Fatalf("Filter: %v", err)
-			}
-			count := 0
-			for !cursor.EOF() {
-				count++
-				cursor.Next()
-			}
-			if count != tt.wantCount {
-				t.Errorf("prefix query %q: got %d results, want %d", tt.query, count, tt.wantCount)
+			if got := countQueryResults(t, table, tt.query); got != tt.wantCount {
+				t.Errorf("prefix query %q: got %d results, want %d", tt.query, got, tt.wantCount)
 			}
 		})
 	}

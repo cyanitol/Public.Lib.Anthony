@@ -310,6 +310,20 @@ func TestFreeListFlushPendingWithPages(t *testing.T) {
 }
 
 // TestFreeListIterateWithPages tests iteration over freelist
+// tcAllocAndFreePages allocates n pages, freeing those at index >= freeFrom.
+func tcAllocAndFreePages(t *testing.T, p *Pager, n, freeFrom int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		pgno, err := p.AllocatePage()
+		if err != nil {
+			t.Fatalf("failed to allocate: %v", err)
+		}
+		if i >= freeFrom {
+			p.freeList.Free(pgno)
+		}
+	}
+}
+
 func TestFreeListIterateWithPages(t *testing.T) {
 	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "freelist_iterate_*.db")
@@ -328,33 +342,19 @@ func TestFreeListIterateWithPages(t *testing.T) {
 	if err := pager.BeginWrite(); err != nil {
 		t.Fatalf("failed to begin write: %v", err)
 	}
-
-	// Allocate and free some pages
-	for i := 0; i < 10; i++ {
-		pgno, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("failed to allocate: %v", err)
-		}
-		if i >= 5 {
-			pager.freeList.Free(pgno)
-		}
-	}
-
+	tcAllocAndFreePages(t, pager, 10, 5)
 	if err := pager.Commit(); err != nil {
 		t.Fatalf("failed to commit: %v", err)
 	}
 
-	// Iterate
 	count := 0
 	err = pager.freeList.Iterate(func(pgno Pgno) bool {
 		count++
 		return true
 	})
-
 	if err != nil {
 		t.Errorf("iterate failed: %v", err)
 	}
-
 	t.Logf("iterated over %d free pages", count)
 }
 

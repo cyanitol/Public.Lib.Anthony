@@ -61,6 +61,13 @@ func TestCompositeSplitReverseOrder(t *testing.T) {
 // that both the "new key < existing" and "new key >= existing" branches of
 // tryInsertNewCellComposite are exercised within a single page before and after
 // splits. It also exercises prepareLeafSplitComposite and executeLeafSplitComposite.
+func insertCompositeKeys(cursor *BtCursor, keys []string, payload []byte) {
+	for _, s := range keys {
+		key := withoutrowid.EncodeCompositeKey([]interface{}{s})
+		cursor.InsertWithComposite(0, key, payload) //nolint:errcheck
+	}
+}
+
 func TestCompositeSplitMixedOrder(t *testing.T) {
 	t.Parallel()
 	bt := NewBtree(512)
@@ -69,33 +76,15 @@ func TestCompositeSplitMixedOrder(t *testing.T) {
 		t.Fatalf("CreateWithoutRowidTable: %v", err)
 	}
 	cursor := NewCursorWithOptions(bt, root, true)
-
 	payload := bytes.Repeat([]byte("p"), 40)
 
-	// Interleave: high keys first, then low keys to force insertions in the
-	// middle of existing cells on the split pages.
 	high := []string{"z9", "z8", "z7", "z6", "z5", "z4", "z3", "z2", "z1", "z0"}
 	low := []string{"a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9"}
 	mid := []string{"m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9"}
 
-	for _, s := range high {
-		key := withoutrowid.EncodeCompositeKey([]interface{}{s})
-		if err := cursor.InsertWithComposite(0, key, payload); err != nil {
-			t.Fatalf("InsertWithComposite(%q): %v", s, err)
-		}
-	}
-	for _, s := range low {
-		key := withoutrowid.EncodeCompositeKey([]interface{}{s})
-		if err := cursor.InsertWithComposite(0, key, payload); err != nil {
-			t.Fatalf("InsertWithComposite(%q): %v", s, err)
-		}
-	}
-	for _, s := range mid {
-		key := withoutrowid.EncodeCompositeKey([]interface{}{s})
-		if err := cursor.InsertWithComposite(0, key, payload); err != nil {
-			t.Fatalf("InsertWithComposite(%q): %v", s, err)
-		}
-	}
+	insertCompositeKeys(cursor, high, payload)
+	insertCompositeKeys(cursor, low, payload)
+	insertCompositeKeys(cursor, mid, payload)
 
 	total := len(high) + len(low) + len(mid)
 	scan := NewCursorWithOptions(bt, cursor.RootPage, true)
@@ -187,39 +176,42 @@ func TestCompositeSplitTwoColumnKey(t *testing.T) {
 // collectLeafCellsForSplitComposite and mergeNewCellWithExistingComposite by
 // building a small page and calling them with a key that is both less than and
 // greater than existing keys.
-func TestCompositeSplitCollectLeafCellsComposite(t *testing.T) {
-	t.Parallel()
+func setupCompositePageForCollect(t *testing.T) (*Btree, *BtCursor, uint32) {
+	t.Helper()
 	bt := NewBtree(4096)
 	root, err := bt.CreateWithoutRowidTable()
 	if err != nil {
 		t.Fatalf("CreateWithoutRowidTable: %v", err)
 	}
-
 	cursor := NewCursorWithOptions(bt, root, true)
-
-	// Insert three keys in sorted order.
-	baseKeys := [][]byte{
-		withoutrowid.EncodeCompositeKey([]interface{}{"b"}),
-		withoutrowid.EncodeCompositeKey([]interface{}{"d"}),
-		withoutrowid.EncodeCompositeKey([]interface{}{"f"}),
-	}
-	for _, k := range baseKeys {
+	for _, s := range []string{"b", "d", "f"} {
+		k := withoutrowid.EncodeCompositeKey([]interface{}{s})
 		if err := cursor.InsertWithComposite(0, k, []byte("data")); err != nil {
 			t.Fatalf("InsertWithComposite: %v", err)
 		}
 	}
-
 	cursor.CurrentPage = root
-	pageData, err := bt.GetPage(root)
+	return bt, cursor, root
+}
+
+func loadBtreePage(t *testing.T, bt *Btree, pgno uint32) *BtreePage {
+	t.Helper()
+	pageData, err := bt.GetPage(pgno)
 	if err != nil {
 		t.Fatalf("GetPage: %v", err)
 	}
-	page, err := NewBtreePage(root, pageData, bt.UsableSize)
+	page, err := NewBtreePage(pgno, pageData, bt.UsableSize)
 	if err != nil {
 		t.Fatalf("NewBtreePage: %v", err)
 	}
+	return page
+}
 
-	// newKey = "a" is less than all existing keys; tryInsertNewCellComposite returns true.
+func TestCompositeSplitCollectLeafCellsComposite_KeyBefore(t *testing.T) {
+	t.Parallel()
+	bt, cursor, root := setupCompositePageForCollect(t)
+	page := loadBtreePage(t, bt, root)
+
 	newKeyA := withoutrowid.EncodeCompositeKey([]interface{}{"a"})
 	cells, keys, err := cursor.collectLeafCellsForSplitComposite(page, newKeyA, []byte("va"))
 	if err != nil {
@@ -231,29 +223,23 @@ func TestCompositeSplitCollectLeafCellsComposite(t *testing.T) {
 	if !bytes.Equal(keys[0], newKeyA) {
 		t.Errorf("first key should be 'a', got %q", keys[0])
 	}
+}
 
-	// Reload page for the second call since page state may differ.
-	pageData2, err := bt.GetPage(root)
-	if err != nil {
-		t.Fatalf("GetPage2: %v", err)
-	}
-	page2, err := NewBtreePage(root, pageData2, bt.UsableSize)
-	if err != nil {
-		t.Fatalf("NewBtreePage2: %v", err)
-	}
+func TestCompositeSplitCollectLeafCellsComposite_KeyAfter(t *testing.T) {
+	t.Parallel()
+	bt, cursor, root := setupCompositePageForCollect(t)
+	page := loadBtreePage(t, bt, root)
 
-	// newKey = "z" is greater than all existing keys; tryInsertNewCellComposite returns false
-	// for all cells and the key is appended at the end.
 	newKeyZ := withoutrowid.EncodeCompositeKey([]interface{}{"z"})
-	cells2, keys2, err := cursor.collectLeafCellsForSplitComposite(page2, newKeyZ, []byte("vz"))
+	cells, keys, err := cursor.collectLeafCellsForSplitComposite(page, newKeyZ, []byte("vz"))
 	if err != nil {
 		t.Fatalf("collectLeafCellsForSplitComposite(z): %v", err)
 	}
-	if len(cells2) != 4 {
-		t.Errorf("expected 4 cells with 'z' key, got %d", len(cells2))
+	if len(cells) != 4 {
+		t.Errorf("expected 4 cells with 'z' key, got %d", len(cells))
 	}
-	if !bytes.Equal(keys2[len(keys2)-1], newKeyZ) {
-		t.Errorf("last key should be 'z', got %q", keys2[len(keys2)-1])
+	if !bytes.Equal(keys[len(keys)-1], newKeyZ) {
+		t.Errorf("last key should be 'z', got %q", keys[len(keys)-1])
 	}
 }
 
@@ -261,22 +247,18 @@ func TestCompositeSplitCollectLeafCellsComposite(t *testing.T) {
 // collectInteriorCellsForSplitComposite and tryInsertInteriorCellComposite by
 // constructing a composite interior page and calling the collect function with
 // keys that sort before and after existing cells.
-func TestCompositeSplitCollectInteriorCellsComposite(t *testing.T) {
-	t.Parallel()
+func setupInteriorCompositePageForCollect(t *testing.T) (*BtCursor, *BtreePage) {
+	t.Helper()
 	bt := NewBtree(4096)
 	root, err := bt.CreateWithoutRowidTable()
 	if err != nil {
 		t.Fatalf("CreateWithoutRowidTable: %v", err)
 	}
 	cursor := NewCursorWithOptions(bt, root, true)
-
-	// Allocate an interior composite page manually.
 	interiorPage, _, err := cursor.allocateAndInitializeInteriorPage(PageTypeInteriorTableNo)
 	if err != nil {
 		t.Fatalf("allocateAndInitializeInteriorPage: %v", err)
 	}
-
-	// Insert three interior cells with composite keys "b", "d", "f".
 	keys := [][]byte{
 		withoutrowid.EncodeCompositeKey([]interface{}{"b"}),
 		withoutrowid.EncodeCompositeKey([]interface{}{"d"}),
@@ -289,8 +271,13 @@ func TestCompositeSplitCollectInteriorCellsComposite(t *testing.T) {
 		}
 	}
 	interiorPage.Header.RightChild = 99
+	return cursor, interiorPage
+}
 
-	// Key "a" < "b": tryInsertInteriorCellComposite should insert at index 0.
+func TestCompositeSplitCollectInteriorCellsComposite_KeyBefore(t *testing.T) {
+	t.Parallel()
+	cursor, interiorPage := setupInteriorCompositePageForCollect(t)
+
 	newKeyA := withoutrowid.EncodeCompositeKey([]interface{}{"a"})
 	cells, ks, _, err := cursor.collectInteriorCellsForSplitComposite(interiorPage, newKeyA, 5)
 	if err != nil {
@@ -302,17 +289,21 @@ func TestCompositeSplitCollectInteriorCellsComposite(t *testing.T) {
 	if !bytes.Equal(ks[0], newKeyA) {
 		t.Errorf("first key should be 'a', got %q", ks[0])
 	}
+}
 
-	// Key "z" > "f": the key should be appended at the end.
+func TestCompositeSplitCollectInteriorCellsComposite_KeyAfter(t *testing.T) {
+	t.Parallel()
+	cursor, interiorPage := setupInteriorCompositePageForCollect(t)
+
 	newKeyZ := withoutrowid.EncodeCompositeKey([]interface{}{"z"})
-	cells2, ks2, _, err := cursor.collectInteriorCellsForSplitComposite(interiorPage, newKeyZ, 6)
+	cells, ks, _, err := cursor.collectInteriorCellsForSplitComposite(interiorPage, newKeyZ, 6)
 	if err != nil {
 		t.Fatalf("collectInteriorCellsForSplitComposite(z): %v", err)
 	}
-	if len(cells2) != 4 {
-		t.Errorf("expected 4 cells with 'z' key, got %d", len(cells2))
+	if len(cells) != 4 {
+		t.Errorf("expected 4 cells with 'z' key, got %d", len(cells))
 	}
-	if !bytes.Equal(ks2[len(ks2)-1], newKeyZ) {
-		t.Errorf("last key should be 'z', got %q", ks2[len(ks2)-1])
+	if !bytes.Equal(ks[len(ks)-1], newKeyZ) {
+		t.Errorf("last key should be 'z', got %q", ks[len(ks)-1])
 	}
 }

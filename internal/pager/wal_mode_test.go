@@ -11,51 +11,53 @@ import (
 )
 
 // TestWALModeSwitch tests switching to and from WAL mode
-func TestWALModeSwitch(t *testing.T) {
+func TestWALModeSwitch_ToWAL(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
 	dbFile := filepath.Join(tempDir, "test.db")
 
-	// Create pager with delete journal mode
 	pager, err := Open(dbFile, false)
 	if err != nil {
 		t.Fatalf("Failed to open pager: %v", err)
 	}
 	defer pager.Close()
 
-	// Verify initial mode
 	if pager.GetJournalMode() != JournalModeDelete {
 		t.Errorf("Expected delete mode, got %d", pager.GetJournalMode())
 	}
 
-	// Switch to WAL mode
 	if err := pager.SetJournalMode(JournalModeWAL); err != nil {
 		t.Fatalf("Failed to switch to WAL mode: %v", err)
 	}
-
-	// Verify WAL mode is active
 	if pager.GetJournalMode() != JournalModeWAL {
 		t.Errorf("Expected WAL mode, got %d", pager.GetJournalMode())
 	}
 
-	// Verify WAL files were created
-	walFile := dbFile + "-wal"
-	shmFile := dbFile + "-shm"
-
-	if _, err := os.Stat(walFile); os.IsNotExist(err) {
+	if _, err := os.Stat(dbFile + "-wal"); os.IsNotExist(err) {
 		t.Errorf("WAL file was not created")
 	}
-
-	if _, err := os.Stat(shmFile); os.IsNotExist(err) {
+	if _, err := os.Stat(dbFile + "-shm"); os.IsNotExist(err) {
 		t.Errorf("WAL index file was not created")
 	}
+}
 
-	// Switch back to delete mode
+func TestWALModeSwitch_BackToDelete(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "test.db")
+
+	pager, err := Open(dbFile, false)
+	if err != nil {
+		t.Fatalf("Failed to open pager: %v", err)
+	}
+	defer pager.Close()
+
+	if err := pager.SetJournalMode(JournalModeWAL); err != nil {
+		t.Fatalf("Failed to switch to WAL mode: %v", err)
+	}
 	if err := pager.SetJournalMode(JournalModeDelete); err != nil {
 		t.Fatalf("Failed to switch back to delete mode: %v", err)
 	}
-
-	// Verify mode changed
 	if pager.GetJournalMode() != JournalModeDelete {
 		t.Errorf("Expected delete mode after switch, got %d", pager.GetJournalMode())
 	}

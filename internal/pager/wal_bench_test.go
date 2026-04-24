@@ -76,37 +76,42 @@ func BenchmarkWALReadFrame(b *testing.B) {
 
 // BenchmarkWALChecksumValidation measures checksum validation overhead on reads
 // by writing frames, closing and reopening (to force cache rebuild), then reading.
-func BenchmarkWALChecksumValidation(b *testing.B) {
+// benchSetupWALWithFrames creates a WAL with frameCount frames and returns a reopened WAL.
+func benchSetupWALWithFrames(b *testing.B, frameCount int) *WAL {
+	b.Helper()
 	dir, err := os.MkdirTemp("", "wal_checksum_bench_*")
 	if err != nil {
 		b.Fatalf("MkdirTemp() error = %v", err)
 	}
-	defer os.RemoveAll(dir)
+	b.Cleanup(func() { os.RemoveAll(dir) })
 
 	dbFile := filepath.Join(dir, "bench.db")
 	if err := os.WriteFile(dbFile, []byte{}, 0600); err != nil {
 		b.Fatalf("WriteFile() error = %v", err)
 	}
 
-	const frameCount = 50
 	w := NewWAL(dbFile, DefaultPageSize)
 	if err := w.Open(); err != nil {
 		b.Fatalf("WAL.Open() error = %v", err)
 	}
 	for i := 0; i < frameCount; i++ {
-		data := makeTestPage(i*7, DefaultPageSize)
-		if err := w.WriteFrame(Pgno(i+1), data, uint32(i+1)); err != nil {
+		if err := w.WriteFrame(Pgno(i+1), makeTestPage(i*7, DefaultPageSize), uint32(i+1)); err != nil {
 			w.Close()
 			b.Fatalf("WriteFrame(%d) error = %v", i, err)
 		}
 	}
 	w.Close()
 
-	// Reopen to force checksum validation during recovery.
 	w2 := NewWAL(dbFile, DefaultPageSize)
 	if err := w2.Open(); err != nil {
 		b.Fatalf("WAL.Open() (reopen) error = %v", err)
 	}
+	return w2
+}
+
+func BenchmarkWALChecksumValidation(b *testing.B) {
+	const frameCount = 50
+	w2 := benchSetupWALWithFrames(b, frameCount)
 	defer w2.Close()
 
 	b.ResetTimer()

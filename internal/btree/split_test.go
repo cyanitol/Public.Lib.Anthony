@@ -320,51 +320,39 @@ func TestSplitMultipleLevels(t *testing.T) {
 }
 
 // TestSplitEmptyPayload tests splitting with empty payloads
-func TestSplitEmptyPayload(t *testing.T) {
-	t.Parallel()
-	bt := NewBtree(1024)
-
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable failed: %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Insert many cells with empty payloads
-	for i := 1; i <= 100; i++ {
-		key := int64(i)
-		err := cursor.Insert(key, []byte{})
-		if err != nil {
-			t.Logf("Insert %d resulted in: %v", i, err)
-		}
-	}
-
-	// Verify we can read them back
-	cursor2 := NewCursor(bt, cursor.RootPage)
-	err = cursor2.MoveToFirst()
-	if err != nil {
+func verifyEmptyPayloads(t *testing.T, cursor *BtCursor) int {
+	t.Helper()
+	if err := cursor.MoveToFirst(); err != nil {
 		t.Fatalf("MoveToFirst failed: %v", err)
 	}
-
 	count := 0
-	for cursor2.IsValid() {
-		payload := cursor2.GetPayload()
+	for cursor.IsValid() {
+		payload := cursor.GetPayload()
 		if len(payload) != 0 {
 			t.Errorf("Cell %d: expected empty payload, got %d bytes", count, len(payload))
 		}
 		count++
-
-		if err := cursor2.Next(); err != nil {
+		if err := cursor.Next(); err != nil {
 			break
 		}
 	}
+	return count
+}
 
+func TestSplitEmptyPayload(t *testing.T) {
+	t.Parallel()
+	bt := NewBtree(1024)
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable failed: %v", err)
+	}
+	cursor := NewCursor(bt, rootPage)
+	insertRowsFixedPayload(cursor, 1, 100, []byte{})
+
+	count := verifyEmptyPayloads(t, NewCursor(bt, cursor.RootPage))
 	if count < 10 {
 		t.Errorf("Expected at least 10 cells, got %d", count)
 	}
-
-	t.Logf("Verified %d cells with empty payloads", count)
 }
 
 // TestSplitLargePayloads tests splitting with large payloads

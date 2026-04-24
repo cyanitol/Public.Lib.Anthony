@@ -89,6 +89,16 @@ func TestLockCoverage_PendingLockAcquireAndRelease(t *testing.T) {
 // TestLockCoverage_PendingLockConflict exercises the EAGAIN/EACCES error
 // branch inside acquirePendingLock. lm1 holds PENDING; lm2 tries to acquire
 // PENDING on the same file and must see ErrLockBusy.
+// lcEscalateLM escalates a lock manager through the given levels, fataling on error.
+func lcEscalateLM(t *testing.T, lm *pager.LockManager, levels []pager.LockLevel) {
+	t.Helper()
+	for _, lvl := range levels {
+		if err := lm.AcquireLock(lvl); err != nil {
+			t.Fatalf("AcquireLock(%v): %v", lvl, err)
+		}
+	}
+}
+
 func TestLockCoverage_PendingLockConflict(t *testing.T) {
 	f1, cleanup1 := lockCoverageOpenFile(t)
 	defer cleanup1()
@@ -101,35 +111,21 @@ func TestLockCoverage_PendingLockConflict(t *testing.T) {
 
 	_, lm2 := lockCoverageSecondHandle(t, f1.Name())
 
-	// lm1: NONE -> SHARED -> RESERVED -> PENDING
-	if err := lm1.AcquireLock(pager.LockLevel(pager.LockShared)); err != nil {
-		t.Fatalf("lm1 AcquireLock(SHARED): %v", err)
-	}
-	if err := lm1.AcquireLock(pager.LockLevel(pager.LockReserved)); err != nil {
-		t.Fatalf("lm1 AcquireLock(RESERVED): %v", err)
-	}
-	if err := lm1.AcquireLock(pager.LockLevel(pager.LockPending)); err != nil {
-		t.Fatalf("lm1 AcquireLock(PENDING): %v", err)
-	}
+	lcEscalateLM(t, lm1, []pager.LockLevel{
+		pager.LockLevel(pager.LockShared),
+		pager.LockLevel(pager.LockReserved),
+		pager.LockLevel(pager.LockPending),
+	})
 
-	// lm2: NONE -> SHARED -> RESERVED
-	// (PENDING byte is locked by lm1 as F_WRLCK so lm2's RESERVED may also
-	// fail depending on ordering — use TryAcquireLock and accept either outcome)
 	if err := lm2.TryAcquireLock(pager.LockLevel(pager.LockShared)); err != nil {
 		t.Skipf("lm2 cannot acquire SHARED (platform behaviour): %v", err)
 	}
 	if err := lm2.TryAcquireLock(pager.LockLevel(pager.LockReserved)); err != nil {
-		// Another connection might already hold RESERVED — that's fine.
 		t.Skipf("lm2 cannot acquire RESERVED (platform behaviour): %v", err)
 	}
 
-	// lm2 tries to acquire PENDING while lm1 already holds it.
-	// This must either return ErrLockBusy (the covered path) or succeed on
-	// platforms that use per-process POSIX locks (same process shares locks).
 	err = lm2.TryAcquireLock(pager.LockLevel(pager.LockPending))
 	if err == nil {
-		// Some platforms (POSIX per-process locks) allow the same process to
-		// re-acquire the same byte lock — that's still valid behaviour.
 		t.Log("lm2 acquired PENDING (same-process POSIX lock sharing)")
 	} else if err == pager.ErrLockBusy {
 		t.Log("lm2 correctly received ErrLockBusy for PENDING conflict")

@@ -231,72 +231,66 @@ func TestPKChanged(t *testing.T) {
 // TestDecodePrimaryKeyValues — covers decodePrimaryKeyValues
 // ---------------------------------------------------------------------------
 
-func TestDecodePrimaryKeyValues(t *testing.T) {
-	t.Run("empty pkCols", func(t *testing.T) {
-		m, err := decodePrimaryKeyValues(nil, []byte{0x00})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(m) != 0 {
-			t.Errorf("expected empty map, got %v", m)
-		}
-	})
+func TestDecodePrimaryKeyValues_EmptyInputs(t *testing.T) {
+	m, err := decodePrimaryKeyValues(nil, []byte{0x00})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(m) != 0 {
+		t.Errorf("expected empty map, got %v", m)
+	}
 
-	t.Run("empty keyBytes", func(t *testing.T) {
-		m, err := decodePrimaryKeyValues([]string{"id"}, nil)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(m) != 0 {
-			t.Errorf("expected empty map, got %v", m)
-		}
-	})
+	m, err = decodePrimaryKeyValues([]string{"id"}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(m) != 0 {
+		t.Errorf("expected empty map, got %v", m)
+	}
+}
 
-	t.Run("single int64 key", func(t *testing.T) {
-		keyBytes := withoutrowid.EncodeCompositeKey([]interface{}{int64(42)})
-		m, err := decodePrimaryKeyValues([]string{"id"}, keyBytes)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if m["id"] != int64(42) {
-			t.Errorf("expected id=42, got %v", m["id"])
-		}
-	})
+func TestDecodePrimaryKeyValues_SingleAndMultiColumn(t *testing.T) {
+	keyBytes := withoutrowid.EncodeCompositeKey([]interface{}{int64(42)})
+	m, err := decodePrimaryKeyValues([]string{"id"}, keyBytes)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m["id"] != int64(42) {
+		t.Errorf("expected id=42, got %v", m["id"])
+	}
 
-	t.Run("two-column key", func(t *testing.T) {
-		keyBytes := withoutrowid.EncodeCompositeKey([]interface{}{int64(1), "alice"})
-		m, err := decodePrimaryKeyValues([]string{"a", "b"}, keyBytes)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if m["a"] != int64(1) {
-			t.Errorf("expected a=1, got %v", m["a"])
-		}
-		if m["b"] != "alice" {
-			t.Errorf("expected b=alice, got %v", m["b"])
-		}
-	})
+	keyBytes = withoutrowid.EncodeCompositeKey([]interface{}{int64(1), "alice"})
+	m, err = decodePrimaryKeyValues([]string{"a", "b"}, keyBytes)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m["a"] != int64(1) {
+		t.Errorf("expected a=1, got %v", m["a"])
+	}
+	if m["b"] != "alice" {
+		t.Errorf("expected b=alice, got %v", m["b"])
+	}
+}
 
-	t.Run("more pkCols than key values", func(t *testing.T) {
-		keyBytes := withoutrowid.EncodeCompositeKey([]interface{}{int64(7)})
-		m, err := decodePrimaryKeyValues([]string{"x", "y"}, keyBytes)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if m["x"] != int64(7) {
-			t.Errorf("expected x=7, got %v", m["x"])
-		}
-		if _, exists := m["y"]; exists {
-			t.Error("expected y to be absent when key has fewer values")
-		}
-	})
+func TestDecodePrimaryKeyValues_MoreColsThanValues(t *testing.T) {
+	keyBytes := withoutrowid.EncodeCompositeKey([]interface{}{int64(7)})
+	m, err := decodePrimaryKeyValues([]string{"x", "y"}, keyBytes)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m["x"] != int64(7) {
+		t.Errorf("expected x=7, got %v", m["x"])
+	}
+	if _, exists := m["y"]; exists {
+		t.Error("expected y to be absent when key has fewer values")
+	}
+}
 
-	t.Run("invalid key bytes", func(t *testing.T) {
-		_, err := decodePrimaryKeyValues([]string{"id"}, []byte{0xFF, 0xFF})
-		if err == nil {
-			t.Error("expected error for invalid key bytes")
-		}
-	})
+func TestDecodePrimaryKeyValues_InvalidKeyBytes(t *testing.T) {
+	_, err := decodePrimaryKeyValues([]string{"id"}, []byte{0xFF, 0xFF})
+	if err == nil {
+		t.Error("expected error for invalid key bytes")
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -408,63 +402,51 @@ func TestValidateDeleteConstraintsWithoutRowID(t *testing.T) {
 // TestGetTableColumnNamesWithIface — covers getTableColumnNamesWithIface
 // ---------------------------------------------------------------------------
 
-func TestGetTableColumnNamesWithIface(t *testing.T) {
-	t.Run("nil schema in ctx", func(t *testing.T) {
-		v := NewTestVDBE(1)
-		v.Ctx = &VDBEContext{Schema: nil}
-		// Schema nil: type assertion to schemaGetter yields false.
-		_, _, ok := v.getTableColumnNamesWithIface("t")
-		if ok {
-			t.Error("expected false when schema is nil")
-		}
-	})
+func TestGetTableColumnNamesWithIface_ErrorCases(t *testing.T) {
+	// nil schema
+	v := NewTestVDBE(1)
+	v.Ctx = &VDBEContext{Schema: nil}
+	if _, _, ok := v.getTableColumnNamesWithIface("t"); ok {
+		t.Error("expected false when schema is nil")
+	}
 
-	t.Run("schema doesn't implement GetTableByName", func(t *testing.T) {
-		v := NewTestVDBE(1)
-		v.Ctx = &VDBEContext{Schema: struct{}{}}
-		_, _, ok := v.getTableColumnNamesWithIface("t")
-		if ok {
-			t.Error("expected false when schema lacks GetTableByName")
-		}
-	})
+	// schema doesn't implement GetTableByName
+	v.Ctx = &VDBEContext{Schema: struct{}{}}
+	if _, _, ok := v.getTableColumnNamesWithIface("t"); ok {
+		t.Error("expected false when schema lacks GetTableByName")
+	}
 
-	t.Run("table not found", func(t *testing.T) {
-		v := NewTestVDBE(1)
-		v.Ctx = &VDBEContext{Schema: &wrSchema{tables: map[string]interface{}{}}}
-		_, _, ok := v.getTableColumnNamesWithIface("missing")
-		if ok {
-			t.Error("expected false when table not found")
-		}
-	})
+	// table not found
+	v.Ctx = &VDBEContext{Schema: &wrSchema{tables: map[string]interface{}{}}}
+	if _, _, ok := v.getTableColumnNamesWithIface("missing"); ok {
+		t.Error("expected false when table not found")
+	}
 
-	t.Run("table lacks GetColumnNames", func(t *testing.T) {
-		v := NewTestVDBE(1)
-		v.Ctx = &VDBEContext{Schema: &wrSchema{
-			tables: map[string]interface{}{"t": struct{}{}},
-		}}
-		_, _, ok := v.getTableColumnNamesWithIface("t")
-		if ok {
-			t.Error("expected false when table lacks GetColumnNames")
-		}
-	})
+	// table lacks GetColumnNames
+	v.Ctx = &VDBEContext{Schema: &wrSchema{
+		tables: map[string]interface{}{"t": struct{}{}},
+	}}
+	if _, _, ok := v.getTableColumnNamesWithIface("t"); ok {
+		t.Error("expected false when table lacks GetColumnNames")
+	}
+}
 
-	t.Run("success", func(t *testing.T) {
-		tbl := &wrColTable{colNames: []string{"id", "name"}}
-		v := NewTestVDBE(1)
-		v.Ctx = &VDBEContext{Schema: &wrSchema{
-			tables: map[string]interface{}{"t": tbl},
-		}}
-		iface, cols, ok := v.getTableColumnNamesWithIface("t")
-		if !ok {
-			t.Fatal("expected ok=true")
-		}
-		if iface == nil {
-			t.Error("expected non-nil tableIface")
-		}
-		if len(cols) != 2 || cols[0] != "id" || cols[1] != "name" {
-			t.Errorf("unexpected cols: %v", cols)
-		}
-	})
+func TestGetTableColumnNamesWithIface_Success(t *testing.T) {
+	tbl := &wrColTable{colNames: []string{"id", "name"}}
+	v := NewTestVDBE(1)
+	v.Ctx = &VDBEContext{Schema: &wrSchema{
+		tables: map[string]interface{}{"t": tbl},
+	}}
+	iface, cols, ok := v.getTableColumnNamesWithIface("t")
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if iface == nil {
+		t.Error("expected non-nil tableIface")
+	}
+	if len(cols) != 2 || cols[0] != "id" || cols[1] != "name" {
+		t.Errorf("unexpected cols: %v", cols)
+	}
 }
 
 // ---------------------------------------------------------------------------

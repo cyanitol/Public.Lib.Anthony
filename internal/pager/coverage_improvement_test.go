@@ -371,6 +371,35 @@ func TestTransactionWaitForReadersToFinish(t *testing.T) {
 }
 
 // TestPagerJournalZeroHeader tests zeroing journal header via journal API
+// ciWritePageAndCommit gets page 1, marks it dirty, puts it back, and commits.
+func ciWritePageAndCommit(t *testing.T, p *Pager) {
+	t.Helper()
+	page, err := p.Get(1)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+	if err := p.Write(page); err != nil {
+		t.Fatalf("failed to write page: %v", err)
+	}
+	p.Put(page)
+	if err := p.Commit(); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+}
+
+// ciWriteJournalEntry creates a journal, writes one original entry, and closes it.
+func ciWriteJournalEntry(t *testing.T, journalFile string) {
+	t.Helper()
+	journal := NewJournal(journalFile, 4096, 1)
+	if err := journal.Open(); err != nil {
+		t.Fatalf("failed to open journal: %v", err)
+	}
+	if err := journal.WriteOriginal(1, make([]byte, 4096)); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+	journal.Close()
+}
+
 func TestPagerJournalZeroHeader(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_zero.db")
@@ -382,41 +411,14 @@ func TestPagerJournalZeroHeader(t *testing.T) {
 	}
 	defer pager.Close()
 
-	// Start a write transaction to create journal
-	page, err := pager.Get(1)
-	if err != nil {
-		t.Fatalf("failed to get page: %v", err)
-	}
+	ciWritePageAndCommit(t, pager)
+	ciWriteJournalEntry(t, journalFile)
 
-	if err := pager.Write(page); err != nil {
-		t.Fatalf("failed to write page: %v", err)
-	}
-	pager.Put(page)
-
-	// Commit to ensure journal is created and synced
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Create a new journal for testing
 	journal := NewJournal(journalFile, 4096, 1)
-	if err := journal.Open(); err != nil {
-		t.Fatalf("failed to open journal: %v", err)
-	}
-
-	pageData := make([]byte, 4096)
-	if err := journal.WriteOriginal(1, pageData); err != nil {
-		t.Fatalf("failed to write: %v", err)
-	}
-	journal.Close()
-
-	// Zero the header
-	journal = NewJournal(journalFile, 4096, 1)
 	if err := journal.ZeroHeader(); err != nil {
 		t.Errorf("ZeroHeader() error = %v", err)
 	}
 
-	// Verify journal is no longer valid
 	valid, _ := journal.IsValid()
 	if valid {
 		t.Error("journal should not be valid after zeroing header")

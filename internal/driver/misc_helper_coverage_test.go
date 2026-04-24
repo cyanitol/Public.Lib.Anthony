@@ -88,9 +88,8 @@ func TestFormatP4Direct(t *testing.T) {
 	}
 }
 
-// TestParseNumericParameterDirect calls parseNumericParameter directly to cover
-// all switch branches and both valid/invalid input paths.
-func TestParseNumericParameterDirect(t *testing.T) {
+// TestParseNumericParameterDirect_CacheSize covers cache_size and its alias.
+func TestParseNumericParameterDirect_CacheSize(t *testing.T) {
 	t.Parallel()
 
 	t.Run("cache_size_valid", func(t *testing.T) {
@@ -122,6 +121,11 @@ func TestParseNumericParameterDirect(t *testing.T) {
 			t.Fatal("expected error for invalid cache_size, got nil")
 		}
 	})
+}
+
+// TestParseNumericParameterDirect_PageSize covers page_size and its alias.
+func TestParseNumericParameterDirect_PageSize(t *testing.T) {
+	t.Parallel()
 
 	t.Run("page_size_valid", func(t *testing.T) {
 		t.Parallel()
@@ -152,6 +156,11 @@ func TestParseNumericParameterDirect(t *testing.T) {
 			t.Fatal("expected error for invalid page_size, got nil")
 		}
 	})
+}
+
+// TestParseNumericParameterDirect_WALAutocheckpoint covers wal_autocheckpoint and alias.
+func TestParseNumericParameterDirect_WALAutocheckpoint(t *testing.T) {
+	t.Parallel()
 
 	t.Run("wal_autocheckpoint_valid", func(t *testing.T) {
 		t.Parallel()
@@ -174,6 +183,11 @@ func TestParseNumericParameterDirect(t *testing.T) {
 			t.Errorf("WALAutocheckpoint = %d, want 500", cfg.Pager.WALAutocheckpoint)
 		}
 	})
+}
+
+// TestParseNumericParameterDirect_MaxPageCount covers max_page_count and alias.
+func TestParseNumericParameterDirect_MaxPageCount(t *testing.T) {
+	t.Parallel()
 
 	t.Run("max_page_count_valid", func(t *testing.T) {
 		t.Parallel()
@@ -196,6 +210,11 @@ func TestParseNumericParameterDirect(t *testing.T) {
 			t.Errorf("MaxPageCount = %d, want 50000", cfg.Pager.MaxPageCount)
 		}
 	})
+}
+
+// TestParseNumericParameterDirect_BusyTimeout covers busy_timeout and its alias.
+func TestParseNumericParameterDirect_BusyTimeout(t *testing.T) {
+	t.Parallel()
 
 	t.Run("busy_timeout_valid", func(t *testing.T) {
 		t.Parallel()
@@ -226,6 +245,11 @@ func TestParseNumericParameterDirect(t *testing.T) {
 			t.Fatal("expected error for invalid busy_timeout, got nil")
 		}
 	})
+}
+
+// TestParseNumericParameterDirect_QueryTimeout covers query_timeout and its alias.
+func TestParseNumericParameterDirect_QueryTimeout(t *testing.T) {
+	t.Parallel()
 
 	t.Run("query_timeout_valid", func(t *testing.T) {
 		t.Parallel()
@@ -256,6 +280,11 @@ func TestParseNumericParameterDirect(t *testing.T) {
 			t.Fatal("expected error for invalid query_timeout, got nil")
 		}
 	})
+}
+
+// TestParseNumericParameterDirect_EdgeCases covers unknown key, zero, and negative values.
+func TestParseNumericParameterDirect_EdgeCases(t *testing.T) {
+	t.Parallel()
 
 	t.Run("unknown_key_returns_error", func(t *testing.T) {
 		t.Parallel()

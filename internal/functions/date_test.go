@@ -220,40 +220,35 @@ func testDaysInMonth(t *testing.T) {
 	}
 }
 
-// TestUnixEpochSubsec tests subsec modifier for unixepoch
-func TestUnixEpochSubsec(t *testing.T) {
-	// Test without subsec - should return integer
-	result, err := unixepochFunc([]Value{NewTextValue("now")})
+// callUnixEpoch calls unixepochFunc, asserting no error and non-null.
+func callUnixEpoch(t *testing.T, args []Value) Value {
+	t.Helper()
+	result, err := unixepochFunc(args)
 	if err != nil {
 		t.Fatalf("unixepochFunc() error = %v", err)
 	}
 	if result.IsNull() {
 		t.Fatal("unixepochFunc() returned NULL")
 	}
+	return result
+}
+
+// TestUnixEpochSubsec tests subsec modifier for unixepoch
+func TestUnixEpochSubsec(t *testing.T) {
+	// Test without subsec - should return integer
+	result := callUnixEpoch(t, []Value{NewTextValue("now")})
 	if result.Type() != TypeInteger {
 		t.Errorf("unixepochFunc() without subsec type = %v, want TypeInteger", result.Type())
 	}
 
 	// Test with subsec - should return float
-	result, err = unixepochFunc([]Value{NewTextValue("now"), NewTextValue("subsec")})
-	if err != nil {
-		t.Fatalf("unixepochFunc() with subsec error = %v", err)
-	}
-	if result.IsNull() {
-		t.Fatal("unixepochFunc() with subsec returned NULL")
-	}
+	result = callUnixEpoch(t, []Value{NewTextValue("now"), NewTextValue("subsec")})
 	if result.Type() != TypeFloat {
 		t.Errorf("unixepochFunc() with subsec type = %v, want TypeFloat", result.Type())
 	}
 
 	// Test no args
-	result, err = unixepochFunc([]Value{})
-	if err != nil {
-		t.Fatalf("unixepochFunc() with no args error = %v", err)
-	}
-	if result.IsNull() {
-		t.Fatal("unixepochFunc() with no args returned NULL")
-	}
+	callUnixEpoch(t, []Value{})
 }
 
 // TestJuliandayBasic tests julianday basic functionality

@@ -48,6 +48,47 @@ func remainQueryFloat64(t *testing.T, db *sql.DB, q string) float64 {
 	return f
 }
 
+// remainBulkInsert inserts n rows into db using the given statement and row generator.
+func remainBulkInsert(t *testing.T, db *sql.DB, insertSQL string, n int, rowGen func(i int) []interface{}) {
+	t.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	stmt, err := tx.Prepare(insertSQL)
+	if err != nil {
+		tx.Rollback()
+		t.Fatalf("Prepare: %v", err)
+	}
+	for i := 0; i < n; i++ {
+		if _, err := stmt.Exec(rowGen(i)...); err != nil {
+			stmt.Close()
+			tx.Rollback()
+			t.Fatalf("Exec row %d: %v", i, err)
+		}
+	}
+	stmt.Close()
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+}
+
+// remainCountRows counts the number of rows returned by the given rows iterator.
+func remainCountRows(t *testing.T, rows *sql.Rows, scanDest ...interface{}) int {
+	t.Helper()
+	count := 0
+	for rows.Next() {
+		if err := rows.Scan(scanDest...); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return count
+}
+
 func remainQueryNullable(t *testing.T, db *sql.DB, q string) (interface{}, bool) {
 	t.Helper()
 	rows, err := db.Query(q)
@@ -221,35 +262,10 @@ func TestVDBERemaining_DecodeIntValue_AllWidths(t *testing.T) {
 	db := remainOpenDB(t)
 
 	remainExec(t, db, "CREATE TABLE ints (val INTEGER)")
-	values := []int64{
-		42,                  // serial type 1 (1 byte, fits int8)
-		300,                 // serial type 2 (2 bytes, fits int16)
-		100000,              // serial type 4 (4 bytes, fits int32)
-		9223372036854775807, // serial type 6 (8 bytes, max int64)
-		-1,                  // serial type 1 (negative)
-		-32769,              // serial type 4 (exceeds int16)
-	}
-
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("Begin: %v", err)
-	}
-	stmt, err := tx.Prepare("INSERT INTO ints VALUES(?)")
-	if err != nil {
-		tx.Rollback()
-		t.Fatalf("Prepare: %v", err)
-	}
-	for _, v := range values {
-		if _, err := stmt.Exec(v); err != nil {
-			stmt.Close()
-			tx.Rollback()
-			t.Fatalf("Exec(%d): %v", v, err)
-		}
-	}
-	stmt.Close()
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
+	values := []int64{42, 300, 100000, 9223372036854775807, -1, -32769}
+	remainBulkInsert(t, db, "INSERT INTO ints VALUES(?)", len(values), func(i int) []interface{} {
+		return []interface{}{values[i]}
+	})
 
 	rows, err := db.Query("SELECT val FROM ints ORDER BY val")
 	if err != nil {
@@ -257,14 +273,8 @@ func TestVDBERemaining_DecodeIntValue_AllWidths(t *testing.T) {
 	}
 	defer rows.Close()
 
-	count := 0
-	for rows.Next() {
-		var n int64
-		if err := rows.Scan(&n); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		count++
-	}
+	var n int64
+	count := remainCountRows(t, rows, &n)
 	if count != len(values) {
 		t.Errorf("expected %d rows, got %d", len(values), count)
 	}
@@ -480,49 +490,21 @@ func TestVDBERemaining_SorterSpill_LargeOrderBy(t *testing.T) {
 	db := remainOpenDB(t)
 
 	remainExec(t, db, "CREATE TABLE large (id INTEGER, val TEXT, n INTEGER)")
-
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("Begin: %v", err)
-	}
-	stmt, err := tx.Prepare("INSERT INTO large VALUES(?, ?, ?)")
-	if err != nil {
-		tx.Rollback()
-		t.Fatalf("Prepare: %v", err)
-	}
 	const n = 5000
-	for i := n; i >= 1; i-- {
-		_, err := stmt.Exec(i, fmt.Sprintf("row_%05d", i), n-i)
-		if err != nil {
-			stmt.Close()
-			tx.Rollback()
-			t.Fatalf("Exec row %d: %v", i, err)
-		}
-	}
-	stmt.Close()
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
+	remainBulkInsert(t, db, "INSERT INTO large VALUES(?, ?, ?)", n, func(i int) []interface{} {
+		v := n - i
+		return []interface{}{v, fmt.Sprintf("row_%05d", v), n - v}
+	})
 
-	// ORDER BY without index forces the sorter path.
 	rows, err := db.Query("SELECT id, val FROM large ORDER BY n, val LIMIT 100")
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	defer rows.Close()
 
-	count := 0
-	for rows.Next() {
-		var id int
-		var val string
-		if err := rows.Scan(&id, &val); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		count++
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows.Err: %v", err)
-	}
+	var id int
+	var val string
+	count := remainCountRows(t, rows, &id, &val)
 	if count != 100 {
 		t.Errorf("expected 100 rows, got %d", count)
 	}
@@ -535,46 +517,14 @@ func TestVDBERemaining_SorterSpill_MixedTypes(t *testing.T) {
 	db := remainOpenDB(t)
 
 	remainExec(t, db, "CREATE TABLE mixed (id INTEGER, f REAL, s TEXT, b BLOB, n INTEGER)")
+	const numRows = 2000
+	remainBulkInsert(t, db, "INSERT INTO mixed VALUES(?, ?, ?, ?, ?)", numRows, func(i int) []interface{} {
+		return []interface{}{i, float64(i) * 0.5, fmt.Sprintf("str_%04d", i), []byte{byte(i % 256)}, numRows - i}
+	})
 
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("Begin: %v", err)
-	}
-	stmt, err := tx.Prepare("INSERT INTO mixed VALUES(?, ?, ?, ?, ?)")
-	if err != nil {
-		tx.Rollback()
-		t.Fatalf("Prepare: %v", err)
-	}
-
-	const rows = 2000
-	for i := 0; i < rows; i++ {
-		_, err := stmt.Exec(i, float64(i)*0.5, fmt.Sprintf("str_%04d", i), []byte{byte(i % 256)}, rows-i)
-		if err != nil {
-			stmt.Close()
-			tx.Rollback()
-			t.Fatalf("Exec row %d: %v", i, err)
-		}
-	}
-	stmt.Close()
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
-
-	// ORDER BY on the last column (no index) forces sorter path with mixed types.
-	qrows, err := db.Query("SELECT COUNT(*) FROM (SELECT id FROM mixed ORDER BY n)")
-	if err != nil {
-		t.Fatalf("query: %v", err)
-	}
-	defer qrows.Close()
-
-	if qrows.Next() {
-		var cnt int
-		if err := qrows.Scan(&cnt); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		if cnt != rows {
-			t.Errorf("expected %d rows, got %d", rows, cnt)
-		}
+	cnt := remainQueryInt64(t, db, "SELECT COUNT(*) FROM (SELECT id FROM mixed ORDER BY n)")
+	if cnt != int64(numRows) {
+		t.Errorf("expected %d rows, got %d", numRows, cnt)
 	}
 }
 

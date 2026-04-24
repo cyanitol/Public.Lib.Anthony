@@ -287,6 +287,12 @@ func verifyIndexMatch(t *testing.T, original, loaded *InvertedIndex) {
 	if loaded.avgDocLength != original.avgDocLength {
 		t.Errorf("avgDocLength: want %f, got %f", original.avgDocLength, loaded.avgDocLength)
 	}
+	verifyIndexTerms(t, original, loaded)
+	verifyDocLengths(t, original, loaded)
+}
+
+func verifyIndexTerms(t *testing.T, original, loaded *InvertedIndex) {
+	t.Helper()
 	for term, wantPostings := range original.index {
 		gotPostings, ok := loaded.index[term]
 		if !ok {
@@ -297,6 +303,10 @@ func verifyIndexMatch(t *testing.T, original, loaded *InvertedIndex) {
 			t.Errorf("postings for %q mismatch", term)
 		}
 	}
+}
+
+func verifyDocLengths(t *testing.T, original, loaded *InvertedIndex) {
+	t.Helper()
 	for docID, wantLen := range original.docLengths {
 		gotLen, ok := loaded.docLengths[docID]
 		if !ok {
@@ -513,25 +523,24 @@ func (r *roundTripDB) Query(sql string, args ...interface{}) ([][]interface{}, e
 		return nil, fmt.Errorf("no data in %s", tbl)
 	}
 
-	// If WHERE clause with args, filter rows where first column matches.
 	if strings.Contains(sql, "WHERE") && len(args) > 0 {
-		wantKey := fmt.Sprintf("%v", args[0])
-		var result [][]interface{}
-		for _, row := range allRows {
-			if len(row) > 0 && fmt.Sprintf("%v", row[0]) == wantKey {
-				// Return columns after the key (simulating SELECT block/term/etc).
-				result = append(result, row[1:])
-			}
-		}
-		return result, nil
+		return r.filterRows(allRows, args[0]), nil
 	}
 
-	// Full table scan: return all rows as-is.
+	result := make([][]interface{}, len(allRows))
+	copy(result, allRows)
+	return result, nil
+}
+
+func (r *roundTripDB) filterRows(allRows [][]interface{}, key interface{}) [][]interface{} {
+	wantKey := fmt.Sprintf("%v", key)
 	var result [][]interface{}
 	for _, row := range allRows {
-		result = append(result, row)
+		if len(row) > 0 && fmt.Sprintf("%v", row[0]) == wantKey {
+			result = append(result, row[1:])
+		}
 	}
-	return result, nil
+	return result
 }
 
 func (r *roundTripDB) extractTable(sql string) string {

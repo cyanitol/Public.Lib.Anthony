@@ -387,38 +387,41 @@ func TestFTS5Module(t *testing.T) {
 	}
 
 	t.Run("insert documents", func(t *testing.T) {
-		rowid, err := ftsTable.Update(4, []interface{}{nil, nil, "First Document", "This is the body of the first document"})
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-		}
-		if rowid <= 0 {
-			t.Error("Expected positive rowid")
-		}
-		rowid2, err := ftsTable.Update(4, []interface{}{nil, nil, "Second Document", "Another body with different content"})
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-		}
-		if rowid2 <= rowid {
-			t.Error("Expected increasing rowids")
-		}
+		testFTS5ModuleInsert(t, ftsTable)
 	})
 
 	t.Run("query documents", func(t *testing.T) {
-		count := queryFTS5Match(t, ftsTable, "document")
-		if count < 1 {
+		if count := queryFTS5Match(t, ftsTable, "document"); count < 1 {
 			t.Error("Expected at least 1 search result")
 		}
 	})
 
 	t.Run("delete document", func(t *testing.T) {
-		_, err := ftsTable.Update(1, []interface{}{int64(1)})
-		if err != nil {
+		if _, err := ftsTable.Update(1, []interface{}{int64(1)}); err != nil {
 			t.Fatalf("DELETE failed: %v", err)
 		}
 		if ftsTable.index.GetTotalDocuments() != 1 {
 			t.Errorf("Expected 1 document after delete, got %d", ftsTable.index.GetTotalDocuments())
 		}
 	})
+}
+
+func testFTS5ModuleInsert(t *testing.T, ftsTable *FTS5Table) {
+	t.Helper()
+	rowid, err := ftsTable.Update(4, []interface{}{nil, nil, "First Document", "This is the body of the first document"})
+	if err != nil {
+		t.Fatalf("INSERT failed: %v", err)
+	}
+	if rowid <= 0 {
+		t.Error("Expected positive rowid")
+	}
+	rowid2, err := ftsTable.Update(4, []interface{}{nil, nil, "Second Document", "Another body with different content"})
+	if err != nil {
+		t.Fatalf("INSERT failed: %v", err)
+	}
+	if rowid2 <= rowid {
+		t.Error("Expected increasing rowids")
+	}
 }
 
 // queryFTS5Match performs a MATCH query and returns the result count.
@@ -625,13 +628,7 @@ func TestFTS5Destroy(t *testing.T) {
 // TestFTS5CursorRowid tests the Rowid method.
 func TestFTS5CursorRowid(t *testing.T) {
 	t.Parallel()
-	module := NewFTS5Module()
-	table, _, err := module.Create(nil, "fts5", "main", "test_fts", []string{"content"})
-	if err != nil {
-		t.Fatalf("Create failed: %v", err)
-	}
-
-	ftsTable := table.(*FTS5Table)
+	ftsTable := createFTS5Table(t, []string{"content"})
 	ftsTable.Update(4, []interface{}{nil, nil, "test document"})
 
 	cursor, err := ftsTable.Open()
@@ -640,12 +637,15 @@ func TestFTS5CursorRowid(t *testing.T) {
 	}
 	defer cursor.Close()
 
-	// Query all documents
-	err = cursor.Filter(0, "", nil)
-	if err != nil {
+	if err := cursor.Filter(0, "", nil); err != nil {
 		t.Fatalf("Filter failed: %v", err)
 	}
 
+	assertCursorRowid(t, cursor)
+}
+
+func assertCursorRowid(t *testing.T, cursor vtab.VirtualCursor) {
+	t.Helper()
 	if !cursor.EOF() {
 		rowid, err := cursor.Rowid()
 		if err != nil {
@@ -655,14 +655,10 @@ func TestFTS5CursorRowid(t *testing.T) {
 			t.Errorf("Expected rowid 1, got %d", rowid)
 		}
 	}
-
-	// Test Rowid at EOF
 	for !cursor.EOF() {
 		cursor.Next()
 	}
-
-	_, err = cursor.Rowid()
-	if err == nil {
+	if _, err := cursor.Rowid(); err == nil {
 		t.Error("Expected error when calling Rowid at EOF")
 	}
 }

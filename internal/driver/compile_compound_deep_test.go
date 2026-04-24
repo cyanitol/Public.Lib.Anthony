@@ -280,34 +280,30 @@ func TestCompileCompoundDeepCmpDifferentTypes(t *testing.T) {
 	})
 }
 
-// TestCompileCompoundDeepCmpSameType exercises cmpSameType for the branches
-// not yet covered: equal integers, equal strings, float64 equal, and the
-// case where both strings are equal (return 0 from cmpStrings).
-func TestCompileCompoundDeepCmpSameType(t *testing.T) {
+// TestCompileCompoundDeepCmpSameType_EqualIntegers exercises equal-integer sorting.
+func TestCompileCompoundDeepCmpSameType_EqualIntegers(t *testing.T) {
 	t.Parallel()
+	db := openDeepDB(t)
+	rows := queryDeep(t, db,
+		"SELECT 5 UNION ALL SELECT 5 UNION ALL SELECT 3 ORDER BY 1 ASC")
+	if len(rows) != 3 {
+		t.Fatalf("want 3 rows, got %d", len(rows))
+	}
+	if rows[0][0] != int64(3) {
+		t.Errorf("want 3 first, got %v", rows[0][0])
+	}
+	if rows[1][0] != int64(5) || rows[2][0] != int64(5) {
+		t.Errorf("want two 5s after 3, got %v %v", rows[1][0], rows[2][0])
+	}
+}
 
-	t.Run("equal_integers_order_stable", func(t *testing.T) {
-		t.Parallel()
-		db := openDeepDB(t)
-		// UNION ALL keeps both copies; ORDER BY with equal values hits cmp==0 in
-		// cmpIntegers (return 0) then the outer if cmp==0 -> continue path.
-		rows := queryDeep(t, db,
-			"SELECT 5 UNION ALL SELECT 5 UNION ALL SELECT 3 ORDER BY 1 ASC")
-		if len(rows) != 3 {
-			t.Fatalf("want 3 rows, got %d", len(rows))
-		}
-		if rows[0][0] != int64(3) {
-			t.Errorf("want 3 first, got %v", rows[0][0])
-		}
-		if rows[1][0] != int64(5) || rows[2][0] != int64(5) {
-			t.Errorf("want two 5s after 3, got %v %v", rows[1][0], rows[2][0])
-		}
-	})
+// TestCompileCompoundDeepCmpSameType_Strings exercises equal and ordered string sorting.
+func TestCompileCompoundDeepCmpSameType_Strings(t *testing.T) {
+	t.Parallel()
 
 	t.Run("equal_strings_stable_order", func(t *testing.T) {
 		t.Parallel()
 		db := openDeepDB(t)
-		// Equal strings: cmpStrings returns 0, the outer cmp==0 -> continue.
 		rows := queryDeep(t, db,
 			"SELECT 'foo' UNION ALL SELECT 'foo' UNION ALL SELECT 'bar' ORDER BY 1 ASC")
 		if len(rows) != 3 {
@@ -321,7 +317,6 @@ func TestCompileCompoundDeepCmpSameType(t *testing.T) {
 	t.Run("string_ascending_order", func(t *testing.T) {
 		t.Parallel()
 		db := openDeepDB(t)
-		// cmpStrings: 'apple' < 'banana' < 'cherry' exercises a<b and a>b paths.
 		rows := queryDeep(t, db,
 			"SELECT 'cherry' UNION ALL SELECT 'apple' UNION ALL SELECT 'banana' ORDER BY 1 ASC")
 		if len(rows) != 3 {
@@ -334,11 +329,16 @@ func TestCompileCompoundDeepCmpSameType(t *testing.T) {
 			t.Errorf("want 'cherry' last, got %v", rows[2][0])
 		}
 	})
+}
+
+// TestCompileCompoundDeepCmpSameType_FloatAndCross exercises cmpSameType for
+// equal floats and int64/float64 cross-type comparisons.
+func TestCompileCompoundDeepCmpSameType_FloatAndCross(t *testing.T) {
+	t.Parallel()
 
 	t.Run("float64_vs_float64_equal", func(t *testing.T) {
 		t.Parallel()
 		db := openDeepDB(t)
-		// Equal floats trigger cmpFloats return 0 -> outer cmp==0 -> continue.
 		rows := queryDeep(t, db,
 			"SELECT 2.718 UNION ALL SELECT 2.718 UNION ALL SELECT 1.0 ORDER BY 1 ASC")
 		if len(rows) != 3 {
@@ -352,8 +352,6 @@ func TestCompileCompoundDeepCmpSameType(t *testing.T) {
 	t.Run("int64_vs_float64_cross_comparison", func(t *testing.T) {
 		t.Parallel()
 		db := openDeepDB(t)
-		// int64(2) vs float64(2.5): cmpSameType: av=int64(2), b is float64 ->
-		// cmpFloats(2.0, 2.5) -> -1. Both have typeOrder=1 so same-type dispatch.
 		rows := queryDeep(t, db,
 			"SELECT 2 UNION ALL SELECT 2.5 UNION ALL SELECT 1.5 ORDER BY 1 ASC")
 		if len(rows) != 3 {
@@ -367,8 +365,6 @@ func TestCompileCompoundDeepCmpSameType(t *testing.T) {
 	t.Run("float64_vs_int64_cross_comparison", func(t *testing.T) {
 		t.Parallel()
 		db := openDeepDB(t)
-		// float64(0.5) vs int64(1): cmpSameType: av=float64(0.5), b is int64 ->
-		// cmpFloats(0.5, 1.0) -> -1. Exercises the float64 case with int64 b.
 		rows := queryDeep(t, db,
 			"SELECT 0.5 UNION ALL SELECT 1 UNION ALL SELECT 3.0 ORDER BY 1 ASC")
 		if len(rows) != 3 {

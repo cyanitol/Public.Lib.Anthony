@@ -156,52 +156,52 @@ func shuffledIndices(n int) []int {
 // TestWALCheckpointAfterManyFrames writes 100 frames, checkpoints, verifies the
 // WAL is empty, then writes 10 more frames and reads them back correctly.
 // This tests WAL restart after checkpoint.
+// walWriteFramesBatch writes numFrames with deterministic data based on seedMul and seedAdd.
+func walWriteFramesBatch(t *testing.T, w *WAL, numFrames int, seedMul, seedAdd int) [][]byte {
+	t.Helper()
+	result := make([][]byte, numFrames)
+	for i := 0; i < numFrames; i++ {
+		data := makeTestPage(i*seedMul+seedAdd, DefaultPageSize)
+		result[i] = data
+		mustWriteFrame(t, w, Pgno(i+1), data, uint32(i+1))
+	}
+	return result
+}
+
+// walVerifyFramesBatch reads numFrames from the WAL and verifies data and page numbers.
+func walVerifyFramesBatch(t *testing.T, w *WAL, expected [][]byte) {
+	t.Helper()
+	for i := 0; i < len(expected); i++ {
+		frame, err := w.ReadFrame(uint32(i))
+		if err != nil {
+			t.Errorf("ReadFrame(%d) error = %v", i, err)
+			continue
+		}
+		if frame.PageNumber != uint32(i+1) {
+			t.Errorf("frame %d: got page number %d, want %d", i, frame.PageNumber, i+1)
+		}
+		if !bytesEqual(frame.Data, expected[i]) {
+			t.Errorf("frame %d: data mismatch", i)
+		}
+	}
+}
+
 func TestWALCheckpointAfterManyFrames(t *testing.T) {
 	t.Parallel()
 
-	const initialFrames = 100
-	const postFrames = 10
-
-	dbFile := createTestDBFileWithSize(t, DefaultPageSize*initialFrames)
+	dbFile := createTestDBFileWithSize(t, DefaultPageSize*100)
 	wal := mustOpenWAL(t, dbFile, DefaultPageSize)
 	defer wal.Close()
 
-	// Write 100 frames.
-	for i := 0; i < initialFrames; i++ {
-		data := makeTestPage(i*11+5, DefaultPageSize)
-		mustWriteFrame(t, wal, Pgno(i+1), data, uint32(i+1))
-	}
+	walWriteFramesBatch(t, wal, 100, 11, 5)
 
-	// Checkpoint: flush WAL to DB.
 	if err := wal.Checkpoint(); err != nil {
 		t.Fatalf("Checkpoint() error = %v", err)
 	}
-
-	// WAL must be empty after checkpoint.
 	if wal.frameCount != 0 {
 		t.Errorf("expected frameCount=0 after checkpoint, got %d", wal.frameCount)
 	}
 
-	// Write 10 new frames after the checkpoint.
-	postData := make([][]byte, postFrames)
-	for i := 0; i < postFrames; i++ {
-		data := makeTestPage(i*23+1, DefaultPageSize)
-		postData[i] = data
-		mustWriteFrame(t, wal, Pgno(i+1), data, uint32(i+1))
-	}
-
-	// Read them back and verify correctness.
-	for i := 0; i < postFrames; i++ {
-		frame, err := wal.ReadFrame(uint32(i))
-		if err != nil {
-			t.Errorf("ReadFrame(%d) after checkpoint error = %v", i, err)
-			continue
-		}
-		if frame.PageNumber != uint32(i+1) {
-			t.Errorf("post-checkpoint frame %d: got page number %d, want %d", i, frame.PageNumber, i+1)
-		}
-		if !bytesEqual(frame.Data, postData[i]) {
-			t.Errorf("post-checkpoint frame %d: data mismatch", i)
-		}
-	}
+	postData := walWriteFramesBatch(t, wal, 10, 23, 1)
+	walVerifyFramesBatch(t, wal, postData)
 }

@@ -1384,35 +1384,35 @@ func TestMCDC4_WithoutRowID_ThreeColumnPK(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			db := mcdc4OpenDB(t)
-			defer db.Close()
-
-			for _, s := range tc.setup {
-				mcdc4Exec(t, db, s)
-			}
-			var lastErr error
-			for _, op := range tc.ops {
-				if err := mcdc4ExecErr(t, db, op); err != nil {
-					lastErr = err
-				}
-			}
-			if tc.wantErr && lastErr == nil {
-				t.Error("expected error, got nil")
-			}
-			if !tc.wantErr && lastErr != nil {
-				t.Errorf("unexpected error: %v", lastErr)
-			}
-			if !tc.wantErr {
-				// Use the first table name from setup
-				// Parse table name from CREATE TABLE statement
-				stmt := tc.setup[0]
-				name := extractTableName(stmt)
-				got := mcdc4QueryInt(t, db, "SELECT COUNT(*) FROM "+name)
-				if got != tc.wantCnt {
-					t.Errorf("expected %d rows, got %d", tc.wantCnt, got)
-				}
-			}
+			mcdc4RunWithoutRowIDCase(t, tc.setup, tc.ops, tc.wantCnt, tc.wantErr)
 		})
+	}
+}
+
+func mcdc4RunWithoutRowIDCase(t *testing.T, setup, ops []string, wantCnt int, wantErr bool) {
+	t.Helper()
+	db := mcdc4OpenDB(t)
+	defer db.Close()
+	for _, s := range setup {
+		mcdc4Exec(t, db, s)
+	}
+	var lastErr error
+	for _, op := range ops {
+		if err := mcdc4ExecErr(t, db, op); err != nil {
+			lastErr = err
+		}
+	}
+	if wantErr && lastErr == nil {
+		t.Error("expected error, got nil")
+	}
+	if !wantErr && lastErr != nil {
+		t.Errorf("unexpected error: %v", lastErr)
+	}
+	if !wantErr {
+		name := extractTableName(setup[0])
+		if got := mcdc4QueryInt(t, db, "SELECT COUNT(*) FROM "+name); got != wantCnt {
+			t.Errorf("expected %d rows, got %d", wantCnt, got)
+		}
 	}
 }
 

@@ -633,56 +633,54 @@ func TestMCDC_processSpatialJoinPair(t *testing.T) {
 //
 // Tested by constructing trees with known layout and verifying result counts.
 
+// buildInternalTree inserts enough entries to force a split producing an internal node.
+func buildInternalTree(t *testing.T) *RTree {
+	t.Helper()
+	rt := newTestTable(t)
+	for i := 0; i < MaxEntries+1; i++ {
+		base := float64(i * 15)
+		insertEntry(t, rt, base, base+10, 0, 10)
+	}
+	return rt
+}
+
+// requireInternalRoot skips if the tree root is not internal.
+func requireInternalRoot(t *testing.T, rt *RTree) {
+	t.Helper()
+	if rt.root == nil || rt.root.IsLeaf {
+		t.Skip("tree root is not internal — skipping")
+	}
+}
+
 func TestMCDC_SearchWithin_innerCompoundGuard(t *testing.T) {
 	t.Parallel()
 
-	// Helper: insert entries far enough apart that a split produces an internal node.
-	buildInternalTree := func(t *testing.T) *RTree {
-		t.Helper()
-		rt := newTestTable(t)
-		for i := 0; i < MaxEntries+1; i++ {
-			base := float64(i * 15)
-			insertEntry(t, rt, base, base+10, 0, 10)
-		}
-		return rt
-	}
-
-	t.Run("MCDC_SearchWithin_A1_B1_descend", func(t *testing.T) {
+	t.Run("descend", func(t *testing.T) {
 		t.Parallel()
-		// A=true (internal root), B=true (large query covers all entries)
 		rt := buildInternalTree(t)
-		if rt.root == nil || rt.root.IsLeaf {
-			t.Skip("tree root is not internal — skipping")
-		}
+		requireInternalRoot(t, rt)
 		query := NewBoundingBox(2)
 		query.Min[0], query.Max[0] = 0, float64(MaxEntries*15+10)
 		query.Min[1], query.Max[1] = 0, 10
-		results := rt.root.SearchWithin(query)
-		if len(results) != MaxEntries+1 {
-			t.Errorf("SearchWithin all-covering: got %d results, want %d",
-				len(results), MaxEntries+1)
+		if results := rt.root.SearchWithin(query); len(results) != MaxEntries+1 {
+			t.Errorf("got %d results, want %d", len(results), MaxEntries+1)
 		}
 	})
 
-	t.Run("MCDC_SearchWithin_A1_B0_no_overlap", func(t *testing.T) {
+	t.Run("no_overlap", func(t *testing.T) {
 		t.Parallel()
-		// A=true (internal root), B=false (query bbox doesn't overlap any child)
 		rt := buildInternalTree(t)
-		if rt.root == nil || rt.root.IsLeaf {
-			t.Skip("tree root is not internal — skipping")
-		}
+		requireInternalRoot(t, rt)
 		query := NewBoundingBox(2)
-		query.Min[0], query.Max[0] = 5000, 6000 // far away
+		query.Min[0], query.Max[0] = 5000, 6000
 		query.Min[1], query.Max[1] = 5000, 6000
-		results := rt.root.SearchWithin(query)
-		if len(results) != 0 {
-			t.Errorf("SearchWithin far-away query: got %d results, want 0", len(results))
+		if results := rt.root.SearchWithin(query); len(results) != 0 {
+			t.Errorf("got %d results, want 0", len(results))
 		}
 	})
 
-	t.Run("MCDC_SearchWithin_A0_B1_leaf_no_descend", func(t *testing.T) {
+	t.Run("leaf_no_descend", func(t *testing.T) {
 		t.Parallel()
-		// A=false (leaf node), B=true (query overlaps but cannot descend into children)
 		rt := newTestTable(t)
 		insertEntry(t, rt, 0, 10, 0, 10)
 		if rt.root == nil || !rt.root.IsLeaf {
@@ -691,9 +689,8 @@ func TestMCDC_SearchWithin_innerCompoundGuard(t *testing.T) {
 		query := NewBoundingBox(2)
 		query.Min[0], query.Max[0] = 0, 10
 		query.Min[1], query.Max[1] = 0, 10
-		results := rt.root.SearchWithin(query)
-		if len(results) != 1 {
-			t.Errorf("SearchWithin leaf with overlap: got %d results, want 1", len(results))
+		if results := rt.root.SearchWithin(query); len(results) != 1 {
+			t.Errorf("got %d results, want 1", len(results))
 		}
 	})
 }

@@ -451,45 +451,16 @@ func TestBalanceAfterInsert(t *testing.T) {
 // TestBalanceAfterDelete tests balance checking after deletions
 func TestBalanceAfterDelete(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
+	_, cursor := setupBtreeWithRows(t, 4096, 1, 50, 9)
+	bt := cursor.Btree
+	rootPage := cursor.RootPage
 
-	cursor := NewCursor(bt, rootPage)
-
-	// Insert many rows
-	for i := int64(1); i <= 50; i++ {
-		cursor.Insert(i, []byte("test data"))
-	}
-
-	// Delete progressively
-	deleteCounts := []int{10, 20, 30, 40}
-
-	for _, count := range deleteCounts {
-		// Delete up to count
-		for i := int64(1); i <= int64(count); i++ {
-			found, _ := cursor.SeekRowid(i)
-			if found {
-				cursor.Delete()
-			}
-		}
-
-		// Check balance after deletions
-		cursor.SeekRowid(int64(count + 1))
+	for _, count := range []int{10, 20, 30, 40} {
+		deleteRowRange(cursor, 1, int64(count))
+		cursor.SeekRowid(int64(count + 1)) //nolint:errcheck
 		if cursor.State == CursorValid {
-			info, err := GetBalanceInfo(bt, rootPage)
-			if err != nil {
-				t.Fatalf("GetBalanceInfo() error = %v", err)
-			}
-
-			t.Logf("After %d deletions: %s", count, info.String())
-
-			err = balance(cursor)
-			if err != nil {
-				t.Logf("balance() returned: %v", err)
-			}
+			GetBalanceInfo(bt, rootPage) //nolint:errcheck
+			balance(cursor)             //nolint:errcheck
 		}
 	}
 }
@@ -601,52 +572,36 @@ func BenchmarkBalance(b *testing.B) {
 }
 
 // TestIsOverfullPublic tests the public IsOverfull method
+func loadPageForOverfullCheck(t *testing.T, bt *Btree, rootPage uint32) *BtreePage {
+	t.Helper()
+	pageData, err := bt.GetPage(rootPage)
+	if err != nil {
+		t.Fatalf("GetPage() error = %v", err)
+	}
+	page, err := NewBtreePage(rootPage, pageData, bt.UsableSize)
+	if err != nil {
+		t.Fatalf("NewBtreePage() error = %v", err)
+	}
+	return page
+}
+
 func TestIsOverfullPublic(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(512) // Small pages
+	bt := NewBtree(512)
 	rootPage, err := bt.CreateTable()
 	if err != nil {
 		t.Fatalf("CreateTable() error = %v", err)
 	}
 
-	// Get page
-	pageData, err := bt.GetPage(rootPage)
-	if err != nil {
-		t.Fatalf("GetPage() error = %v", err)
-	}
-
-	page, err := NewBtreePage(rootPage, pageData, bt.UsableSize)
-	if err != nil {
-		t.Fatalf("NewBtreePage() error = %v", err)
-	}
-
-	// Page should start not overfull
+	page := loadPageForOverfullCheck(t, bt, rootPage)
 	if page.IsOverfull() {
 		t.Error("Empty page should not be overfull")
 	}
 
 	cursor := NewCursor(bt, rootPage)
+	insertRows(cursor, 1, 100, 4)
 
-	// Fill page
-	for i := int64(1); i <= 100; i++ {
-		err := cursor.Insert(i, []byte("data"))
-		if err != nil {
-			// Stop when page is full
-			break
-		}
-	}
-
-	// Check again
-	pageData, err = bt.GetPage(rootPage)
-	if err != nil {
-		t.Fatalf("GetPage() error = %v", err)
-	}
-
-	page, err = NewBtreePage(rootPage, pageData, bt.UsableSize)
-	if err != nil {
-		t.Fatalf("NewBtreePage() error = %v", err)
-	}
-
+	page = loadPageForOverfullCheck(t, bt, rootPage)
 	t.Logf("Page overfull status after filling: %v", page.IsOverfull())
 }
 

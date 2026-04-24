@@ -168,33 +168,35 @@ func TestAggregateDateCoverage_JSONGroupObjectReset(t *testing.T) {
 
 // --- valueToJSONInterface tests ---
 
-func TestAggregateDateCoverage_ValueToJSONInterface(t *testing.T) {
+func TestAggregateDateCoverage_ValueToJSONInterface_Null(t *testing.T) {
 	t.Parallel()
-
-	// Null
 	if v := valueToJSONInterface(NewNullValue()); v != nil {
 		t.Errorf("null -> %v, want nil", v)
 	}
+}
 
-	// Integer
+func TestAggregateDateCoverage_ValueToJSONInterface_Integer(t *testing.T) {
+	t.Parallel()
 	v := valueToJSONInterface(NewIntValue(42))
 	if i, ok := v.(int64); !ok || i != 42 {
 		t.Errorf("int -> %v (%T), want int64(42)", v, v)
 	}
+}
 
-	// Float
+func TestAggregateDateCoverage_ValueToJSONInterface_Float(t *testing.T) {
+	t.Parallel()
 	v2 := valueToJSONInterface(NewFloatValue(3.14))
 	if f, ok := v2.(float64); !ok || f != 3.14 {
 		t.Errorf("float -> %v (%T), want float64(3.14)", v2, v2)
 	}
+}
 
-	// Blob
+func TestAggregateDateCoverage_ValueToJSONInterface_BlobAndText(t *testing.T) {
+	t.Parallel()
 	v3 := valueToJSONInterface(NewBlobValue([]byte("bin")))
 	if s, ok := v3.(string); !ok || s != "bin" {
 		t.Errorf("blob -> %v (%T), want string \"bin\"", v3, v3)
 	}
-
-	// Text
 	v4 := valueToJSONInterface(NewTextValue("hello"))
 	if s, ok := v4.(string); !ok || s != "hello" {
 		t.Errorf("text -> %v (%T), want string \"hello\"", v4, v4)
@@ -540,61 +542,40 @@ func TestAggregateDateCoverage_GetDayOfYear(t *testing.T) {
 
 // TestAggregateDateCoverage_HandleSpecialModifiers tests handleSpecialModifiers
 // via applyModifier with "unixepoch", "auto", and "julianday".
+// callDateFunc calls dateFunc and fails on error, returning the result.
+func callDateFunc(t *testing.T, args []Value) Value {
+	t.Helper()
+	v, err := dateFunc(args)
+	if err != nil {
+		t.Fatalf("dateFunc error = %v", err)
+	}
+	return v
+}
+
 func TestAggregateDateCoverage_HandleSpecialModifiers(t *testing.T) {
 	t.Parallel()
 
-	// Test 'unixepoch' modifier: a small numeric value (treated initially as Julian day)
-	// reinterpreted as unix timestamp seconds. The value 0 as Julian day refers to
-	// 4713 BCE; with 'unixepoch' it is reinterpreted as Unix epoch 0 = 1970-01-01.
-	v, err := dateFunc([]Value{
-		NewFloatValue(0), // 0 seconds since Unix epoch
-		NewTextValue("unixepoch"),
-	})
-	if err != nil {
-		t.Fatalf("dateFunc with unixepoch modifier error = %v", err)
-	}
+	// Test 'unixepoch' modifier
+	v := callDateFunc(t, []Value{NewFloatValue(0), NewTextValue("unixepoch")})
 	if v.AsString() != "1970-01-01" {
 		t.Errorf("unixepoch modifier result = %q, want \"1970-01-01\"", v.AsString())
 	}
 
 	// Test 'auto' modifier (no-op)
-	v2, err := dateFunc([]Value{
-		NewTextValue("2024-06-15"),
-		NewTextValue("auto"),
-	})
-	if err != nil {
-		t.Fatalf("dateFunc with auto modifier error = %v", err)
-	}
+	v2 := callDateFunc(t, []Value{NewTextValue("2024-06-15"), NewTextValue("auto")})
 	if v2.AsString() != "2024-06-15" {
 		t.Errorf("auto modifier result = %q, want \"2024-06-15\"", v2.AsString())
 	}
 
-	// Test 'julianday' modifier: numeric Julian day should be accepted
-	// 2451544.5 is approximately 2000-01-01
-	v3, err := dateFunc([]Value{
-		NewFloatValue(2451544.5),
-		NewTextValue("julianday"),
-	})
-	if err != nil {
-		t.Fatalf("dateFunc with julianday modifier error = %v", err)
-	}
+	// Test 'julianday' modifier
+	v3 := callDateFunc(t, []Value{NewFloatValue(2451544.5), NewTextValue("julianday")})
 	if v3.IsNull() {
 		t.Error("julianday modifier returned NULL")
 	}
 
-	// Test handleSpecialModifiers with unixepoch on a DateTime without validJD
-	// (should be handled as returning nil from parseDateTimeWithModifiers)
-	// Use a text-based input (not numeric) with unixepoch modifier — should return NULL
-	v4, err := dateFunc([]Value{
-		NewTextValue("2024-01-01"),
-		NewTextValue("unixepoch"),
-	})
-	if err != nil {
-		t.Fatalf("dateFunc with text + unixepoch error = %v", err)
-	}
-	// This should return NULL because applyUnixepoch fails on non-numeric input
+	// Test unixepoch on text-based input — should return NULL
+	v4 := callDateFunc(t, []Value{NewTextValue("2024-01-01"), NewTextValue("unixepoch")})
 	if !v4.IsNull() {
-		// dateFunc returns NULL when modifier fails
 		t.Logf("text+unixepoch returned %q (may vary by implementation)", v4.AsString())
 	}
 }

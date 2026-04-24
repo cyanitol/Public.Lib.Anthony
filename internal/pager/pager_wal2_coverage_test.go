@@ -272,12 +272,25 @@ func TestPagerWAL2_RecoverWALReadOnly(t *testing.T) {
 
 // TestPagerWAL2_RecoverWAL_MultipleReopens reopens a WAL database several times
 // to exercise the recovery path repeatedly.
+// wal2ReopenAndInsert opens the database, sets WAL mode, inserts rows, then closes.
+func wal2ReopenAndInsert(t *testing.T, dbFile string, round, n int, data string) {
+	t.Helper()
+	db, err := sql.Open("sqlite_internal", dbFile)
+	if err != nil {
+		t.Fatalf("round %d open: %v", round, err)
+	}
+	defer db.Close()
+	wal2Exec(t, db, "PRAGMA journal_mode=WAL")
+	for i := 0; i < n; i++ {
+		wal2MustExec(t, db, "INSERT INTO t (data) VALUES (?)", strings.Repeat(data, 150))
+	}
+}
+
 func TestPagerWAL2_RecoverWAL_MultipleReopens(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	dbFile := filepath.Join(dir, "recover_multi.db")
 
-	// Initial setup.
 	func() {
 		db, err := sql.Open("sqlite_internal", dbFile)
 		if err != nil {
@@ -291,23 +304,10 @@ func TestPagerWAL2_RecoverWAL_MultipleReopens(t *testing.T) {
 		}
 	}()
 
-	// Reopen 3 times, writing more data each time.
 	for round := 0; round < 3; round++ {
-		func() {
-			db, err := sql.Open("sqlite_internal", dbFile)
-			if err != nil {
-				t.Fatalf("round %d open: %v", round, err)
-			}
-			defer db.Close()
-
-			wal2Exec(t, db, "PRAGMA journal_mode=WAL")
-			for i := 0; i < 5; i++ {
-				wal2MustExec(t, db, "INSERT INTO t (data) VALUES (?)", strings.Repeat("n", 150))
-			}
-		}()
+		wal2ReopenAndInsert(t, dbFile, round, 5, "n")
 	}
 
-	// Final open: verify data.
 	db, err := sql.Open("sqlite_internal", dbFile)
 	if err != nil {
 		t.Fatalf("final open: %v", err)
@@ -454,7 +454,6 @@ func TestPagerWAL2_ValidateRollbackState_NestedSavepoints(t *testing.T) {
 		t.Fatalf("Begin: %v", err)
 	}
 
-	// Inner savepoints via SAVEPOINT SQL.
 	if _, err := tx.Exec("SAVEPOINT sp1"); err != nil {
 		tx.Rollback()
 		t.Fatalf("SAVEPOINT sp1: %v", err)
@@ -463,7 +462,6 @@ func TestPagerWAL2_ValidateRollbackState_NestedSavepoints(t *testing.T) {
 		tx.Rollback()
 		t.Fatalf("INSERT 1: %v", err)
 	}
-
 	if _, err := tx.Exec("SAVEPOINT sp2"); err != nil {
 		tx.Rollback()
 		t.Fatalf("SAVEPOINT sp2: %v", err)
@@ -473,17 +471,7 @@ func TestPagerWAL2_ValidateRollbackState_NestedSavepoints(t *testing.T) {
 		t.Fatalf("INSERT 2: %v", err)
 	}
 
-	// Rollback to sp1 – exercises validateRollbackState.
-	if _, err := tx.Exec("ROLLBACK TO SAVEPOINT sp1"); err != nil {
-		tx.Rollback()
-		t.Logf("ROLLBACK TO SAVEPOINT sp1: %v (non-fatal)", err)
-		return
-	}
-
-	// Release sp1.
-	if _, err := tx.Exec("RELEASE SAVEPOINT sp1"); err != nil {
-		tx.Rollback()
-		t.Logf("RELEASE SAVEPOINT sp1: %v (non-fatal)", err)
+	if !wal2RollbackAndRelease(t, tx, "sp1") {
 		return
 	}
 
@@ -494,6 +482,33 @@ func TestPagerWAL2_ValidateRollbackState_NestedSavepoints(t *testing.T) {
 
 // TestPagerWAL2_ValidateRollbackState_WALMode exercises savepoint rollback
 // specifically in WAL mode which has different rollback handling.
+// wal2InsertRows inserts n rows into table t within the given tx.
+func wal2InsertRows(t *testing.T, tx *sql.Tx, n int, char string) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		if _, err := tx.Exec("INSERT INTO t (v) VALUES (?)", strings.Repeat(char, 100)); err != nil {
+			tx.Rollback()
+			t.Fatalf("INSERT %d: %v", i, err)
+		}
+	}
+}
+
+// wal2RollbackAndRelease rolls back to and releases a savepoint, returning false on non-fatal error.
+func wal2RollbackAndRelease(t *testing.T, tx *sql.Tx, name string) bool {
+	t.Helper()
+	if _, err := tx.Exec("ROLLBACK TO SAVEPOINT " + name); err != nil {
+		tx.Rollback()
+		t.Logf("ROLLBACK TO %s: %v (non-fatal)", name, err)
+		return false
+	}
+	if _, err := tx.Exec("RELEASE SAVEPOINT " + name); err != nil {
+		tx.Rollback()
+		t.Logf("RELEASE %s: %v (non-fatal)", name, err)
+		return false
+	}
+	return true
+}
+
 func TestPagerWAL2_ValidateRollbackState_WALMode(t *testing.T) {
 	t.Parallel()
 	db, _ := wal2OpenDB(t, "sp_wal.db")
@@ -510,44 +525,18 @@ func TestPagerWAL2_ValidateRollbackState_WALMode(t *testing.T) {
 		tx.Rollback()
 		t.Fatalf("SAVEPOINT sp1: %v", err)
 	}
-	for i := 0; i < 5; i++ {
-		if _, err := tx.Exec("INSERT INTO t (v) VALUES (?)", strings.Repeat("q", 100)); err != nil {
-			tx.Rollback()
-			t.Fatalf("INSERT %d: %v", i, err)
-		}
-	}
+	wal2InsertRows(t, tx, 5, "q")
 
 	if _, err := tx.Exec("SAVEPOINT sp2"); err != nil {
 		tx.Rollback()
 		t.Fatalf("SAVEPOINT sp2: %v", err)
 	}
-	for i := 0; i < 3; i++ {
-		if _, err := tx.Exec("INSERT INTO t (v) VALUES (?)", strings.Repeat("r", 100)); err != nil {
-			tx.Rollback()
-			t.Fatalf("INSERT sp2 %d: %v", i, err)
-		}
-	}
+	wal2InsertRows(t, tx, 3, "r")
 
-	// Roll back the inner savepoint, keep the outer.
-	if _, err := tx.Exec("ROLLBACK TO SAVEPOINT sp2"); err != nil {
-		tx.Rollback()
-		t.Logf("ROLLBACK TO sp2: %v (non-fatal)", err)
+	if !wal2RollbackAndRelease(t, tx, "sp2") {
 		return
 	}
-	if _, err := tx.Exec("RELEASE SAVEPOINT sp2"); err != nil {
-		tx.Rollback()
-		t.Logf("RELEASE sp2: %v (non-fatal)", err)
-		return
-	}
-
-	if _, err := tx.Exec("ROLLBACK TO SAVEPOINT sp1"); err != nil {
-		tx.Rollback()
-		t.Logf("ROLLBACK TO sp1: %v (non-fatal)", err)
-		return
-	}
-	if _, err := tx.Exec("RELEASE SAVEPOINT sp1"); err != nil {
-		tx.Rollback()
-		t.Logf("RELEASE sp1: %v (non-fatal)", err)
+	if !wal2RollbackAndRelease(t, tx, "sp1") {
 		return
 	}
 
@@ -562,23 +551,27 @@ func TestPagerWAL2_ValidateRollbackState_WALMode(t *testing.T) {
 
 // TestPagerWAL2_AcquirePendingLock_WriteContention creates concurrent write
 // transactions that compete for the exclusive lock, triggering acquirePendingLock.
-func TestPagerWAL2_AcquirePendingLock_WriteContention(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	dbFile := filepath.Join(dir, "pending_lock.db")
-
-	// Setup: create and populate the database.
+// wal2SetupContentionDB creates and populates a database for contention tests.
+func wal2SetupContentionDB(t *testing.T, dbFile string, rows int) {
+	t.Helper()
 	setupDB, err := sql.Open("sqlite_internal", dbFile)
 	if err != nil {
 		t.Fatalf("setup open: %v", err)
 	}
 	wal2MustExec(t, setupDB, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)")
-	for i := 0; i < 50; i++ {
+	for i := 0; i < rows; i++ {
 		wal2MustExec(t, setupDB, "INSERT INTO t (v) VALUES (?)", i)
 	}
 	setupDB.Close()
+}
 
-	// Open two connections and perform overlapping write transactions.
+func TestPagerWAL2_AcquirePendingLock_WriteContention(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	dbFile := filepath.Join(dir, "pending_lock.db")
+
+	wal2SetupContentionDB(t, dbFile, 50)
+
 	db1, err := sql.Open("sqlite_internal", dbFile)
 	if err != nil {
 		t.Fatalf("db1 open: %v", err)
@@ -591,7 +584,6 @@ func TestPagerWAL2_AcquirePendingLock_WriteContention(t *testing.T) {
 	}
 	defer db2.Close()
 
-	// db1 gets an exclusive write lock; db2 will contend, hitting acquirePendingLock.
 	tx1, err := db1.Begin()
 	if err != nil {
 		t.Fatalf("db1 Begin: %v", err)
@@ -599,21 +591,20 @@ func TestPagerWAL2_AcquirePendingLock_WriteContention(t *testing.T) {
 	if _, err := tx1.Exec("INSERT INTO t (v) VALUES (999)"); err != nil {
 		tx1.Rollback()
 		t.Logf("db1 INSERT: %v (non-fatal)", err)
-	} else {
-		// db2 attempts to write while db1 holds the lock.
-		tx2, err := db2.Begin()
-		if err != nil {
-			tx1.Rollback()
-			t.Logf("db2 Begin: %v (non-fatal)", err)
-		} else {
-			// This will either succeed or return a busy error; both exercise the lock path.
-			if _, err := tx2.Exec("INSERT INTO t (v) VALUES (888)"); err != nil {
-				t.Logf("db2 INSERT (expected contention): %v", err)
-			}
-			tx2.Rollback()
-		}
-		tx1.Commit()
+		return
 	}
+
+	tx2, err := db2.Begin()
+	if err != nil {
+		tx1.Rollback()
+		t.Logf("db2 Begin: %v (non-fatal)", err)
+		return
+	}
+	if _, err := tx2.Exec("INSERT INTO t (v) VALUES (888)"); err != nil {
+		t.Logf("db2 INSERT (expected contention): %v", err)
+	}
+	tx2.Rollback()
+	tx1.Commit()
 }
 
 // TestPagerWAL2_AcquirePendingLock_WALModeContention exercises acquirePendingLock

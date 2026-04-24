@@ -190,17 +190,15 @@ func TestSerialDecodeFloat64(t *testing.T) {
 
 // TestSerialDecodeBlobOrText covers serialDecodeBlobOrText for blob (even) and
 // text (odd) serial types, including the short-data guard.
-func TestSerialDecodeBlobOrText(t *testing.T) {
-	// Even serial types produce []byte blobs.
-	blobCases := []struct {
+func TestSerialDecodeBlobOrText_Blob(t *testing.T) {
+	for _, tc := range []struct {
 		serialType uint64
 		data       []byte
 	}{
 		{12, []byte{}},
 		{14, []byte{0xAB, 0x00}},
 		{16, []byte{0x01, 0x02}},
-	}
-	for _, tc := range blobCases {
+	} {
 		got, sz := serialDecodeBlobOrText(tc.serialType, tc.data)
 		expLen := int((tc.serialType - 12) / 2)
 		if sz != expLen {
@@ -215,9 +213,10 @@ func TestSerialDecodeBlobOrText(t *testing.T) {
 			}
 		}
 	}
+}
 
-	// Odd serial types produce strings.
-	textCases := []struct {
+func TestSerialDecodeBlobOrText_TextAndShort(t *testing.T) {
+	for _, tc := range []struct {
 		serialType uint64
 		data       []byte
 		wantStr    string
@@ -225,8 +224,7 @@ func TestSerialDecodeBlobOrText(t *testing.T) {
 		{13, []byte{}, ""},
 		{15, []byte{'A', 'B'}, "A"},
 		{17, []byte{'h', 'i', '!'}, "hi"},
-	}
-	for _, tc := range textCases {
+	} {
 		got, _ := serialDecodeBlobOrText(tc.serialType, tc.data)
 		s, ok := got.(string)
 		if !ok {
@@ -238,42 +236,37 @@ func TestSerialDecodeBlobOrText(t *testing.T) {
 		}
 	}
 
-	// Short data must return nil, 0.
-	v, sz := serialDecodeBlobOrText(16, []byte{0x01}) // type 16 needs 2 bytes
+	v, sz := serialDecodeBlobOrText(16, []byte{0x01})
 	if v != nil || sz != 0 {
 		t.Errorf("serialDecodeBlobOrText(short) expected nil,0, got %v,%d", v, sz)
 	}
 }
 
-// TestDecodeSerialValue covers decodeSerialValue dispatching across all branches.
-func TestDecodeSerialValue(t *testing.T) {
+func TestDecodeSerialValue_NullAndConstants(t *testing.T) {
 	vdbeInst := NewTestVDBE(1)
 
-	// Serial type 0 = NULL.
 	v, sz := vdbeInst.decodeSerialValue(0, []byte{})
 	if v != nil || sz != 0 {
 		t.Errorf("serial 0 (NULL): got %v,%d", v, sz)
 	}
-
-	// Serial type 8 = constant integer 0.
 	v, sz = vdbeInst.decodeSerialValue(8, []byte{})
 	if v != int64(0) || sz != 0 {
 		t.Errorf("serial 8 (const 0): got %v,%d", v, sz)
 	}
-
-	// Serial type 9 = constant integer 1.
 	v, sz = vdbeInst.decodeSerialValue(9, []byte{})
 	if v != int64(1) || sz != 0 {
 		t.Errorf("serial 9 (const 1): got %v,%d", v, sz)
 	}
+}
 
-	// Serial type 1 = int8.
-	v, sz = vdbeInst.decodeSerialValue(1, []byte{0x42})
+func TestDecodeSerialValue_IntFloatText(t *testing.T) {
+	vdbeInst := NewTestVDBE(1)
+
+	v, sz := vdbeInst.decodeSerialValue(1, []byte{0x42})
 	if v != int64(0x42) || sz != 1 {
 		t.Errorf("serial 1 (int8): got %v,%d", v, sz)
 	}
 
-	// Serial type 7 = float64.
 	buf := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf, math.Float64bits(3.14))
 	v, sz = vdbeInst.decodeSerialValue(7, buf)
@@ -284,7 +277,6 @@ func TestDecodeSerialValue(t *testing.T) {
 		t.Errorf("serial 7 (float64) val=%v, want 3.14", v)
 	}
 
-	// Serial type >= 12 dispatches to serialDecodeBlobOrText (text path).
 	v, sz = vdbeInst.decodeSerialValue(15, []byte{'Z', 'X'})
 	if s, ok := v.(string); !ok || s != "Z" {
 		t.Errorf("serial 15 (text len=1): got %v,%d", v, sz)

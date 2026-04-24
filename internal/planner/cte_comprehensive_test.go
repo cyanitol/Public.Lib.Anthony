@@ -471,17 +471,7 @@ func TestCTEInferColumnNameEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := parser.NewParser(tt.sql)
-			stmts, err := p.Parse()
-			if err != nil {
-				t.Fatalf("Parse failed: %v", err)
-			}
-
-			selectStmt := stmts[0].(*parser.SelectStmt)
-			ctx, err := NewCTEContext(selectStmt.With)
-			if err != nil {
-				t.Fatalf("NewCTEContext failed: %v", err)
-			}
+			ctx := parseCTEContext(t, tt.sql)
 
 			def, exists := ctx.GetCTE(tt.cteName)
 			if !exists {

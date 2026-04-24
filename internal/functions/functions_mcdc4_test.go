@@ -256,6 +256,16 @@ func TestMCDC_JSONEachFunc_Open_ArgGuard(t *testing.T) {
 //	B: {2-arg null (A=T,B=F) → root path used, 2-arg non-null (A=T,B=T) → path applied}
 //
 // ---------------------------------------------------------------------------
+// openJSONEach is a helper that calls jsonEachFunc.Open and fails on error.
+func openJSONEach(t *testing.T, f *jsonEachFunc, args []Value) [][]Value {
+	t.Helper()
+	rows, err := f.Open(args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return rows
+}
+
 func TestMCDC_JSONEachFunc_Open_PathGuard(t *testing.T) {
 	t.Parallel()
 
@@ -265,11 +275,7 @@ func TestMCDC_JSONEachFunc_Open_PathGuard(t *testing.T) {
 	// A=F: 1-arg → root path "$/a" not extracted, iterates top-level object keys
 	t.Run("A=F: 1-arg → root path, top-level keys", func(t *testing.T) {
 		t.Parallel()
-		rows, err := f.Open([]Value{NewTextValue(jsonStr)})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		// Top-level has 2 keys: a, b
+		rows := openJSONEach(t, f, []Value{NewTextValue(jsonStr)})
 		if len(rows) != 2 {
 			t.Errorf("1-arg json_each rows = %d, want 2", len(rows))
 		}
@@ -278,11 +284,7 @@ func TestMCDC_JSONEachFunc_Open_PathGuard(t *testing.T) {
 	// A=T B=F: 2-arg with null path → root path used (same as 1-arg case)
 	t.Run("A=T B=F: 2-arg null path → root path used", func(t *testing.T) {
 		t.Parallel()
-		rows, err := f.Open([]Value{NewTextValue(jsonStr), NewNullValue()})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		// Same as root: 2 keys
+		rows := openJSONEach(t, f, []Value{NewTextValue(jsonStr), NewNullValue()})
 		if len(rows) != 2 {
 			t.Errorf("2-arg null-path json_each rows = %d, want 2", len(rows))
 		}
@@ -291,11 +293,7 @@ func TestMCDC_JSONEachFunc_Open_PathGuard(t *testing.T) {
 	// A=T B=T: 2-arg with non-null path → path $.a applied, iterates [1,2]
 	t.Run("A=T B=T: 2-arg non-null path → path applied", func(t *testing.T) {
 		t.Parallel()
-		rows, err := f.Open([]Value{NewTextValue(jsonStr), NewTextValue("$.a")})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		// $.a = [1,2] → 2 array elements
+		rows := openJSONEach(t, f, []Value{NewTextValue(jsonStr), NewTextValue("$.a")})
 		if len(rows) != 2 {
 			t.Errorf("2-arg path=$.a json_each rows = %d, want 2", len(rows))
 		}
@@ -732,88 +730,73 @@ func TestMCDC_LikelihoodFunc_ProbabilityGuard(t *testing.T) {
 //  5. A=F C=F (val=0): zero add → no overflow check needed
 //
 // ---------------------------------------------------------------------------
+// sumFinalResult calls Final on a SumFunc and asserts no error, returning the result.
+func sumFinalResult(t *testing.T, f *SumFunc) Value {
+	t.Helper()
+	result, err := f.Final()
+	if err != nil {
+		t.Fatalf("SumFunc.Final() error: %v", err)
+	}
+	return result
+}
+
+// assertSumType checks that the SumFunc result has the expected type.
+func assertSumType(t *testing.T, f *SumFunc, wantType ValueType) Value {
+	t.Helper()
+	result := sumFinalResult(t, f)
+	if result.Type() != wantType {
+		t.Errorf("got Type=%v, want %v", result.Type(), wantType)
+	}
+	return result
+}
+
 func TestMCDC_SumFunc_AddInteger_OverflowGuard(t *testing.T) {
 	t.Parallel()
 
-	// Case 1: A=T B=T — positive overflow → result is float
-	t.Run("A=T B=T: positive integer overflow → float result", func(t *testing.T) {
+	t.Run("positive overflow → float", func(t *testing.T) {
 		t.Parallel()
 		f := &SumFunc{}
 		_ = f.Step([]Value{NewIntValue(math.MaxInt64)})
-		_ = f.Step([]Value{NewIntValue(1)}) // overflow
-		result, err := f.Final()
-		if err != nil {
-			t.Fatalf("SumFunc.Final() error: %v", err)
-		}
-		if result.Type() != TypeFloat {
-			t.Errorf("after positive overflow, got Type=%v, want TypeFloat", result.Type())
-		}
+		_ = f.Step([]Value{NewIntValue(1)})
+		assertSumType(t, f, TypeFloat)
 	})
 
-	// Case 2: A=T B=F — positive add, no overflow → integer result
-	t.Run("A=T B=F: normal positive add → integer result", func(t *testing.T) {
+	t.Run("normal positive add → integer 300", func(t *testing.T) {
 		t.Parallel()
 		f := &SumFunc{}
 		_ = f.Step([]Value{NewIntValue(100)})
 		_ = f.Step([]Value{NewIntValue(200)})
-		result, err := f.Final()
-		if err != nil {
-			t.Fatalf("SumFunc.Final() error: %v", err)
-		}
-		if result.Type() != TypeInteger {
-			t.Errorf("after normal positive add, got Type=%v, want TypeInteger", result.Type())
-		}
+		result := assertSumType(t, f, TypeInteger)
 		if result.AsInt64() != 300 {
 			t.Errorf("sum = %d, want 300", result.AsInt64())
 		}
 	})
 
-	// Case 3: C=T D=T — negative overflow → result is float
-	t.Run("C=T D=T: negative integer overflow → float result", func(t *testing.T) {
+	t.Run("negative overflow → float", func(t *testing.T) {
 		t.Parallel()
 		f := &SumFunc{}
 		_ = f.Step([]Value{NewIntValue(math.MinInt64)})
-		_ = f.Step([]Value{NewIntValue(-1)}) // underflow
-		result, err := f.Final()
-		if err != nil {
-			t.Fatalf("SumFunc.Final() error: %v", err)
-		}
-		if result.Type() != TypeFloat {
-			t.Errorf("after negative overflow, got Type=%v, want TypeFloat", result.Type())
-		}
+		_ = f.Step([]Value{NewIntValue(-1)})
+		assertSumType(t, f, TypeFloat)
 	})
 
-	// Case 4: C=T D=F — negative add, no overflow → integer result
-	t.Run("C=T D=F: normal negative add → integer result", func(t *testing.T) {
+	t.Run("normal negative add → integer -80", func(t *testing.T) {
 		t.Parallel()
 		f := &SumFunc{}
 		_ = f.Step([]Value{NewIntValue(-50)})
 		_ = f.Step([]Value{NewIntValue(-30)})
-		result, err := f.Final()
-		if err != nil {
-			t.Fatalf("SumFunc.Final() error: %v", err)
-		}
-		if result.Type() != TypeInteger {
-			t.Errorf("after normal negative add, got Type=%v, want TypeInteger", result.Type())
-		}
+		result := assertSumType(t, f, TypeInteger)
 		if result.AsInt64() != -80 {
 			t.Errorf("sum = %d, want -80", result.AsInt64())
 		}
 	})
 
-	// Case 5: val=0 — neither branch fires
-	t.Run("val=0: no overflow check → integer result", func(t *testing.T) {
+	t.Run("zero add → integer 10", func(t *testing.T) {
 		t.Parallel()
 		f := &SumFunc{}
 		_ = f.Step([]Value{NewIntValue(10)})
 		_ = f.Step([]Value{NewIntValue(0)})
-		result, err := f.Final()
-		if err != nil {
-			t.Fatalf("SumFunc.Final() error: %v", err)
-		}
-		if result.Type() != TypeInteger {
-			t.Errorf("after zero add, got Type=%v, want TypeInteger", result.Type())
-		}
+		result := assertSumType(t, f, TypeInteger)
 		if result.AsInt64() != 10 {
 			t.Errorf("sum = %d, want 10", result.AsInt64())
 		}
@@ -1151,16 +1134,23 @@ func TestMCDC_AtanhFunc_DomainGuard_Extra(t *testing.T) {
 //	B: {null arg0 with non-null arg1 (A=T,B=F) → second guard, both null (A=T,B=T)}
 //
 // ---------------------------------------------------------------------------
+// callNullif invokes nullifFunc and fails the test on error.
+func callNullif(t *testing.T, args []Value) Value {
+	t.Helper()
+	result, err := nullifFunc(args)
+	if err != nil {
+		t.Fatalf("nullifFunc() error: %v", err)
+	}
+	return result
+}
+
 func TestMCDC_NullifFunc_BothNullGuard(t *testing.T) {
 	t.Parallel()
 
 	// A=T B=T: both null → NULL (equal nulls)
 	t.Run("A=T B=T: both null → NULL", func(t *testing.T) {
 		t.Parallel()
-		result, err := nullifFunc([]Value{NewNullValue(), NewNullValue()})
-		if err != nil {
-			t.Fatalf("nullifFunc() error: %v", err)
-		}
+		result := callNullif(t, []Value{NewNullValue(), NewNullValue()})
 		if !result.IsNull() {
 			t.Errorf("nullif(NULL,NULL) should be NULL, got %v", result.AsString())
 		}
@@ -1169,10 +1159,7 @@ func TestMCDC_NullifFunc_BothNullGuard(t *testing.T) {
 	// A=T B=F: arg0 null, arg1 non-null → arg0 returned (not equal)
 	t.Run("A=T B=F: arg0 null, arg1 non-null → arg0 (NULL)", func(t *testing.T) {
 		t.Parallel()
-		result, err := nullifFunc([]Value{NewNullValue(), NewIntValue(5)})
-		if err != nil {
-			t.Fatalf("nullifFunc() error: %v", err)
-		}
+		result := callNullif(t, []Value{NewNullValue(), NewIntValue(5)})
 		if !result.IsNull() {
 			t.Errorf("nullif(NULL,5) should be NULL (returns arg0), got %v", result.AsString())
 		}
@@ -1181,10 +1168,7 @@ func TestMCDC_NullifFunc_BothNullGuard(t *testing.T) {
 	// A=F B=T: arg0 non-null, arg1 null → arg0 returned
 	t.Run("A=F B=T: arg0 non-null, arg1 null → arg0", func(t *testing.T) {
 		t.Parallel()
-		result, err := nullifFunc([]Value{NewIntValue(3), NewNullValue()})
-		if err != nil {
-			t.Fatalf("nullifFunc() error: %v", err)
-		}
+		result := callNullif(t, []Value{NewIntValue(3), NewNullValue()})
 		if result.IsNull() || result.AsInt64() != 3 {
 			t.Errorf("nullif(3,NULL) should return 3, got %v", result.AsString())
 		}
@@ -1193,10 +1177,7 @@ func TestMCDC_NullifFunc_BothNullGuard(t *testing.T) {
 	// A=F B=F: both non-null, equal → NULL
 	t.Run("A=F B=F: both non-null equal → NULL", func(t *testing.T) {
 		t.Parallel()
-		result, err := nullifFunc([]Value{NewIntValue(5), NewIntValue(5)})
-		if err != nil {
-			t.Fatalf("nullifFunc() error: %v", err)
-		}
+		result := callNullif(t, []Value{NewIntValue(5), NewIntValue(5)})
 		if !result.IsNull() {
 			t.Errorf("nullif(5,5) should be NULL, got %v", result.AsString())
 		}
@@ -1205,10 +1186,7 @@ func TestMCDC_NullifFunc_BothNullGuard(t *testing.T) {
 	// A=F B=F: both non-null, not equal → arg0
 	t.Run("A=F B=F: both non-null not equal → arg0", func(t *testing.T) {
 		t.Parallel()
-		result, err := nullifFunc([]Value{NewIntValue(3), NewIntValue(5)})
-		if err != nil {
-			t.Fatalf("nullifFunc() error: %v", err)
-		}
+		result := callNullif(t, []Value{NewIntValue(3), NewIntValue(5)})
 		if result.IsNull() || result.AsInt64() != 3 {
 			t.Errorf("nullif(3,5) should return 3, got %v", result.AsString())
 		}

@@ -554,6 +554,20 @@ func TestCTEExplain_FormatScanDetail(t *testing.T) {
 
 // TestCTEExplain_IsRowidLookup covers the rowid-alias path and the schema
 // INTEGER PRIMARY KEY path.
+// newExplainCtxForRowid creates an explainCtx for rowid lookup tests.
+func newExplainCtxForRowid(s *schema.Schema) *explainCtx {
+	return &explainCtx{plan: NewExplainPlan(), schema: s}
+}
+
+// assertRowidDetected checks that isRowidLookup returns the expected isRowid flag.
+func assertRowidDetected(t *testing.T, s *schema.Schema, table string, where parser.Expression, wantRowid bool) {
+	t.Helper()
+	col, isRowid := newExplainCtxForRowid(s).isRowidLookup(table, where)
+	if isRowid != wantRowid {
+		t.Errorf("isRowidLookup: isRowid=%v, want %v (col=%q)", isRowid, wantRowid, col)
+	}
+}
+
 func TestCTEExplain_IsRowidLookup(t *testing.T) {
 	t.Parallel()
 
@@ -576,59 +590,32 @@ func TestCTEExplain_IsRowidLookup(t *testing.T) {
 
 	t.Run("rowid_alias", func(t *testing.T) {
 		t.Parallel()
-		c := &explainCtx{plan: NewExplainPlan(), schema: s}
-		_, isRowid := c.isRowidLookup("things", eqWhere("rowid"))
-		if !isRowid {
-			t.Error("expected rowid alias to be detected")
-		}
+		assertRowidDetected(t, s, "things", eqWhere("rowid"), true)
 	})
 
 	t.Run("oid_alias", func(t *testing.T) {
 		t.Parallel()
-		c := &explainCtx{plan: NewExplainPlan(), schema: s}
-		_, isRowid := c.isRowidLookup("things", eqWhere("oid"))
-		if !isRowid {
-			t.Error("expected oid alias to be detected")
-		}
+		assertRowidDetected(t, s, "things", eqWhere("oid"), true)
 	})
 
 	t.Run("integer_pk_via_schema", func(t *testing.T) {
 		t.Parallel()
-		c := &explainCtx{plan: NewExplainPlan(), schema: s}
-		_, isRowid := c.isRowidLookup("things", eqWhere("id"))
-		if !isRowid {
-			t.Error("expected INTEGER PRIMARY KEY to be detected as rowid")
-		}
+		assertRowidDetected(t, s, "things", eqWhere("id"), true)
 	})
 
 	t.Run("non_pk_column", func(t *testing.T) {
 		t.Parallel()
-		c := &explainCtx{plan: NewExplainPlan(), schema: s}
-		col, isRowid := c.isRowidLookup("things", eqWhere("label"))
-		if isRowid {
-			t.Error("expected non-pk column to not be rowid")
-		}
-		if col == "" {
-			t.Error("expected col name to be returned")
-		}
+		assertRowidDetected(t, s, "things", eqWhere("label"), false)
 	})
 
 	t.Run("no_schema", func(t *testing.T) {
 		t.Parallel()
-		c := &explainCtx{plan: NewExplainPlan(), schema: nil}
-		col, isRowid := c.isRowidLookup("things", eqWhere("id"))
-		if isRowid {
-			t.Error("without schema, should not detect rowid")
-		}
-		if col == "" {
-			t.Error("expected col name")
-		}
+		assertRowidDetected(t, nil, "things", eqWhere("id"), false)
 	})
 
 	t.Run("non_binary_expr", func(t *testing.T) {
 		t.Parallel()
-		c := &explainCtx{plan: NewExplainPlan(), schema: s}
-		col, isRowid := c.isRowidLookup("things", &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"})
+		col, isRowid := newExplainCtxForRowid(s).isRowidLookup("things", &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"})
 		if col != "" || isRowid {
 			t.Errorf("expected empty col and false isRowid, got col=%q isRowid=%v", col, isRowid)
 		}
@@ -721,6 +708,23 @@ func TestCTEExplain_FormatIndexDetail(t *testing.T) {
 
 // TestCTEExplain_WalkExprForSubqueries exercises all handled expression types
 // in walkExprForSubqueries.
+// countWalkSubqueries walks the given expressions and counts SUBQUERY children.
+func countWalkSubqueries(exprs ...parser.Expression) int {
+	plan := NewExplainPlan()
+	root := plan.AddNode(nil, "ROOT")
+	c := &explainCtx{plan: plan}
+	for _, e := range exprs {
+		c.walkExprForSubqueries(root, e)
+	}
+	n := 0
+	for _, ch := range root.Children {
+		if strings.Contains(ch.Detail, "SUBQUERY") {
+			n++
+		}
+	}
+	return n
+}
+
 func TestCTEExplain_WalkExprForSubqueries(t *testing.T) {
 	t.Parallel()
 
@@ -728,98 +732,54 @@ func TestCTEExplain_WalkExprForSubqueries(t *testing.T) {
 		From: &parser.FromClause{Tables: []parser.TableOrSubquery{{TableName: "inner"}}},
 	}
 
-	countSubqueries := func(exprs ...parser.Expression) int {
-		plan := NewExplainPlan()
-		root := plan.AddNode(nil, "ROOT")
-		c := &explainCtx{plan: plan}
-		for _, e := range exprs {
-			c.walkExprForSubqueries(root, e)
-		}
-		// Count CORRELATED nodes
-		n := 0
-		for _, ch := range root.Children {
-			if strings.Contains(ch.Detail, "SUBQUERY") {
-				n++
-			}
-		}
-		return n
-	}
-
 	t.Run("SubqueryExpr", func(t *testing.T) {
 		t.Parallel()
-		n := countSubqueries(&parser.SubqueryExpr{Select: innerSel})
-		if n != 1 {
+		if n := countWalkSubqueries(&parser.SubqueryExpr{Select: innerSel}); n != 1 {
 			t.Errorf("expected 1 subquery node, got %d", n)
 		}
 	})
 
 	t.Run("ExistsExpr", func(t *testing.T) {
 		t.Parallel()
-		n := countSubqueries(&parser.ExistsExpr{Select: innerSel})
-		if n != 1 {
+		if n := countWalkSubqueries(&parser.ExistsExpr{Select: innerSel}); n != 1 {
 			t.Errorf("expected 1 subquery node, got %d", n)
 		}
 	})
 
 	t.Run("InExpr_with_select", func(t *testing.T) {
 		t.Parallel()
-		n := countSubqueries(&parser.InExpr{
-			Expr:   &parser.IdentExpr{Name: "id"},
-			Select: innerSel,
-		})
-		if n != 1 {
+		if n := countWalkSubqueries(&parser.InExpr{Expr: &parser.IdentExpr{Name: "id"}, Select: innerSel}); n != 1 {
 			t.Errorf("expected 1 subquery node, got %d", n)
 		}
 	})
 
 	t.Run("InExpr_no_select", func(t *testing.T) {
 		t.Parallel()
-		n := countSubqueries(&parser.InExpr{
-			Expr:   &parser.IdentExpr{Name: "id"},
-			Values: []parser.Expression{&parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"}},
-		})
-		if n != 0 {
+		if n := countWalkSubqueries(&parser.InExpr{Expr: &parser.IdentExpr{Name: "id"}, Values: []parser.Expression{&parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"}}}); n != 0 {
 			t.Errorf("expected 0 subquery nodes, got %d", n)
 		}
 	})
 
 	t.Run("BinaryExpr_with_subquery_child", func(t *testing.T) {
 		t.Parallel()
-		n := countSubqueries(&parser.BinaryExpr{
-			Op:    parser.OpEq,
-			Left:  &parser.SubqueryExpr{Select: innerSel},
-			Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"},
-		})
-		if n != 1 {
+		if n := countWalkSubqueries(&parser.BinaryExpr{Op: parser.OpEq, Left: &parser.SubqueryExpr{Select: innerSel}, Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"}}); n != 1 {
 			t.Errorf("expected 1 subquery node, got %d", n)
 		}
 	})
 
-	t.Run("UnaryExpr_with_subquery", func(t *testing.T) {
+	t.Run("UnaryAndParenExpr_with_subquery", func(t *testing.T) {
 		t.Parallel()
-		n := countSubqueries(&parser.UnaryExpr{
-			Op:   parser.OpNot,
-			Expr: &parser.SubqueryExpr{Select: innerSel},
-		})
-		if n != 1 {
-			t.Errorf("expected 1 subquery node, got %d", n)
+		if n := countWalkSubqueries(&parser.UnaryExpr{Op: parser.OpNot, Expr: &parser.SubqueryExpr{Select: innerSel}}); n != 1 {
+			t.Errorf("UnaryExpr: expected 1 subquery node, got %d", n)
 		}
-	})
-
-	t.Run("ParenExpr_with_subquery", func(t *testing.T) {
-		t.Parallel()
-		n := countSubqueries(&parser.ParenExpr{
-			Expr: &parser.SubqueryExpr{Select: innerSel},
-		})
-		if n != 1 {
-			t.Errorf("expected 1 subquery node, got %d", n)
+		if n := countWalkSubqueries(&parser.ParenExpr{Expr: &parser.SubqueryExpr{Select: innerSel}}); n != 1 {
+			t.Errorf("ParenExpr: expected 1 subquery node, got %d", n)
 		}
 	})
 
 	t.Run("nil_expr", func(t *testing.T) {
 		t.Parallel()
-		n := countSubqueries(nil)
-		if n != 0 {
+		if n := countWalkSubqueries(nil); n != 0 {
 			t.Errorf("expected 0 for nil, got %d", n)
 		}
 	})

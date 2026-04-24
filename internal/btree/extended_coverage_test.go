@@ -343,39 +343,15 @@ func TestCursor_LoadCellAtCurrentIndex(t *testing.T) {
 // TestIndexCursor_AdvanceWithinPageIndex tests index forward navigation (60.0% coverage)
 func TestIndexCursor_AdvanceWithinPageIndex(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
-	rootPage, err := createIndexPage(bt)
-	if err != nil {
-		t.Fatalf("createIndexPage() error = %v", err)
-	}
+	_, cursor := setupIndexCursor(t, 4096)
+	insertIndexEntriesN(cursor, 12, func(i int) []byte {
+		return []byte{byte('A' + i)}
+	})
 
-	cursor := NewIndexCursor(bt, rootPage)
-
-	// Insert entries on one page
-	for i := 0; i < 12; i++ {
-		key := []byte{byte('A' + i)}
-		err := cursor.InsertIndex(key, int64(i))
-		if err != nil {
-			t.Fatalf("InsertIndex() error = %v", err)
-		}
-	}
-
-	// Navigate forward
-	cursor.MoveToFirst()
-	nextCount := 0
-	initialPage := cursor.CurrentPage
-	for i := 0; i < 10; i++ {
-		err := cursor.NextIndex()
-		if err != nil || !cursor.IsValid() {
-			break
-		}
-		if cursor.CurrentPage == initialPage {
-			nextCount++
-		}
-	}
-
+	cursor.MoveToFirst() //nolint:errcheck
+	nextCount := navigateIndexForward(cursor, 10)
 	if nextCount > 0 {
-		t.Logf("Index navigated forward %d times on same page", nextCount)
+		t.Logf("Index navigated forward %d times", nextCount)
 	}
 }
 
@@ -488,40 +464,9 @@ func mergePagesAttempt(t *testing.T, cursor *BtCursor, seekRowid int64) {
 // TestMerge_UpdateParentAfterMerge tests parent update (66.7% coverage)
 func TestMerge_UpdateParentAfterMerge(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
-
-	cursor := NewCursor(bt, rootPage)
-
-	// Create multi-page tree
-	for i := int64(1); i <= 100; i++ {
-		err := cursor.Insert(i, make([]byte, 18))
-		if err != nil {
-			break
-		}
-	}
-
-	// Delete to make underfull
-	for i := int64(30); i <= 70; i++ {
-		cursor.SeekRowid(i)
-		if cursor.IsValid() {
-			cursor.Delete()
-		}
-	}
-
-	// Attempt merge which updates parent
-	cursor.SeekRowid(40)
-	if cursor.IsValid() && cursor.Depth > 0 {
-		merged, err := cursor.MergePage()
-		if err != nil {
-			t.Logf("MergePage() error = %v", err)
-		} else {
-			t.Logf("Merge result: %v (updateParentAfterMerge)", merged)
-		}
-	}
+	_, cursor := setupBtreeWithRows(t, 512, 1, 100, 18)
+	deleteRowRange(cursor, 30, 70)
+	tryMergeAtPosition(cursor, 40) //nolint:errcheck
 }
 
 // TestMerge_CopyRightCellsToLeft tests cell copying (70.0% coverage)

@@ -529,33 +529,30 @@ func TestMCDC7_IndexCursor_SeekIndex_NotFound(t *testing.T) {
 // so the left-sibling path is taken.
 // ---------------------------------------------------------------------------
 
-func TestMCDC7_MergeGetSiblingWithLeftPage(t *testing.T) {
-	t.Parallel()
-	_, c, _ := mcdc7NewRowidTree(t, 500)
-	// Delete from the middle to create an underfull page with a left sibling.
-	for i := int64(200); i <= int64(300); i++ {
+func mcdc7DeleteRangeWithReseek(c *BtCursor, start, end int64) {
+	for i := start; i <= end; i++ {
 		found, err := c.SeekRowid(i)
 		if err != nil || !found {
 			continue
 		}
 		if err := c.Delete(); err != nil {
-			t.Fatalf("Delete(%d): %v", i, err)
+			break
 		}
 		if c.State != CursorValid {
-			// Re-seek to continue
 			c2 := NewCursor(c.Btree, c.RootPage)
 			*c = *c2
-			found, err = c.SeekRowid(i + 1)
-			if err != nil || !found {
+			if _, err := c.SeekRowid(i + 1); err != nil {
 				break
 			}
 		}
 	}
-	// Attempt a merge operation from a known position.
-	found, err := c.SeekRowid(250)
-	if err == nil && found {
-		c.MergePage()
-	}
+}
+
+func TestMCDC7_MergeGetSiblingWithLeftPage(t *testing.T) {
+	t.Parallel()
+	_, c, _ := mcdc7NewRowidTree(t, 500)
+	mcdc7DeleteRangeWithReseek(c, 200, 300)
+	tryMergeAtPosition(c, 250) //nolint:errcheck
 }
 
 // ---------------------------------------------------------------------------

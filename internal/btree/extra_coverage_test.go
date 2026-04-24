@@ -319,40 +319,10 @@ func TestAllocateAndInitializeLeafPage(t *testing.T) {
 // Targets allocateAndInitializeInteriorPage at 66.7% coverage
 func TestAllocateAndInitializeInteriorPage(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(512)
-	rootPage, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable() error = %v", err)
-	}
+	bt, _ := setupBtreeWithRows(t, 512, 1, 250, 8)
 
-	cursor := NewCursor(bt, rootPage)
-
-	// Insert many rows to force interior page creation
-	for i := int64(1); i <= 250; i++ {
-		err := cursor.Insert(i, make([]byte, 8))
-		if err != nil {
-			break
-		}
-	}
-
-	// Check for interior pages
-	hasInterior := false
-	for pageNum := range bt.Pages {
-		pageData, err := bt.GetPage(pageNum)
-		if err != nil {
-			continue
-		}
-		header, err := ParsePageHeader(pageData, pageNum)
-		if err != nil {
-			continue
-		}
-		if header.IsInterior {
-			hasInterior = true
-			break
-		}
-	}
-
-	if hasInterior {
+	pgno, _ := findInteriorPage(bt)
+	if pgno != 0 {
 		t.Log("Interior page(s) created successfully")
 	}
 }

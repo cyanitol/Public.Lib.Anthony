@@ -62,13 +62,9 @@ func TestCacheWAL_FlushPage_CleanPage(t *testing.T) {
 
 // TestCacheWAL_FlushPage_DirtyManyThenFlushEach creates several dirty pages
 // and flushes each one explicitly, verifying they transition to clean.
-func TestCacheWAL_FlushPage_DirtyManyThenFlushEach(t *testing.T) {
-	t.Parallel()
-	cache := NewLRUCacheSimple(4096, 20)
-	writer := newMockPageWriter()
-	cache.SetPager(writer)
-
-	const n = 8
+// cwPutDirtyPages adds n dirty pages to the cache.
+func cwPutDirtyPages(t *testing.T, cache *LRUCache, n Pgno) {
+	t.Helper()
 	for i := Pgno(1); i <= n; i++ {
 		p := NewDbPage(i, 4096)
 		p.MakeDirty()
@@ -76,11 +72,11 @@ func TestCacheWAL_FlushPage_DirtyManyThenFlushEach(t *testing.T) {
 			t.Fatalf("Put(%d) error = %v", i, err)
 		}
 	}
+}
 
-	if got := len(cache.GetDirtyPages()); got != n {
-		t.Fatalf("expected %d dirty pages before flush, got %d", n, got)
-	}
-
+// cwFlushAndVerify flushes each page and verifies it's clean and was written.
+func cwFlushAndVerify(t *testing.T, cache *LRUCache, writer *mockPageWriter, n Pgno) {
+	t.Helper()
 	for i := Pgno(1); i <= n; i++ {
 		if err := cache.FlushPage(i); err != nil {
 			t.Fatalf("FlushPage(%d) error = %v", i, err)
@@ -92,6 +88,22 @@ func TestCacheWAL_FlushPage_DirtyManyThenFlushEach(t *testing.T) {
 			t.Errorf("page %d was not written", i)
 		}
 	}
+}
+
+func TestCacheWAL_FlushPage_DirtyManyThenFlushEach(t *testing.T) {
+	t.Parallel()
+	cache := NewLRUCacheSimple(4096, 20)
+	writer := newMockPageWriter()
+	cache.SetPager(writer)
+
+	const n = 8
+	cwPutDirtyPages(t, cache, n)
+
+	if got := len(cache.GetDirtyPages()); got != n {
+		t.Fatalf("expected %d dirty pages before flush, got %d", n, got)
+	}
+
+	cwFlushAndVerify(t, cache, writer, n)
 
 	if got := len(cache.GetDirtyPages()); got != 0 {
 		t.Fatalf("expected 0 dirty pages after flush, got %d", got)
@@ -118,7 +130,7 @@ func TestCacheWAL_SetMaxPages_ZeroCapacityError(t *testing.T) {
 	//
 	// Use a simpler cache that only has MaxPages, then drive MaxPages to zero.
 	cache2 := NewLRUCacheSimple(4096, 10)
-	// Set maxMemory to 0 (it already is by default from NewLRUCacheSimple).
+	// Set maxMemory to 0 (it already is by default from NewLRUCache).
 	err = cache2.SetMaxPages(0)
 	if !errors.Is(err, ErrCacheCapacityZero) {
 		t.Fatalf("SetMaxPages(0) with zero maxMemory: error = %v, want ErrCacheCapacityZero", err)

@@ -1138,89 +1138,55 @@ func TestMCDC_InsertCell_IndexGuard(t *testing.T) {
 //   Row 2: A=F → proceeds to check depth and siblings
 // ---------------------------------------------------------------------------
 
-func TestMCDC_HandleUnderfullPage_RootGuard(t *testing.T) {
+func mcdc4CursorAtRoot() *BtCursor {
+	bt := NewBtree(4096)
+	rootPage, _ := bt.CreateTable()
+	c := NewCursor(bt, rootPage)
+	for i := int64(1); i <= 5; i++ {
+		c.Insert(i, []byte("x")) //nolint:errcheck
+	}
+	deleteRowRange(c, 1, 4)
+	c.MoveToFirst() //nolint:errcheck
+	c.CurrentPage = c.RootPage
+	return c
+}
+
+func mcdc4CursorNonRoot() *BtCursor {
+	bt := NewBtree(4096)
+	rootPage, _ := bt.CreateTable()
+	c := NewCursor(bt, rootPage)
+	insertRows(c, 1, 80, 50)
+	c.MoveToFirst() //nolint:errcheck
+	if c.Depth == 0 {
+		c.CurrentPage = c.RootPage + 1
+	}
+	return c
+}
+
+func runUnderfullPageTest(t *testing.T, c *BtCursor, wantErr bool) {
+	t.Helper()
+	pageData, err := c.Btree.GetPage(c.CurrentPage)
+	if err != nil {
+		t.Skip("page not available")
+	}
+	page, err := NewBtreePage(c.CurrentPage, pageData, c.Btree.UsableSize)
+	if err != nil {
+		t.Skip("NewBtreePage failed")
+	}
+	err = handleUnderfullPage(c, page)
+	if !wantErr && err != nil {
+		t.Errorf("handleUnderfullPage() error = %v, want nil", err)
+	}
+}
+
+func TestMCDC_HandleUnderfullPage_RootGuard_AtRoot(t *testing.T) {
 	t.Parallel()
+	runUnderfullPageTest(t, mcdc4CursorAtRoot(), false)
+}
 
-	tests := []struct {
-		name        string
-		cursor      func() *BtCursor
-		wantErrKind string // substring of expected error, or "" for nil
-	}{
-		{
-			// A=T: current page IS the root → handleUnderfullPage returns nil
-			name: "A=T currentPage==rootPage: nil",
-			cursor: func() *BtCursor {
-				bt := NewBtree(4096)
-				rootPage, _ := bt.CreateTable()
-				c := NewCursor(bt, rootPage)
-				// Insert a few rows then delete most to make root underfull
-				for i := int64(1); i <= 5; i++ {
-					c.Insert(i, []byte("x"))
-				}
-				for i := int64(1); i <= 4; i++ {
-					c.SeekRowid(i)
-					if c.IsValid() {
-						c.Delete()
-					}
-				}
-				c.MoveToFirst()
-				// Ensure CurrentPage == RootPage
-				c.CurrentPage = c.RootPage
-				return c
-			},
-			wantErrKind: "",
-		},
-		{
-			// A=F: current page is NOT the root (non-root leaf) → error about underfull
-			name: "A=F currentPage!=rootPage: underfull error",
-			cursor: func() *BtCursor {
-				bt := NewBtree(4096)
-				rootPage, _ := bt.CreateTable()
-				c := NewCursor(bt, rootPage)
-				// Build a 2-level tree
-				for i := int64(1); i <= 80; i++ {
-					payload := make([]byte, 50)
-					c.Insert(i, payload)
-				}
-				// Position cursor on a non-root leaf
-				c.MoveToFirst()
-				if c.Depth == 0 {
-					// If still on root (flat tree), set a fake non-root page
-					c.CurrentPage = c.RootPage + 1
-				}
-				return c
-			},
-			wantErrKind: "underfull",
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			c := tt.cursor()
-			pageData, err := c.Btree.GetPage(c.CurrentPage)
-			if err != nil {
-				t.Skip("page not available for this test variant")
-			}
-			page, err := NewBtreePage(c.CurrentPage, pageData, c.Btree.UsableSize)
-			if err != nil {
-				t.Skip("NewBtreePage failed")
-			}
-			err = handleUnderfullPage(c, page)
-			if tt.wantErrKind == "" {
-				if err != nil {
-					t.Errorf("handleUnderfullPage() error = %v, want nil", err)
-				}
-			} else {
-				if err == nil {
-					// Acceptable: the page may not actually be underfull in this config
-					// The important thing is no panic and the guard works
-					t.Skip("handleUnderfullPage returned nil (page not underfull enough)")
-				}
-			}
-		})
-	}
+func TestMCDC_HandleUnderfullPage_RootGuard_NonRoot(t *testing.T) {
+	t.Parallel()
+	runUnderfullPageTest(t, mcdc4CursorNonRoot(), true)
 }
 
 // ---------------------------------------------------------------------------

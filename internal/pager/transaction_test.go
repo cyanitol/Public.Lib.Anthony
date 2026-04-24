@@ -2,6 +2,7 @@
 package pager
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -145,7 +146,7 @@ func TestReadTransactionReadOnly(t *testing.T) {
 	}
 }
 
-func TestTransactionStateTransitions(t *testing.T) {
+func TestTransactionStateTransitions_ReadCycle(t *testing.T) {
 	t.Parallel()
 	pager := openTestPager(t)
 
@@ -153,7 +154,6 @@ func TestTransactionStateTransitions(t *testing.T) {
 		t.Error("should not be in transaction initially")
 	}
 
-	// Open -> Read -> Open
 	mustBeginRead(t, pager)
 	if !pager.InTransaction() || pager.GetTransactionState() != TxRead {
 		t.Error("should be in read transaction")
@@ -162,8 +162,12 @@ func TestTransactionStateTransitions(t *testing.T) {
 	if pager.InTransaction() {
 		t.Error("should not be in transaction")
 	}
+}
 
-	// Open -> Write -> Open (commit)
+func TestTransactionStateTransitions_WriteCommit(t *testing.T) {
+	t.Parallel()
+	pager := openTestPager(t)
+
 	mustBeginWrite(t, pager)
 	if !pager.InWriteTransaction() || pager.GetTransactionState() != TxWrite {
 		t.Error("should be in write transaction")
@@ -172,8 +176,12 @@ func TestTransactionStateTransitions(t *testing.T) {
 	if pager.InTransaction() {
 		t.Error("should not be in transaction after commit")
 	}
+}
 
-	// Open -> Write -> Open (rollback)
+func TestTransactionStateTransitions_WriteRollback(t *testing.T) {
+	t.Parallel()
+	pager := openTestPager(t)
+
 	mustBeginWrite(t, pager)
 	mustRollback(t, pager)
 	if pager.InTransaction() {
@@ -255,54 +263,47 @@ func TestLockStateManagement(t *testing.T) {
 	}
 }
 
-func TestJournalModeSettings(t *testing.T) {
+func TestJournalModeSettings_ValidModes(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
-	dbFile := tmpDir + "/" + "test_journal_mode.db"
-
-	pager, err := Open(dbFile, false)
+	pager, err := Open(filepath.Join(t.TempDir(), "test_journal_mode.db"), false)
 	if err != nil {
 		t.Fatalf("failed to open pager: %v", err)
 	}
 	defer pager.Close()
 
-	// Default journal mode
 	if pager.GetJournalMode() != JournalModeDelete {
 		t.Error("default journal mode should be DELETE")
 	}
 
-	// Set journal mode
-	modes := []int{
-		JournalModePersist,
-		JournalModeTruncate,
-		JournalModeOff,
-		JournalModeDelete,
-	}
-
+	modes := []int{JournalModePersist, JournalModeTruncate, JournalModeOff, JournalModeDelete}
 	for _, mode := range modes {
 		if err := pager.SetJournalMode(mode); err != nil {
 			t.Errorf("failed to set journal mode %d: %v", mode, err)
 		}
-
 		if pager.GetJournalMode() != mode {
 			t.Errorf("journal mode not set correctly: expected %d, got %d", mode, pager.GetJournalMode())
 		}
 	}
+}
 
-	// Try to set invalid mode
+func TestJournalModeSettings_InvalidAndDuringTransaction(t *testing.T) {
+	t.Parallel()
+	pager, err := Open(filepath.Join(t.TempDir(), "test_journal_mode2.db"), false)
+	if err != nil {
+		t.Fatalf("failed to open pager: %v", err)
+	}
+	defer pager.Close()
+
 	if err := pager.SetJournalMode(999); err == nil {
 		t.Error("expected error when setting invalid journal mode")
 	}
 
-	// Cannot change journal mode during transaction
 	if err := pager.BeginWrite(); err != nil {
 		t.Fatalf("failed to begin write: %v", err)
 	}
-
 	if err := pager.SetJournalMode(JournalModePersist); err != nil {
 		t.Errorf("expected journal mode change to succeed during transaction, got %v", err)
 	}
-
 	pager.Rollback()
 }
 

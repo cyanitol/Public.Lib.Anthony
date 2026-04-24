@@ -31,6 +31,60 @@ func spillDeepExec(t *testing.T, db *sql.DB, q string) {
 	}
 }
 
+// spillDeepBulkInsert inserts n rows via a transaction using the given statement and row generator.
+func spillDeepBulkInsert(t *testing.T, db *sql.DB, insertSQL string, n int, rowGen func(i int) []interface{}) {
+	t.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	stmt, err := tx.Prepare(insertSQL)
+	if err != nil {
+		tx.Rollback()
+		t.Fatalf("Prepare: %v", err)
+	}
+	for i := 0; i < n; i++ {
+		if _, err := stmt.Exec(rowGen(i)...); err != nil {
+			stmt.Close()
+			tx.Rollback()
+			t.Fatalf("Exec row %d: %v", i, err)
+		}
+	}
+	stmt.Close()
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+}
+
+// spillDeepCountSorted queries rows and verifies ascending integer order, returning count.
+func spillDeepCountSortedInt(t *testing.T, rows *sql.Rows) int {
+	t.Helper()
+	prev := 0
+	count := 0
+	for rows.Next() {
+		var id int
+		var discard interface{}
+		cols, _ := rows.Columns()
+		scanArgs := make([]interface{}, len(cols))
+		scanArgs[0] = &id
+		for i := 1; i < len(cols); i++ {
+			scanArgs[i] = &discard
+		}
+		if err := rows.Scan(scanArgs...); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if id <= prev && count > 0 {
+			t.Errorf("out of order: got %d after %d", id, prev)
+		}
+		prev = id
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return count
+}
+
 // newTinySpillSorter creates a SorterWithSpill with a very small memory budget
 // so that spill is triggered after just a few rows.
 func newTinySpillSorter(t *testing.T, keyCols []int, desc []bool, collations []string, numCols int) *vdbe.SorterWithSpill {
@@ -59,27 +113,10 @@ func TestSorterSpillDeep_1000RowsSQL(t *testing.T) {
 	spillDeepExec(t, db, "CREATE TABLE big (id INTEGER, val TEXT)")
 
 	const n = 1000
-
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("Begin: %v", err)
-	}
-	stmt, err := tx.Prepare("INSERT INTO big VALUES (?, ?)")
-	if err != nil {
-		tx.Rollback()
-		t.Fatalf("Prepare: %v", err)
-	}
-	for i := n; i >= 1; i-- {
-		if _, err := stmt.Exec(i, fmt.Sprintf("row_%04d", i)); err != nil {
-			stmt.Close()
-			tx.Rollback()
-			t.Fatalf("Exec row %d: %v", i, err)
-		}
-	}
-	stmt.Close()
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
+	spillDeepBulkInsert(t, db, "INSERT INTO big VALUES (?, ?)", n, func(i int) []interface{} {
+		v := n - i
+		return []interface{}{v, fmt.Sprintf("row_%04d", v)}
+	})
 
 	rows, err := db.Query("SELECT id, val FROM big ORDER BY id ASC")
 	if err != nil {
@@ -87,23 +124,7 @@ func TestSorterSpillDeep_1000RowsSQL(t *testing.T) {
 	}
 	defer rows.Close()
 
-	prev := 0
-	count := 0
-	for rows.Next() {
-		var id int
-		var val string
-		if err := rows.Scan(&id, &val); err != nil {
-			t.Fatalf("Scan: %v", err)
-		}
-		if id <= prev {
-			t.Errorf("out of order: got %d after %d", id, prev)
-		}
-		prev = id
-		count++
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows.Err: %v", err)
-	}
+	count := spillDeepCountSortedInt(t, rows)
 	if count != n {
 		t.Errorf("expected %d rows, got %d", n, count)
 	}
@@ -248,11 +269,25 @@ func TestSorterSpillDeep_NullOrdering(t *testing.T) {
 // merge path (mergeSpilledRuns / mergeRuns) with diverse column types.
 // ---------------------------------------------------------------------------
 
+// spillDeepMakeCol1 creates a Mem of varying type based on index.
+func spillDeepMakeCol1(i int) *vdbe.Mem {
+	switch i % 4 {
+	case 0:
+		return vdbe.NewMemNull()
+	case 1:
+		return vdbe.NewMemInt(int64(i * 10))
+	case 2:
+		return vdbe.NewMemReal(float64(i) * 1.5)
+	default:
+		return vdbe.NewMemStr(fmt.Sprintf("str_%03d", i))
+	}
+}
+
 func TestSorterSpillDeep_MultiRunMerge(t *testing.T) {
 	t.Parallel()
 
 	cfg := &vdbe.SorterConfig{
-		MaxMemoryBytes: 200, // extremely tight: forces a new run every row or two
+		MaxMemoryBytes: 200,
 		TempDir:        t.TempDir(),
 		EnableSpill:    true,
 	}
@@ -261,28 +296,15 @@ func TestSorterSpillDeep_MultiRunMerge(t *testing.T) {
 
 	const n = 40
 	for i := n; i >= 1; i-- {
-		var col1 *vdbe.Mem
-		switch i % 4 {
-		case 0:
-			col1 = vdbe.NewMemNull()
-		case 1:
-			col1 = vdbe.NewMemInt(int64(i * 10))
-		case 2:
-			col1 = vdbe.NewMemReal(float64(i) * 1.5)
-		default:
-			col1 = vdbe.NewMemStr(fmt.Sprintf("str_%03d", i))
-		}
+		col1 := spillDeepMakeCol1(i)
 		if err := s.Insert([]*vdbe.Mem{vdbe.NewMemInt(int64(i)), col1, vdbe.NewMemBlob([]byte{byte(i % 256)})}); err != nil {
 			t.Fatalf("Insert %d: %v", i, err)
 		}
 	}
 
-	spills := s.GetNumSpilledRuns()
-	t.Logf("spilled runs before Sort: %d", spills)
-	if spills < 2 {
-		t.Errorf("expected ≥2 spilled runs, got %d", spills)
+	if spills := s.GetNumSpilledRuns(); spills < 2 {
+		t.Errorf("expected >=2 spilled runs, got %d", spills)
 	}
-
 	if err := s.Sort(); err != nil {
 		t.Fatalf("Sort: %v", err)
 	}
@@ -290,8 +312,7 @@ func TestSorterSpillDeep_MultiRunMerge(t *testing.T) {
 	prev := int64(0)
 	count := 0
 	for s.Next() {
-		row := s.CurrentRow()
-		cur := row[0].IntValue()
+		cur := s.CurrentRow()[0].IntValue()
 		if cur <= prev {
 			t.Errorf("out of order: %d after %d", cur, prev)
 		}
@@ -322,57 +343,24 @@ func TestSorterSpillDeep_MultiColMixedSQL(t *testing.T) {
 		bval BLOB
 	)`)
 
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("Begin: %v", err)
-	}
-	stmt, err := tx.Prepare("INSERT INTO mixed VALUES (?, ?, ?, ?)")
-	if err != nil {
-		tx.Rollback()
-		t.Fatalf("Prepare: %v", err)
-	}
-	for i := 500; i >= 1; i-- {
+	spillDeepBulkInsert(t, db, "INSERT INTO mixed VALUES (?, ?, ?, ?)", 500, func(i int) []interface{} {
+		v := 500 - i
 		var sval interface{}
-		if i%10 == 0 {
-			sval = nil // SQL NULL
+		if v%10 == 0 {
+			sval = nil
 		} else {
-			sval = fmt.Sprintf("text_%04d", i)
+			sval = fmt.Sprintf("text_%04d", v)
 		}
-		if _, err := stmt.Exec(i, float64(i)*0.1, sval, []byte{byte(i % 256)}); err != nil {
-			stmt.Close()
-			tx.Rollback()
-			t.Fatalf("Exec row %d: %v", i, err)
-		}
-	}
-	stmt.Close()
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
+		return []interface{}{v, float64(v) * 0.1, sval, []byte{byte(v % 256)}}
+	})
 
-	// ORDER BY two columns to exercise multi-key comparison through spill
 	rows, err := db.Query("SELECT id, fval FROM mixed ORDER BY id ASC, fval DESC")
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
 	defer rows.Close()
 
-	prev := 0
-	count := 0
-	for rows.Next() {
-		var id int
-		var fval float64
-		if err := rows.Scan(&id, &fval); err != nil {
-			t.Fatalf("Scan: %v", err)
-		}
-		if id <= prev {
-			t.Errorf("out of order: id %d after %d", id, prev)
-		}
-		prev = id
-		count++
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows.Err: %v", err)
-	}
+	count := spillDeepCountSortedInt(t, rows)
 	if count != 500 {
 		t.Errorf("expected 500 rows, got %d", count)
 	}
@@ -518,40 +506,9 @@ func TestSorterSpillDeep_DescendingWithSpill(t *testing.T) {
 // engine when rows are read back after spilling.
 // ---------------------------------------------------------------------------
 
-func TestSorterSpillDeep_SQLOrderByReal(t *testing.T) {
-	t.Parallel()
-
-	db := spillDeepOpenDB(t)
-	spillDeepExec(t, db, "CREATE TABLE reals (id INTEGER, score REAL, padding TEXT)")
-
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("Begin: %v", err)
-	}
-	stmt, err := tx.Prepare("INSERT INTO reals VALUES (?, ?, ?)")
-	if err != nil {
-		tx.Rollback()
-		t.Fatalf("Prepare: %v", err)
-	}
-	for i := 1000; i >= 1; i-- {
-		score := float64(i) * 0.001
-		if _, err := stmt.Exec(i, score, fmt.Sprintf("row_%04d", i)); err != nil {
-			stmt.Close()
-			tx.Rollback()
-			t.Fatalf("Exec row %d: %v", i, err)
-		}
-	}
-	stmt.Close()
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
-
-	rows, err := db.Query("SELECT score FROM reals ORDER BY score ASC")
-	if err != nil {
-		t.Fatalf("Query: %v", err)
-	}
-	defer rows.Close()
-
+// spillDeepCountSortedFloat queries rows with a single float column and verifies ascending order.
+func spillDeepCountSortedFloat(t *testing.T, rows *sql.Rows) int {
+	t.Helper()
 	prev := -1.0
 	count := 0
 	for rows.Next() {
@@ -568,7 +525,27 @@ func TestSorterSpillDeep_SQLOrderByReal(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows.Err: %v", err)
 	}
-	if count != 1000 {
+	return count
+}
+
+func TestSorterSpillDeep_SQLOrderByReal(t *testing.T) {
+	t.Parallel()
+
+	db := spillDeepOpenDB(t)
+	spillDeepExec(t, db, "CREATE TABLE reals (id INTEGER, score REAL, padding TEXT)")
+
+	spillDeepBulkInsert(t, db, "INSERT INTO reals VALUES (?, ?, ?)", 1000, func(i int) []interface{} {
+		v := 1000 - i
+		return []interface{}{v, float64(v) * 0.001, fmt.Sprintf("row_%04d", v)}
+	})
+
+	rows, err := db.Query("SELECT score FROM reals ORDER BY score ASC")
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	defer rows.Close()
+
+	if count := spillDeepCountSortedFloat(t, rows); count != 1000 {
 		t.Errorf("expected 1000 rows, got %d", count)
 	}
 }
@@ -586,32 +563,16 @@ func TestSorterSpillDeep_SQLOrderByNullColumn(t *testing.T) {
 	db := spillDeepOpenDB(t)
 	spillDeepExec(t, db, "CREATE TABLE nullcol (id INTEGER, tag TEXT, padding TEXT)")
 
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("Begin: %v", err)
-	}
-	stmt, err := tx.Prepare("INSERT INTO nullcol VALUES (?, ?, ?)")
-	if err != nil {
-		tx.Rollback()
-		t.Fatalf("Prepare: %v", err)
-	}
-	for i := 1000; i >= 1; i-- {
+	spillDeepBulkInsert(t, db, "INSERT INTO nullcol VALUES (?, ?, ?)", 1000, func(i int) []interface{} {
+		v := 1000 - i
 		var tag interface{}
-		if i%5 == 0 {
+		if v%5 == 0 {
 			tag = nil
 		} else {
-			tag = fmt.Sprintf("tag_%04d", i)
+			tag = fmt.Sprintf("tag_%04d", v)
 		}
-		if _, err := stmt.Exec(i, tag, fmt.Sprintf("pad_%04d", i)); err != nil {
-			stmt.Close()
-			tx.Rollback()
-			t.Fatalf("Exec row %d: %v", i, err)
-		}
-	}
-	stmt.Close()
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
+		return []interface{}{v, tag, fmt.Sprintf("pad_%04d", v)}
+	})
 
 	rows, err := db.Query("SELECT id, tag FROM nullcol ORDER BY tag ASC, id ASC")
 	if err != nil {

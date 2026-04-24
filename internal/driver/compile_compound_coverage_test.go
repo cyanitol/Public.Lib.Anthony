@@ -348,16 +348,13 @@ func TestCompileCompoundFloatEdgeCases(t *testing.T) {
 	})
 }
 
-// TestCompileCompoundLimitOffset exercises parseOffsetExpr with various
-// LIMIT/OFFSET combinations including zero offset and large offset.
-func TestCompileCompoundLimitOffset(t *testing.T) {
+// TestCompileCompoundLimitOffsetBasic exercises basic LIMIT/OFFSET combinations.
+func TestCompileCompoundLimitOffsetBasic(t *testing.T) {
 	t.Parallel()
 
 	t.Run("offset_zero_no_skip", func(t *testing.T) {
 		t.Parallel()
 		db := openCompoundCovDB(t)
-		// OFFSET 0: parseOffsetExpr parses literal 0, v > 0 is false -> returns 0
-		// applyOffset with offset=0 returns all rows
 		rows := queryCompound(t, db,
 			"SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 ORDER BY 1 LIMIT -1 OFFSET 0")
 		if len(rows) != 3 {
@@ -368,7 +365,6 @@ func TestCompileCompoundLimitOffset(t *testing.T) {
 	t.Run("offset_larger_than_result", func(t *testing.T) {
 		t.Parallel()
 		db := openCompoundCovDB(t)
-		// OFFSET >= len(rows): applyOffset returns nil (empty)
 		rows := queryCompound(t, db,
 			"SELECT 1 UNION ALL SELECT 2 ORDER BY 1 LIMIT 100 OFFSET 5")
 		if len(rows) != 0 {
@@ -379,7 +375,6 @@ func TestCompileCompoundLimitOffset(t *testing.T) {
 	t.Run("limit_and_offset_mid_range", func(t *testing.T) {
 		t.Parallel()
 		db := openCompoundCovDB(t)
-		// LIMIT 2 OFFSET 1: skip first, take 2
 		rows := queryCompound(t, db,
 			"SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 ORDER BY 1 LIMIT 2 OFFSET 1")
 		if len(rows) != 2 {
@@ -393,7 +388,6 @@ func TestCompileCompoundLimitOffset(t *testing.T) {
 	t.Run("limit_zero_empty_result", func(t *testing.T) {
 		t.Parallel()
 		db := openCompoundCovDB(t)
-		// LIMIT 0: applyLimit returns empty slice
 		rows := queryCompound(t, db,
 			"SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 LIMIT 0")
 		if len(rows) != 0 {
@@ -404,59 +398,58 @@ func TestCompileCompoundLimitOffset(t *testing.T) {
 	t.Run("no_limit_no_offset", func(t *testing.T) {
 		t.Parallel()
 		db := openCompoundCovDB(t)
-		// No LIMIT/OFFSET: parseLimitExpr and parseOffsetExpr both return nil path
 		rows := queryCompound(t, db,
 			"SELECT 5 UNION ALL SELECT 3 UNION ALL SELECT 1 ORDER BY 1")
 		if len(rows) != 3 {
 			t.Fatalf("want 3, got %d", len(rows))
 		}
 	})
+}
 
-	t.Run("intersect_with_limit_offset", func(t *testing.T) {
-		t.Parallel()
-		db := openCompoundCovDB(t)
-		execCompound(t, db,
-			"CREATE TABLE tg(n INTEGER)",
-			"INSERT INTO tg VALUES(1),(2),(3),(4),(5)",
-			"CREATE TABLE th(n INTEGER)",
-			"INSERT INTO th VALUES(2),(3),(4),(5),(6)",
-		)
-		// INTERSECT yields [2,3,4,5], LIMIT 2 OFFSET 1 yields [3,4]
-		rows := queryCompound(t, db,
-			"SELECT n FROM tg INTERSECT SELECT n FROM th ORDER BY n LIMIT 2 OFFSET 1")
-		if len(rows) != 2 {
-			t.Fatalf("want 2, got %d", len(rows))
-		}
-		if rows[0][0] != int64(3) || rows[1][0] != int64(4) {
-			t.Errorf("want [3,4], got [%v,%v]", rows[0][0], rows[1][0])
-		}
-	})
+// TestCompileCompoundLimitOffsetIntersect exercises LIMIT/OFFSET with INTERSECT.
+func TestCompileCompoundLimitOffsetIntersect(t *testing.T) {
+	t.Parallel()
+	db := openCompoundCovDB(t)
+	execCompound(t, db,
+		"CREATE TABLE tg(n INTEGER)",
+		"INSERT INTO tg VALUES(1),(2),(3),(4),(5)",
+		"CREATE TABLE th(n INTEGER)",
+		"INSERT INTO th VALUES(2),(3),(4),(5),(6)",
+	)
+	rows := queryCompound(t, db,
+		"SELECT n FROM tg INTERSECT SELECT n FROM th ORDER BY n LIMIT 2 OFFSET 1")
+	if len(rows) != 2 {
+		t.Fatalf("want 2, got %d", len(rows))
+	}
+	if rows[0][0] != int64(3) || rows[1][0] != int64(4) {
+		t.Errorf("want [3,4], got [%v,%v]", rows[0][0], rows[1][0])
+	}
+}
 
-	t.Run("except_with_limit_offset", func(t *testing.T) {
-		t.Parallel()
-		db := openCompoundCovDB(t)
-		execCompound(t, db,
-			"CREATE TABLE ti(n INTEGER)",
-			"INSERT INTO ti VALUES(1),(2),(3),(4),(5)",
-			"CREATE TABLE tj(n INTEGER)",
-			"INSERT INTO tj VALUES(3)",
-		)
-		// EXCEPT yields [1,2,4,5], LIMIT 2 OFFSET 2 yields [4,5]
-		rows := queryCompound(t, db,
-			"SELECT n FROM ti EXCEPT SELECT n FROM tj ORDER BY n LIMIT 2 OFFSET 2")
-		if len(rows) != 2 {
-			t.Fatalf("want 2, got %d", len(rows))
-		}
-		if rows[0][0] != int64(4) || rows[1][0] != int64(4) {
-			// rows should be 4 and 5
-		}
-		if rows[0][0] != int64(4) {
-			t.Errorf("want 4, got %v", rows[0][0])
-		}
-		if rows[1][0] != int64(5) {
-			t.Errorf("want 5, got %v", rows[1][0])
-		}
-	})
+// TestCompileCompoundLimitOffsetExcept exercises LIMIT/OFFSET with EXCEPT.
+func TestCompileCompoundLimitOffsetExcept(t *testing.T) {
+	t.Parallel()
+	db := openCompoundCovDB(t)
+	execCompound(t, db,
+		"CREATE TABLE ti(n INTEGER)",
+		"INSERT INTO ti VALUES(1),(2),(3),(4),(5)",
+		"CREATE TABLE tj(n INTEGER)",
+		"INSERT INTO tj VALUES(3)",
+	)
+	rows := queryCompound(t, db,
+		"SELECT n FROM ti EXCEPT SELECT n FROM tj ORDER BY n LIMIT 2 OFFSET 2")
+	if len(rows) != 2 {
+		t.Fatalf("want 2, got %d", len(rows))
+	}
+	if rows[0][0] != int64(4) || rows[1][0] != int64(4) {
+		// rows should be 4 and 5
+	}
+	if rows[0][0] != int64(4) {
+		t.Errorf("want 4, got %v", rows[0][0])
+	}
+	if rows[1][0] != int64(5) {
+		t.Errorf("want 5, got %v", rows[1][0])
+	}
 }
 
 // TestCompileCompoundFlattenNested exercises flattenCompound with right-nested

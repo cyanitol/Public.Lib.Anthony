@@ -393,33 +393,29 @@ func testOptimizeFromSubqueryViaPlanQueryWithSubqueries(t *testing.T) {
 // are triggered by passing nil or a stmt without a From clause.
 
 func testFlattenViewsInSelectViaExpandViewsInSelect(t *testing.T) {
-	// Nil stmt: ExpandViewsInSelect → flattenViewsInSelect → returns stmt (nil).
-	t.Run("NilStmt", func(t *testing.T) {
-		s := schema.NewSchema()
-		result, err := planner.ExpandViewsInSelect(nil, s)
-		if err != nil {
-			t.Fatalf("unexpected error for nil stmt: %v", err)
-		}
-		if result != nil {
-			t.Error("expected nil result for nil stmt")
-		}
-	})
+	t.Run("NilAndNoFrom", testFlattenNilAndNoFrom)
+	t.Run("ViewFlattening", testFlattenViewFlattening)
+}
 
-	// Stmt without From clause: returns stmt unchanged.
-	t.Run("StmtWithoutFrom", func(t *testing.T) {
-		s := schema.NewSchema()
-		stmt := &parser.SelectStmt{
-			Columns: []parser.ResultColumn{{Star: true}},
-		}
-		result, err := planner.ExpandViewsInSelect(stmt, s)
-		if err != nil {
-			t.Fatalf("unexpected error for stmt without From: %v", err)
-		}
-		if result == nil {
-			t.Error("expected non-nil result")
-		}
-	})
+func testFlattenNilAndNoFrom(t *testing.T) {
+	// Nil stmt
+	s := schema.NewSchema()
+	result := expandView(t, nil, s)
+	if result != nil {
+		t.Error("expected nil result for nil stmt")
+	}
 
+	// Stmt without From clause
+	stmt := &parser.SelectStmt{
+		Columns: []parser.ResultColumn{{Star: true}},
+	}
+	result = expandView(t, stmt, s)
+	if result == nil {
+		t.Error("expected non-nil result")
+	}
+}
+
+func testFlattenViewFlattening(t *testing.T) {
 	// Simple view: exercises the normal flattening code path.
 	t.Run("SimpleViewFlattened", func(t *testing.T) {
 		s := schema.NewSchema()
@@ -438,14 +434,10 @@ func testFlattenViewsInSelectViaExpandViewsInSelect(t *testing.T) {
 				Tables: []parser.TableOrSubquery{{TableName: "simple_v"}},
 			},
 		}
-		result, err := planner.ExpandViewsInSelect(stmt, s)
-		if err != nil {
-			t.Fatalf("unexpected error flattening simple view: %v", err)
-		}
+		result := expandView(t, stmt, s)
 		if result == nil {
 			t.Fatal("expected non-nil result")
 		}
-		// After flattening, the underlying table should be "base_t".
 		if result.From.Tables[0].TableName != "base_t" {
 			t.Errorf("expected 'base_t', got %q", result.From.Tables[0].TableName)
 		}
@@ -473,14 +465,10 @@ func testFlattenViewsInSelectViaExpandViewsInSelect(t *testing.T) {
 				Tables: []parser.TableOrSubquery{{TableName: "complex_v"}},
 			},
 		}
-		result, err := planner.ExpandViewsInSelect(stmt, s)
-		if err != nil {
-			t.Fatalf("unexpected error expanding complex view: %v", err)
-		}
+		result := expandView(t, stmt, s)
 		if result == nil {
 			t.Fatal("expected non-nil result")
 		}
-		// Complex view cannot be flattened, so it becomes a subquery.
 		if result.From.Tables[0].Subquery == nil {
 			t.Error("expected complex view to be expanded as subquery")
 		}
@@ -514,14 +502,10 @@ func testFlattenViewsInSelectViaExpandViewsInSelect(t *testing.T) {
 				Right: &parser.LiteralExpr{Value: "'Sales'"},
 			},
 		}
-		result, err := planner.ExpandViewsInSelect(stmt, s)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		result := expandView(t, stmt, s)
 		if result == nil {
 			t.Fatal("expected non-nil result")
 		}
-		// Both WHERE clauses should be AND-ed together.
 		if result.Where == nil {
 			t.Error("expected merged WHERE clause")
 		}
@@ -551,10 +535,7 @@ func testCanFlattenViewViaExpandViewsInSelect(t *testing.T) {
 			Columns: []parser.ResultColumn{{Star: true}},
 			From:    &parser.FromClause{Tables: []parser.TableOrSubquery{{TableName: "cv_simple"}}},
 		}
-		result, err := planner.ExpandViewsInSelect(stmt, s)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		result := expandView(t, stmt, s)
 		if result.From.Tables[0].TableName != "raw" {
 			t.Errorf("expected 'raw', got %q", result.From.Tables[0].TableName)
 		}
@@ -577,10 +558,7 @@ func testCanFlattenViewViaExpandViewsInSelect(t *testing.T) {
 			Columns: []parser.ResultColumn{{Star: true}},
 			From:    &parser.FromClause{Tables: []parser.TableOrSubquery{{TableName: "cv_grouped"}}},
 		}
-		result, err := planner.ExpandViewsInSelect(stmt, s)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		result := expandView(t, stmt, s)
 		if result.From.Tables[0].Subquery == nil {
 			t.Error("expected view with GROUP BY to become a subquery")
 		}
@@ -603,10 +581,7 @@ func testCanFlattenViewViaExpandViewsInSelect(t *testing.T) {
 			Columns: []parser.ResultColumn{{Star: true}},
 			From:    &parser.FromClause{Tables: []parser.TableOrSubquery{{TableName: "cv_distinct"}}},
 		}
-		result, err := planner.ExpandViewsInSelect(stmt, s)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		result := expandView(t, stmt, s)
 		if result.From.Tables[0].Subquery == nil {
 			t.Error("expected view with DISTINCT to become a subquery")
 		}
@@ -629,17 +604,13 @@ func testCanFlattenViewViaExpandViewsInSelect(t *testing.T) {
 			Columns: []parser.ResultColumn{{Star: true}},
 			From:    &parser.FromClause{Tables: []parser.TableOrSubquery{{TableName: "cv_limited"}}},
 		}
-		result, err := planner.ExpandViewsInSelect(stmt, s)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		result := expandView(t, stmt, s)
 		if result.From.Tables[0].Subquery == nil {
 			t.Error("expected view with LIMIT to become a subquery")
 		}
 	})
 
-	// View with multiple tables in FROM (no JOINs but len(Tables) != 1):
-	// canFlattenView → hasValidFromClauseForFlattening returns false.
+	// View with multiple tables in FROM.
 	t.Run("ViewWithMultipleFromTables_CannotFlatten", func(t *testing.T) {
 		s := schema.NewSchema()
 		s.Views["cv_multi"] = &schema.View{
@@ -658,26 +629,20 @@ func testCanFlattenViewViaExpandViewsInSelect(t *testing.T) {
 			Columns: []parser.ResultColumn{{Star: true}},
 			From:    &parser.FromClause{Tables: []parser.TableOrSubquery{{TableName: "cv_multi"}}},
 		}
-		result, err := planner.ExpandViewsInSelect(stmt, s)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		result := expandView(t, stmt, s)
 		if result.From.Tables[0].Subquery == nil {
 			t.Error("expected view with multiple FROM tables to become a subquery")
 		}
 	})
 
-	// Non-view table: canFlattenView is never called, table passes through.
+	// Non-view table: passes through.
 	t.Run("NonViewTable_PassThrough", func(t *testing.T) {
 		s := schema.NewSchema()
 		stmt := &parser.SelectStmt{
 			Columns: []parser.ResultColumn{{Star: true}},
 			From:    &parser.FromClause{Tables: []parser.TableOrSubquery{{TableName: "users"}}},
 		}
-		result, err := planner.ExpandViewsInSelect(stmt, s)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		result := expandView(t, stmt, s)
 		if result.From.Tables[0].TableName != "users" {
 			t.Errorf("expected 'users', got %q", result.From.Tables[0].TableName)
 		}

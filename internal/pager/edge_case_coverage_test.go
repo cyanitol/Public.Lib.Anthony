@@ -336,6 +336,33 @@ func TestTryUpgradeToExclusiveEdgeCases(t *testing.T) {
 }
 
 // TestMultipleCommitCycles tests multiple commit/rollback cycles
+// ecAllocWriteCommitFree performs one cycle of allocate, write, commit, free, commit.
+func ecAllocWriteCommitFree(t *testing.T, p *Pager, cycle int) {
+	t.Helper()
+	pgno, err := p.AllocatePage()
+	if err != nil {
+		t.Fatalf("cycle %d: AllocatePage() error = %v", cycle, err)
+	}
+	page, err := p.Get(pgno)
+	if err != nil {
+		t.Fatalf("cycle %d: Get() error = %v", cycle, err)
+	}
+	if err := p.Write(page); err != nil {
+		t.Fatalf("cycle %d: Write() error = %v", cycle, err)
+	}
+	page.Data[0] = byte(cycle)
+	p.Put(page)
+	if err := p.Commit(); err != nil {
+		t.Errorf("cycle %d: Commit() error = %v", cycle, err)
+	}
+	if err := p.FreePage(pgno); err != nil {
+		t.Errorf("cycle %d: FreePage() error = %v", cycle, err)
+	}
+	if err := p.Commit(); err != nil {
+		t.Errorf("cycle %d: Commit after free error = %v", cycle, err)
+	}
+}
+
 func TestMultipleCommitCycles(t *testing.T) {
 	t.Parallel()
 	dbFile := filepath.Join(t.TempDir(), "test_cycles.db")
@@ -346,40 +373,8 @@ func TestMultipleCommitCycles(t *testing.T) {
 	}
 	defer pager.Close()
 
-	// Run multiple commit cycles
 	for cycle := 0; cycle < 5; cycle++ {
-		// Allocate a page
-		pgno, err := pager.AllocatePage()
-		if err != nil {
-			t.Fatalf("cycle %d: AllocatePage() error = %v", cycle, err)
-		}
-
-		// Write to it
-		page, err := pager.Get(pgno)
-		if err != nil {
-			t.Fatalf("cycle %d: Get() error = %v", cycle, err)
-		}
-
-		if err := pager.Write(page); err != nil {
-			t.Fatalf("cycle %d: Write() error = %v", cycle, err)
-		}
-
-		page.Data[0] = byte(cycle)
-		pager.Put(page)
-
-		// Commit
-		if err := pager.Commit(); err != nil {
-			t.Errorf("cycle %d: Commit() error = %v", cycle, err)
-		}
-
-		// Free it
-		if err := pager.FreePage(pgno); err != nil {
-			t.Errorf("cycle %d: FreePage() error = %v", cycle, err)
-		}
-
-		if err := pager.Commit(); err != nil {
-			t.Errorf("cycle %d: Commit after free error = %v", cycle, err)
-		}
+		ecAllocWriteCommitFree(t, pager, cycle)
 	}
 }
 

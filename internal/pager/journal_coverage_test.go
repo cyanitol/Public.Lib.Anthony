@@ -148,6 +148,17 @@ func TestJournalRollback_SamePage(t *testing.T) {
 // TestJournalRollback_SQLInterface exercises the pager-level rollback path via
 // the database/sql interface: open a database, INSERT rows inside a transaction,
 // call tx.Rollback, then verify the rows are absent.
+// jcInsertRowsInTx inserts n rows with the given value in a transaction.
+func jcInsertRowsInTx(t *testing.T, tx *sql.Tx, n int, val string) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		if _, err := tx.Exec("INSERT INTO t (v) VALUES (?)", val); err != nil {
+			tx.Rollback() //nolint:errcheck
+			t.Fatalf("INSERT: %v", err)
+		}
+	}
+}
+
 func TestJournalRollback_SQLInterface(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -167,13 +178,7 @@ func TestJournalRollback_SQLInterface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-
-	for i := 0; i < 5; i++ {
-		if _, err := tx.Exec("INSERT INTO t (v) VALUES (?)", "data"); err != nil {
-			tx.Rollback() //nolint:errcheck
-			t.Fatalf("INSERT: %v", err)
-		}
-	}
+	jcInsertRowsInTx(t, tx, 5, "data")
 
 	if err := tx.Rollback(); err != nil {
 		t.Fatalf("tx.Rollback: %v", err)

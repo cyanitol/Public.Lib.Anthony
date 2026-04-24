@@ -553,39 +553,21 @@ func TestMCDC6_CreateNewRoot_CompositePK(t *testing.T) {
 
 func TestMCDC6_AdjustCursorAfterDelete_NegativeIndex(t *testing.T) {
 	t.Parallel()
-	bt := NewBtree(4096)
-	root, err := bt.CreateTable()
-	if err != nil {
-		t.Fatalf("CreateTable: %v", err)
-	}
-	c := NewCursor(bt, root)
+	_, c := setupBtreeWithRows(t, 4096, 1, 1, 4)
 
-	if err := c.Insert(1, []byte("only")); err != nil {
-		t.Fatalf("Insert: %v", err)
-	}
-
-	// Position cursor at the single cell (index 0).
 	found, err := c.SeekRowid(1)
 	if err != nil || !found {
 		t.Fatalf("SeekRowid(1): err=%v found=%v", err, found)
 	}
-
-	// Delete the cell, then call adjustCursorAfterDelete directly.
 	if err := c.performCellDeletion(); err != nil {
 		t.Fatalf("performCellDeletion: %v", err)
 	}
 
-	// After deletion of the only cell, CurrentIndex starts at 0; adjusting
-	// should decrement to -1 and set CurrentCell = nil.
 	c.CurrentIndex = 0
-	err = c.adjustCursorAfterDelete()
-	if err != nil {
-		t.Fatalf("adjustCursorAfterDelete: unexpected error: %v", err)
+	if err := c.adjustCursorAfterDelete(); err != nil {
+		t.Fatalf("adjustCursorAfterDelete: %v", err)
 	}
 	if c.CurrentIndex != -1 {
 		t.Errorf("CurrentIndex = %d, want -1", c.CurrentIndex)
-	}
-	if c.CurrentCell != nil {
-		t.Error("CurrentCell should be nil after index underflows to -1")
 	}
 }

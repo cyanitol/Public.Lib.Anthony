@@ -147,31 +147,31 @@ func vacIntoVerifyPage(t *testing.T, pager *Pager, pgno Pgno, expected byte) {
 	}
 }
 
+// vacIntoCreateAndVacuum creates a source db, writes pages 2-5, commits, vacuums into targetFile, and closes.
+func vacIntoCreateAndVacuum(t *testing.T, sourceFile, targetFile string) {
+	t.Helper()
+	pager, err := Open(sourceFile, false)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	for i := Pgno(2); i <= 5; i++ {
+		vacIntoWritePage(t, pager, i, byte(i*2))
+	}
+	if err := pager.Commit(); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	if err := pager.Vacuum(&VacuumOptions{IntoFile: targetFile}); err != nil {
+		t.Fatalf("Vacuum() error = %v", err)
+	}
+	pager.Close()
+}
+
 func TestVacuum_Into(t *testing.T) {
 	t.Parallel()
 	sourceFile := filepath.Join(t.TempDir(), "source.db")
 	targetFile := filepath.Join(t.TempDir(), "target.db")
 
-	pager, err := Open(sourceFile, false)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-
-	// Start from page 2: page 1 is reserved for sqlite_master btree header
-	for i := Pgno(2); i <= 5; i++ {
-		vacIntoWritePage(t, pager, i, byte(i*2))
-	}
-
-	if err := pager.Commit(); err != nil {
-		t.Fatalf("Commit() error = %v", err)
-	}
-
-	opts := &VacuumOptions{IntoFile: targetFile}
-	if err := pager.Vacuum(opts); err != nil {
-		t.Fatalf("Vacuum() error = %v", err)
-	}
-
-	pager.Close()
+	vacIntoCreateAndVacuum(t, sourceFile, targetFile)
 
 	if _, err := os.Stat(targetFile); os.IsNotExist(err) {
 		t.Fatal("Target file was not created")
@@ -182,7 +182,6 @@ func TestVacuum_Into(t *testing.T) {
 		t.Fatalf("Open(target) error = %v", err)
 	}
 	defer targetPager.Close()
-
 	for i := Pgno(2); i <= 5; i++ {
 		vacIntoVerifyPage(t, targetPager, i, byte(i*2))
 	}
@@ -192,7 +191,6 @@ func TestVacuum_Into(t *testing.T) {
 		t.Fatalf("Open(source) after vacuum error = %v", err)
 	}
 	defer sourcePager.Close()
-
 	vacIntoVerifyPage(t, sourcePager, 2, 4)
 }
 
