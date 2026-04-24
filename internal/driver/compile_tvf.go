@@ -602,73 +602,92 @@ func (s *Stmt) hasColumnRefArg(args []parser.Expression) bool {
 func (s *Stmt) compileCorrelatedTVFJoin(vm *vdbe.VDBE, stmt *parser.SelectStmt, args []driver.NamedValue) (*vdbe.VDBE, error) {
 	vm.SetReadOnly(true)
 
+	ctx, err := s.prepareCorrelatedTVFJoin(stmt)
+	if err != nil {
+		return nil, err
+	}
+	flatRows, err := s.buildCorrelatedTVFRows(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+	return s.finishCorrelatedTVFJoin(vm, stmt, ctx, flatRows)
+}
+
+type correlatedTVFJoinContext struct {
+	outerTable *schema.Table
+	outerAlias  string
+	tvfAlias    string
+	tvfCols     []string
+	tvfRef      *parser.TableOrSubquery
+}
+
+func (s *Stmt) prepareCorrelatedTVFJoin(stmt *parser.SelectStmt) (*correlatedTVFJoinContext, error) {
 	outerRef := &stmt.From.Tables[0]
 	tvfRef := s.findCorrelatedTVFRef(stmt)
 	if tvfRef == nil {
 		return nil, fmt.Errorf("correlated TVF not found")
 	}
-
 	tvf := s.lookupTVF(tvfRef.TableName)
-	tvfCols := tvf.Columns()
-
 	outerTable, _, _, ok := s.conn.dbRegistry.ResolveTable(outerRef.Schema, outerRef.TableName)
 	if !ok {
 		return nil, fmt.Errorf("table not found: %s", outerRef.TableName)
 	}
+	return &correlatedTVFJoinContext{
+		outerTable: outerTable,
+		outerAlias: aliasOrName(outerRef.TableName, outerRef.Alias),
+		tvfAlias:   aliasOrName(tvfRef.TableName, tvfRef.Alias),
+		tvfCols:    tvf.Columns(),
+		tvfRef:     tvfRef,
+	}, nil
+}
 
-	outerAlias := outerRef.TableName
-	if outerRef.Alias != "" {
-		outerAlias = outerRef.Alias
+func aliasOrName(name, alias string) string {
+	if alias != "" {
+		return alias
 	}
-	tvfAlias := tvfRef.TableName
-	if tvfRef.Alias != "" {
-		tvfAlias = tvfRef.Alias
-	}
+	return name
+}
 
-	// Read all rows from the outer table
-	outerRows, err := s.readAllTableRows(outerTable)
+func (s *Stmt) buildCorrelatedTVFRows(ctx *correlatedTVFJoinContext, args []driver.NamedValue) ([][]functions.Value, error) {
+	outerRows, err := s.readAllTableRows(ctx.outerTable)
 	if err != nil {
 		return nil, err
 	}
+	joined := s.crossJoinWithTVF(outerRows, ctx.outerTable, ctx.tvfRef, s.lookupTVF(ctx.tvfRef.TableName), args)
+	return flattenCorrelatedRows(joined, ctx.outerTable, ctx.tvfCols), nil
+}
 
-	// For each outer row, evaluate TVF args and call TVF
-	joined := s.crossJoinWithTVF(outerRows, outerTable, tvfRef, tvf, args)
+func (s *Stmt) finishCorrelatedTVFJoin(vm *vdbe.VDBE, stmt *parser.SelectStmt, ctx *correlatedTVFJoinContext, flatRows [][]functions.Value) (*vdbe.VDBE, error) {
+	flatCols := buildFlatColNames(ctx.outerTable, ctx.tvfCols)
+	flatRows = s.applyCorrelatedTVFFilters(stmt, flatRows, flatCols)
+	if s.detectAggregates(stmt) {
+		outCols := s.resolveCorrelatedOutputCols(stmt.Columns, ctx.outerTable, ctx.tvfCols, ctx.outerAlias, ctx.tvfAlias)
+		return s.emitCorrelatedAggregate(vm, flatRows, stmt, outCols, flatCols)
+	}
+	outCols := s.resolveCorrelatedOutputCols(stmt.Columns, ctx.outerTable, ctx.tvfCols, ctx.outerAlias, ctx.tvfAlias)
+	projected := projectFlatRows(flatRows, stmt.Columns, ctx.outerTable, ctx.tvfCols, flatCols)
+	projected = s.postProcessCorrelatedTVFProjection(stmt, projected, outCols)
+	return emitTVFProjectedBytecode(vm, projected, outCols)
+}
 
-	// Build flat joined rows with full column names for filtering/aggregation
-	flatCols := buildFlatColNames(outerTable, tvfCols)
-	flatRows := flattenCorrelatedRows(joined, outerTable, tvfCols)
-
-	// Apply WHERE filter on full joined data
+func (s *Stmt) applyCorrelatedTVFFilters(stmt *parser.SelectStmt, flatRows [][]functions.Value, flatCols []string) [][]functions.Value {
 	if stmt.Where != nil {
 		flatRows = filterTVFRows(flatRows, stmt.Where, flatCols)
 	}
+	return flatRows
+}
 
-	// Handle aggregates on full joined data
-	if s.detectAggregates(stmt) {
-		outCols := s.resolveCorrelatedOutputCols(stmt.Columns, outerTable, tvfCols, outerAlias, tvfAlias)
-		return s.emitCorrelatedAggregate(vm, flatRows, stmt, outCols, flatCols)
-	}
-
-	// Resolve output columns and project for non-aggregate queries
-	outCols := s.resolveCorrelatedOutputCols(stmt.Columns, outerTable, tvfCols, outerAlias, tvfAlias)
-	projected := projectFlatRows(flatRows, stmt.Columns, outerTable, tvfCols, flatCols)
-
-	// Apply DISTINCT
+func (s *Stmt) postProcessCorrelatedTVFProjection(stmt *parser.SelectStmt, projected [][]functions.Value, outCols []string) [][]functions.Value {
 	if stmt.Distinct {
 		projected = deduplicateTVFRows(projected)
 	}
-
-	// Apply ORDER BY
 	if len(stmt.OrderBy) > 0 {
 		sortTVFRows(projected, stmt.OrderBy, outCols)
 	}
-
-	// Apply LIMIT
 	if stmt.Limit != nil {
 		projected = applyTVFLimit(projected, stmt.Limit)
 	}
-
-	return emitTVFProjectedBytecode(vm, projected, outCols)
+	return projected
 }
 
 // findCorrelatedTVFRef finds the TVF table reference in the FROM clause.
