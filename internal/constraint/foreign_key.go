@@ -686,30 +686,46 @@ func (m *ForeignKeyManager) cascadeDelete(
 	deleterExt, hasDeleterExt := rowDeleter.(RowDeleterExtended)
 
 	for _, rowID := range rowIDs {
-		// Read the row values before deletion (needed for recursive FK checking)
-		rowValues, err := rowReader.ReadRowByRowid(table, rowID)
+		rowValues, err := m.loadCascadeRow(table, rowID, rowReader)
 		if err != nil {
-			// Row might already be deleted by a previous cascade
 			continue
 		}
-
-		// Recursively handle any grandchildren that reference this row
 		if err := m.validateDeleteRecursive(table, rowValues, schemaObj, rowReader, rowDeleter, rowUpdater); err != nil {
 			return err
 		}
-
-		// Now delete the row
-		if tableObj.WithoutRowID && hasDeleterExt {
-			// Extract PK values for deletion
-			pkValues := extractKeyValues(rowValues, tableObj.PrimaryKey)
-			if err := deleterExt.DeleteRowByKey(table, pkValues); err != nil {
-				return fmt.Errorf("CASCADE DELETE failed: %w", err)
-			}
-		} else {
-			if err := rowDeleter.DeleteRow(table, rowID); err != nil {
-				return fmt.Errorf("CASCADE DELETE failed: %w", err)
-			}
+		if err := m.deleteCascadeRow(table, rowID, rowValues, tableObj, hasDeleterExt, deleterExt, rowDeleter); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func (m *ForeignKeyManager) loadCascadeRow(table string, rowID int64, rowReader RowReader) (map[string]interface{}, error) {
+	rowValues, err := rowReader.ReadRowByRowid(table, rowID)
+	if err != nil {
+		return nil, err
+	}
+	return rowValues, nil
+}
+
+func (m *ForeignKeyManager) deleteCascadeRow(
+	table string,
+	rowID int64,
+	rowValues map[string]interface{},
+	tableObj *schema.Table,
+	hasDeleterExt bool,
+	deleterExt RowDeleterExtended,
+	rowDeleter RowDeleter,
+) error {
+	if tableObj.WithoutRowID && hasDeleterExt {
+		pkValues := extractKeyValues(rowValues, tableObj.PrimaryKey)
+		if err := deleterExt.DeleteRowByKey(table, pkValues); err != nil {
+			return fmt.Errorf("CASCADE DELETE failed: %w", err)
+		}
+		return nil
+	}
+	if err := rowDeleter.DeleteRow(table, rowID); err != nil {
+		return fmt.Errorf("CASCADE DELETE failed: %w", err)
 	}
 	return nil
 }
