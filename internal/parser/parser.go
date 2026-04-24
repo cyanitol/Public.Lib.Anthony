@@ -3885,52 +3885,68 @@ func (p *Parser) parseOrderByList() ([]OrderingTerm, error) {
 	terms := make([]OrderingTerm, 0)
 
 	for {
-		expr, err := p.parseExpression()
+		term, err := p.parseOrderingTerm()
 		if err != nil {
 			return nil, err
 		}
-
-		term := OrderingTerm{
-			Expr: expr,
-			Asc:  true,
-		}
-
-		// If the expression is a CollateExpr, extract the collation
-		if collateExpr, ok := expr.(*CollateExpr); ok {
-			term.Collation = collateExpr.Collation
-			term.Expr = collateExpr.Expr
-		}
-
-		if p.match(TK_DESC) {
-			term.Asc = false
-		} else {
-			p.match(TK_ASC)
-		}
-
-		// Parse optional NULLS FIRST / NULLS LAST
-		if p.peekIsKeyword("NULLS") {
-			p.advance() // consume NULLS
-			if p.peekIsKeyword("FIRST") {
-				p.advance() // consume FIRST
-				t := true
-				term.NullsFirst = &t
-			} else if p.peekIsKeyword("LAST") {
-				p.advance() // consume LAST
-				f := false
-				term.NullsFirst = &f
-			} else {
-				return nil, fmt.Errorf("expected FIRST or LAST after NULLS")
-			}
-		}
-
 		terms = append(terms, term)
-
 		if !p.match(TK_COMMA) {
 			break
 		}
 	}
 
 	return terms, nil
+}
+
+func (p *Parser) parseOrderingTerm() (OrderingTerm, error) {
+	expr, err := p.parseExpression()
+	if err != nil {
+		return OrderingTerm{}, err
+	}
+	term := OrderingTerm{Expr: expr, Asc: true}
+	p.applyOrderingCollation(&term, expr)
+	p.applyOrderingDirection(&term)
+	if err := p.applyOrderingNulls(&term); err != nil {
+		return OrderingTerm{}, err
+	}
+	return term, nil
+}
+
+func (p *Parser) applyOrderingCollation(term *OrderingTerm, expr Expression) {
+	if collateExpr, ok := expr.(*CollateExpr); ok {
+		term.Collation = collateExpr.Collation
+		term.Expr = collateExpr.Expr
+	}
+}
+
+func (p *Parser) applyOrderingDirection(term *OrderingTerm) {
+	if p.match(TK_DESC) {
+		term.Asc = false
+		return
+	}
+	p.match(TK_ASC)
+}
+
+func (p *Parser) applyOrderingNulls(term *OrderingTerm) error {
+	if !p.peekIsKeyword("NULLS") {
+		return nil
+	}
+	p.advance()
+	if p.peekIsKeyword("FIRST") {
+		p.advance()
+		term.NullsFirst = boolPtr(true)
+		return nil
+	}
+	if p.peekIsKeyword("LAST") {
+		p.advance()
+		term.NullsFirst = boolPtr(false)
+		return nil
+	}
+	return fmt.Errorf("expected FIRST or LAST after NULLS")
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }
 
 // tokenEnumPair maps a token type to a typed enum value.
