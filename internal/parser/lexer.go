@@ -803,25 +803,40 @@ func lookupKeyword(ident string) TokenType {
 	if tokType, ok := keywordMap[ident]; ok {
 		return tokType
 	}
-	if len(ident) > maxKeywordLen {
+	normalized, ok := normalizeKeywordASCII(ident)
+	if !ok {
 		return TK_ID
 	}
-	var upper [maxKeywordLen]byte
-	for i := 0; i < len(ident); i++ {
-		c := ident[i]
-		switch {
-		case c >= 'a' && c <= 'z':
-			upper[i] = c - 'a' + 'A'
-		case c >= 'A' && c <= 'Z':
-			upper[i] = c
-		default:
-			return TK_ID
-		}
-	}
-	if tokType, ok := keywordMap[string(upper[:len(ident)])]; ok {
+	if tokType, ok := keywordMap[normalized]; ok {
 		return tokType
 	}
 	return TK_ID
+}
+
+func normalizeKeywordASCII(ident string) (string, bool) {
+	if len(ident) > maxKeywordLen {
+		return "", false
+	}
+	var upper [maxKeywordLen]byte
+	for i := 0; i < len(ident); i++ {
+		normalized, ok := uppercaseASCII(ident[i])
+		if !ok {
+			return "", false
+		}
+		upper[i] = normalized
+	}
+	return string(upper[:len(ident)]), true
+}
+
+func uppercaseASCII(c byte) (byte, bool) {
+	switch {
+	case c >= 'a' && c <= 'z':
+		return c - 'a' + 'A', true
+	case c >= 'A' && c <= 'Z':
+		return c, true
+	default:
+		return 0, false
+	}
 }
 
 // TokenizeAll tokenizes the entire input and returns all tokens (excluding whitespace).

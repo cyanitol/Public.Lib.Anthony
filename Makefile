@@ -1,8 +1,10 @@
-.PHONY: all build test test-fast test-ci test-short test-cover test-cover-report test-cover-func test-race lint check clean help commit check-spdx check-complexity check-fmt bench vet
+.PHONY: all build test test-fast test-ci test-short test-cover test-cover-report test-cover-func test-race lint check clean help commit check-spdx check-complexity check-complexity-all check-complexity-prod check-fmt bench vet quality-gates complexity complexity-all complexity-prod
 
 # Test configuration
 TEST_PARALLEL ?= 4
 TEST_PKG_PARALLEL ?= 8
+COMPLEXITY_MAX ?= 8
+PROD_COMPLEXITY_MAX ?= 8
 
 # Default target
 all: test build
@@ -60,10 +62,17 @@ test-cover-func:
 test-race:
 	CGO_ENABLED=1 go test -race ./...
 
-# Run cyclomatic complexity check
-complexity:
+# Run cyclomatic complexity check across the whole tree (including tests)
+complexity: complexity-all
+
+complexity-all:
 	@which gocyclo > /dev/null || go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
-	gocyclo -over 11 .
+	gocyclo -over $(COMPLEXITY_MAX) .
+
+# Run cyclomatic complexity check for production code only
+complexity-prod:
+	@which gocyclo > /dev/null || go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
+	gocyclo -over $(PROD_COMPLEXITY_MAX) . | grep -v '_test.go' || true
 
 # Run go vet
 vet:
@@ -106,6 +115,11 @@ commit: check test
 	@echo "✓ All pre-commit checks passed!"
 	@echo "Ready to commit."
 
+# Publication-grade quality gates
+quality-gates: check-fmt check-spdx check-complexity vet build test
+	@echo ""
+	@echo "All quality gates passed."
+
 # Check that go fmt produces no changes
 check-fmt:
 	@echo "Checking go fmt..."
@@ -123,17 +137,32 @@ check-spdx:
 	fi
 	@echo "✓ All files have SPDX headers"
 
-# Check cyclomatic complexity (max 11 for non-test files)
+# Check cyclomatic complexity (whole tree, including tests)
 check-complexity:
-	@echo "Checking cyclomatic complexity (max 11)..."
+	@echo "Checking cyclomatic complexity (max $(COMPLEXITY_MAX), whole tree)..."
 	@which gocyclo > /dev/null || go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
-	@violations=$$(gocyclo -over 11 . 2>/dev/null | grep -v '_test.go' || true); \
+	@violations=$$(gocyclo -over $(COMPLEXITY_MAX) . 2>/dev/null || true); \
 	if [ -n "$$violations" ]; then \
-		echo "Functions with complexity > 11:"; \
+		echo "Functions with complexity > $(COMPLEXITY_MAX):"; \
 		echo "$$violations"; \
 		exit 1; \
 	fi
-	@echo "✓ All functions have complexity ≤ 11"
+	@echo "✓ All functions have complexity ≤ $(COMPLEXITY_MAX)"
+
+# Explicit alias for whole-tree complexity gate
+check-complexity-all: check-complexity
+
+# Check cyclomatic complexity for production code only
+check-complexity-prod:
+	@echo "Checking production cyclomatic complexity (max $(PROD_COMPLEXITY_MAX))..."
+	@which gocyclo > /dev/null || go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
+	@violations=$$(gocyclo -over $(PROD_COMPLEXITY_MAX) . 2>/dev/null | grep -v '_test.go' || true); \
+	if [ -n "$$violations" ]; then \
+		echo "Production functions with complexity > $(PROD_COMPLEXITY_MAX):"; \
+		echo "$$violations"; \
+		exit 1; \
+	fi
+	@echo "✓ All production functions have complexity ≤ $(PROD_COMPLEXITY_MAX)"
 
 # Show help
 help:
@@ -148,7 +177,9 @@ help:
 	@echo "  test-cover-report - Generate HTML coverage report"
 	@echo "  test-cover-func  - Show per-function coverage"
 	@echo "  test-race        - Run tests with race detection"
-	@echo "  complexity       - Check cyclomatic complexity"
+	@echo "  complexity       - Check cyclomatic complexity across the whole tree"
+	@echo "  complexity-all   - Print whole-tree complexity violations over COMPLEXITY_MAX"
+	@echo "  complexity-prod  - Print production-only complexity violations over PROD_COMPLEXITY_MAX"
 	@echo "  vet              - Run go vet"
 	@echo "  fmt              - Format code"
 	@echo "  tidy             - Tidy go.mod"
@@ -157,7 +188,10 @@ help:
 	@echo "  lint             - Static analysis (fmt, spdx, complexity, vet)"
 	@echo "  check            - Lint + build (no tests)"
 	@echo "  commit           - Full pre-commit validation (check + test)"
+	@echo "  quality-gates    - Full release-quality gate run (fmt, spdx, complexity, vet, build, test)"
 	@echo "  check-fmt        - Check code is formatted"
 	@echo "  check-spdx       - Check SPDX headers"
-	@echo "  check-complexity - Check cyclomatic complexity ≤ 11"
+	@echo "  check-complexity - Enforce whole-tree cyclomatic complexity ≤ COMPLEXITY_MAX"
+	@echo "  check-complexity-all - Alias for whole-tree complexity gate"
+	@echo "  check-complexity-prod - Enforce production cyclomatic complexity ≤ PROD_COMPLEXITY_MAX"
 	@echo "  help             - Show this help"

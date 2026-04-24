@@ -1,7 +1,31 @@
 DRY Code Reduction TODO
 ========================
 Goal: Improve resilience, readability, and auditability while retaining all features and security guarantees.
-Constraints: cyclomatic complexity ≤ 11, all tests pass, no external deps, Go 1.26.1, WASM primary target.
+Constraints: cyclomatic complexity ≤ 8, all tests pass, no external deps, Go 1.26.1, WASM primary target.
+
+RELEASE-HARDENING AUDIT (2026-04-24)
+------------------------------------
+Target raised: cyclomatic complexity <= 8 across the entire codebase, including tests.
+
+Baseline status:
+- Full test suite passes under `go test ./...`
+- Whole-tree complexity audit with `gocyclo -over 8 .` reports widespread overages
+- The highest concentration is in generated/coverage-heavy test files, but there are also
+  production overages that must be reduced before a 1.0 release gate can be claimed
+
+Immediate tracked gaps:
+- Production complexity > 8 still exists in parser, driver, planner, expr, functions,
+  pager, vtab, rtree, fts5, btree, and command code
+- Test complexity > 8 is far above the requested ceiling; this will require helper
+  extraction, generated-test consolidation, and selective decomposition of oversized cases
+- Publication-grade / peer-review readiness is not credible until the complexity gate,
+  roadmap backlog, and TODO feature gaps in `doc/TODO.txt` are materially reduced
+
+Next implementation slices:
+1. Reduce production complexity overages one function at a time, starting with the
+   smallest hot-path functions that are already well covered
+2. Add package-local test helpers to collapse repeated MC/DC and coverage scaffolding
+3. Re-run `gocyclo -over 8 .` after each slice and track the remaining overages
 
 COMPLETED
 ---------

@@ -30,50 +30,15 @@ func (tx *Tx) Commit() error {
 		return fmt.Errorf("no transaction in progress")
 	}
 
-	// For read-only transactions, just end the read transaction
 	if tx.readOnly {
-		if err := tx.conn.pager.EndRead(); err != nil {
-			return fmt.Errorf("failed to end read transaction: %w", err)
-		}
-	} else {
-		// OCC conflict detection: check if another writer committed since we began.
-		if tx.conn.writeVersion != nil {
-			current := atomic.LoadUint64(tx.conn.writeVersion)
-			if current != tx.conn.startVersion {
-				// A concurrent writer committed; rollback and signal conflict.
-				_ = tx.conn.pager.Rollback()
-				tx.conn.btree.ClearCache()
-				tx.conn.inTx = false
-				tx.conn.setFKTransactionState(false)
-				tx.closed = true
-				return ErrWriteConflict
-			}
-		}
-
-		// For write transactions, check deferred FK constraints before committing
-		if err := tx.conn.checkDeferredFKConstraints(); err != nil {
+		if err := tx.endReadTransaction(); err != nil {
 			return err
 		}
-
-		// Commit the pager transaction
-		if err := tx.conn.pager.Commit(); err != nil {
-			return fmt.Errorf("commit failed: %w", err)
-		}
-
-		// Increment write version so concurrent transactions in-flight detect a conflict.
-		if tx.conn.writeVersion != nil {
-			atomic.AddUint64(tx.conn.writeVersion, 1)
-		}
-
-		// Clear deferred FK violations after successful commit
-		tx.conn.clearDeferredFKViolations()
+		tx.finish()
+		return nil
 	}
 
-	tx.conn.inTx = false
-	tx.conn.setFKTransactionState(false)
-	tx.closed = true
-
-	return nil
+	return tx.commitWriteTransaction()
 }
 
 // Rollback rolls back the transaction.
@@ -98,10 +63,9 @@ func (tx *Tx) Rollback() error {
 	// Clear deferred FK violations before rollback
 	tx.conn.clearDeferredFKViolations()
 
-	// For read-only transactions, just end the read transaction
 	if tx.readOnly {
-		if err := tx.conn.pager.EndRead(); err != nil {
-			return fmt.Errorf("failed to end read transaction: %w", err)
+		if err := tx.endReadTransaction(); err != nil {
+			return err
 		}
 	} else {
 		// For write transactions, rollback the pager transaction
@@ -112,11 +76,52 @@ func (tx *Tx) Rollback() error {
 		tx.conn.btree.ClearCache()
 	}
 
+	tx.finish()
+
+	return nil
+}
+
+func (tx *Tx) commitWriteTransaction() error {
+	if tx.hasWriteConflict() {
+		tx.abortWriteConflict()
+		return ErrWriteConflict
+	}
+	if err := tx.conn.checkDeferredFKConstraints(); err != nil {
+		return err
+	}
+	if err := tx.conn.pager.Commit(); err != nil {
+		return fmt.Errorf("commit failed: %w", err)
+	}
+	if tx.conn.writeVersion != nil {
+		atomic.AddUint64(tx.conn.writeVersion, 1)
+	}
+	tx.conn.clearDeferredFKViolations()
+	tx.finish()
+	return nil
+}
+
+func (tx *Tx) endReadTransaction() error {
+	if err := tx.conn.pager.EndRead(); err != nil {
+		return fmt.Errorf("failed to end read transaction: %w", err)
+	}
+	return nil
+}
+
+func (tx *Tx) hasWriteConflict() bool {
+	return tx.conn.writeVersion != nil &&
+		atomic.LoadUint64(tx.conn.writeVersion) != tx.conn.startVersion
+}
+
+func (tx *Tx) abortWriteConflict() {
+	_ = tx.conn.pager.Rollback()
+	tx.conn.btree.ClearCache()
+	tx.finish()
+}
+
+func (tx *Tx) finish() {
 	tx.conn.inTx = false
 	tx.conn.setFKTransactionState(false)
 	tx.closed = true
-
-	return nil
 }
 
 // IsReadOnly returns true if this is a read-only transaction.
