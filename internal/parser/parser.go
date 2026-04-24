@@ -3600,18 +3600,25 @@ func (p *Parser) parseFunctionOver(fn *FunctionExpr) error {
 		return nil
 	}
 
-	// Check for named window reference: OVER window_name
-	if p.check(TK_ID) && p.peekAhead(1).Type != TK_LP {
-		fn.Over = &WindowSpec{BaseName: Unquote(p.advance().Lexeme)}
+	if p.parseNamedWindowReference(fn) {
 		return nil
 	}
+	return p.parseInlineWindowSpec(fn)
+}
 
+func (p *Parser) parseNamedWindowReference(fn *FunctionExpr) bool {
+	if !p.check(TK_ID) || p.peekAhead(1).Type == TK_LP {
+		return false
+	}
+	fn.Over = &WindowSpec{BaseName: Unquote(p.advance().Lexeme)}
+	return true
+}
+
+func (p *Parser) parseInlineWindowSpec(fn *FunctionExpr) error {
 	if !p.match(TK_LP) {
 		return p.error("expected ( or window name after OVER")
 	}
-
 	windowSpec := &WindowSpec{}
-
 	if err := p.parsePartitionBy(windowSpec); err != nil {
 		return err
 	}
@@ -3621,11 +3628,9 @@ func (p *Parser) parseFunctionOver(fn *FunctionExpr) error {
 	if err := p.parseWindowFrame(windowSpec); err != nil {
 		return err
 	}
-
 	if !p.match(TK_RP) {
 		return p.error("expected ) after window specification")
 	}
-
 	fn.Over = windowSpec
 	return nil
 }
@@ -3789,27 +3794,8 @@ func (p *Parser) parseExistsExpr(not bool) (Expression, error) {
 
 // parseParenOrSubquery parses a parenthesized expression or subquery.
 func (p *Parser) parseParenOrSubquery() (Expression, error) {
-	if p.match(TK_SELECT) {
-		sel, err := p.parseSelect()
-		if err != nil {
-			return nil, err
-		}
-		if !p.match(TK_RP) {
-			return nil, p.error("expected ) after subquery")
-		}
-		return &SubqueryExpr{Select: sel}, nil
-	}
-
-	// Handle WITH ... SELECT subquery (CTE in subquery)
-	if p.check(TK_WITH) {
-		sel, err := p.parseSelect()
-		if err != nil {
-			return nil, err
-		}
-		if !p.match(TK_RP) {
-			return nil, p.error("expected ) after subquery")
-		}
-		return &SubqueryExpr{Select: sel}, nil
+	if p.match(TK_SELECT) || p.check(TK_WITH) {
+		return p.parseParenthesizedSubquery()
 	}
 
 	expr, err := p.parseExpression()
@@ -3820,6 +3806,17 @@ func (p *Parser) parseParenOrSubquery() (Expression, error) {
 		return nil, p.error("expected ) after expression")
 	}
 	return &ParenExpr{Expr: expr}, nil
+}
+
+func (p *Parser) parseParenthesizedSubquery() (Expression, error) {
+	sel, err := p.parseSelect()
+	if err != nil {
+		return nil, err
+	}
+	if !p.match(TK_RP) {
+		return nil, p.error("expected ) after subquery")
+	}
+	return &SubqueryExpr{Select: sel}, nil
 }
 
 // =============================================================================
