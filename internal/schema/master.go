@@ -282,16 +282,14 @@ func (s *Schema) buildMasterRows() []MasterRow {
 // clearMasterTable clears all existing content from sqlite_master table.
 // This is used during VACUUM to rebuild the table from scratch.
 func (s *Schema) clearMasterTable(bt *btree.Btree) error {
-	// Create a cursor on sqlite_master (page 1)
 	cur := btree.NewCursor(bt, 1)
-
-	// Move to first entry
 	if err := cur.MoveToFirst(); err != nil {
-		// If no entries exist, that's fine
 		return nil
 	}
+	return deleteMasterRows(cur, collectMasterRowIDs(cur))
+}
 
-	// Collect all rowids to delete
+func collectMasterRowIDs(cur *btree.BtCursor) []int64 {
 	var rowids []int64
 	for cur.IsValid() {
 		if cur.CurrentCell != nil {
@@ -301,21 +299,29 @@ func (s *Schema) clearMasterTable(bt *btree.Btree) error {
 			break
 		}
 	}
+	return rowids
+}
 
-	// Delete all entries
+func deleteMasterRows(cur *btree.BtCursor, rowids []int64) error {
 	for _, rowid := range rowids {
-		found, err := cur.SeekRowid(rowid)
-		if err != nil {
-			return fmt.Errorf("failed to seek to rowid %d: %w", rowid, err)
-		}
-		if !found {
-			return fmt.Errorf("rowid %d not found", rowid)
-		}
-		if err := cur.Delete(); err != nil {
-			return fmt.Errorf("failed to delete rowid %d: %w", rowid, err)
+		if err := deleteMasterRow(cur, rowid); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
+func deleteMasterRow(cur *btree.BtCursor, rowid int64) error {
+	found, err := cur.SeekRowid(rowid)
+	if err != nil {
+		return fmt.Errorf("failed to seek to rowid %d: %w", rowid, err)
+	}
+	if !found {
+		return fmt.Errorf("rowid %d not found", rowid)
+	}
+	if err := cur.Delete(); err != nil {
+		return fmt.Errorf("failed to delete rowid %d: %w", rowid, err)
+	}
 	return nil
 }
 
