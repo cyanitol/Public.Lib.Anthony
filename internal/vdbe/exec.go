@@ -2646,26 +2646,33 @@ func (v *VDBE) performInsertWithCompositeKey(cursor *Cursor, btCursor *btree.BtC
 		}
 	}
 
+	v.syncCompositeInsertCursor(cursor, btCursor, keyBytes)
+	v.recordCompositeInsertChange(isUpdate)
+	return nil
+}
+
+func (v *VDBE) syncCompositeInsertCursor(cursor *Cursor, btCursor *btree.BtCursor, keyBytes []byte) {
 	// Root page can change after a split; keep cursor and schema in sync.
 	if cursor.RootPage != btCursor.RootPage {
 		cursor.RootPage = btCursor.RootPage
 		if tbl, ok := cursor.Table.(interface{ SetRootPage(uint32) }); ok && tbl != nil {
 			tbl.SetRootPage(btCursor.RootPage)
 		}
-		// Signal that schema changed - statement cache needs invalidation
 		v.SchemaChanged = true
 	}
 
-	// For WITHOUT ROWID tables, we don't have a rowid to track
+	// WITHOUT ROWID tables do not track rowids; keep the composite key instead.
 	cursor.LastRowid = 0
 	cursor.CurrentKey = keyBytes
+}
+
+func (v *VDBE) recordCompositeInsertChange(isUpdate bool) {
 	if !isUpdate {
 		v.NumChanges++
 	}
 	if v.Stats != nil {
 		v.Stats.RowsWritten++
 	}
-	return nil
 }
 
 // resolveCompositeConflict handles conflict resolution for WITHOUT ROWID composite key inserts.
