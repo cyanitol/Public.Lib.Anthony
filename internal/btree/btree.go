@@ -50,36 +50,35 @@ func (bt *Btree) validatePage(data []byte, pageNum uint32) error {
 	if err := bt.validatePageSize(data); err != nil {
 		return err
 	}
-
-	if pageNum == 1 {
-		// Page 1 may have a database file header; treat empty btree payload as uninitialized.
-		if isZeroBuffer(data[FileHeaderSize:]) {
-			return nil
-		}
-	} else if isZeroBuffer(data) {
-		// Freshly allocated page - caller will initialize and mark dirty
+	if isUninitializedPage(data, pageNum) {
 		return nil
 	}
-
-	headerOffset := 0
-	if pageNum == 1 {
-		headerOffset = FileHeaderSize
-	}
+	headerOffset := pageHeaderOffset(pageNum)
 	if data[headerOffset+PageHeaderOffsetType] == 0 {
-		// Uninitialized page - allow caller to set up header
 		return nil
 	}
-
 	header, err := ParsePageHeader(data, pageNum)
 	if err != nil {
 		return fmt.Errorf("%w: failed to parse header: %v", ErrCorruptedPage, err)
 	}
-
 	if err := validatePageTypeForBtree(header.PageType); err != nil {
 		return err
 	}
-
 	return validatePageStructure(header, data)
+}
+
+func isUninitializedPage(data []byte, pageNum uint32) bool {
+	if pageNum == 1 {
+		return isZeroBuffer(data[FileHeaderSize:])
+	}
+	return isZeroBuffer(data)
+}
+
+func pageHeaderOffset(pageNum uint32) int {
+	if pageNum == 1 {
+		return FileHeaderSize
+	}
+	return 0
 }
 
 // isZeroBuffer reports whether the buffer is entirely zeroed.
