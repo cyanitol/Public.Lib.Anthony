@@ -347,42 +347,55 @@ func (c *IndexCursor) climbToNextParent() (uint32, bool, error) {
 		c.Depth--
 		parentPage := c.PageStack[c.Depth]
 		parentIndex := c.IndexStack[c.Depth]
-
-		parentData, err := c.Btree.GetPage(parentPage)
+		parentData, parentHeader, err := c.loadParentPage(parentPage)
 		if err != nil {
-			c.State = CursorInvalid
-			return 0, false, err
-		}
-		parentHeader, err := ParsePageHeader(parentData, parentPage)
-		if err != nil {
-			c.State = CursorInvalid
 			return 0, false, err
 		}
 		if parentIndex >= int(parentHeader.NumCells) {
-			// Already past the right child; continue climbing.
 			continue
 		}
-		if parentIndex < int(parentHeader.NumCells)-1 {
-			c.IndexStack[c.Depth] = parentIndex + 1
-			cellOffset, err := parentHeader.GetCellPointer(parentData, parentIndex+1)
-			if err != nil {
-				c.State = CursorInvalid
-				return 0, false, err
-			}
-			cell, err := ParseCell(parentHeader.PageType, parentData[cellOffset:], c.Btree.UsableSize)
-			if err != nil {
-				c.State = CursorInvalid
-				return 0, false, err
-			}
-			return cell.ChildPage, true, nil
-		}
-		// parentIndex == NumCells-1: advance to the right child.
-		if parentHeader.RightChild != 0 {
-			c.IndexStack[c.Depth] = int(parentHeader.NumCells)
-			return parentHeader.RightChild, true, nil
+		childPage, found, err := c.nextParentChild(parentData, parentHeader, parentIndex)
+		if found || err != nil {
+			return childPage, found, err
 		}
 	}
 	return 0, false, nil
+}
+
+func (c *IndexCursor) loadParentPage(parentPage uint32) ([]byte, *PageHeader, error) {
+	parentData, err := c.Btree.GetPage(parentPage)
+	if err != nil {
+		return nil, nil, c.markInvalidAndReturn(err)
+	}
+	parentHeader, err := ParsePageHeader(parentData, parentPage)
+	if err != nil {
+		return nil, nil, c.markInvalidAndReturn(err)
+	}
+	return parentData, parentHeader, nil
+}
+
+func (c *IndexCursor) nextParentChild(parentData []byte, parentHeader *PageHeader, parentIndex int) (uint32, bool, error) {
+	if parentIndex < int(parentHeader.NumCells)-1 {
+		return c.nextParentCellChild(parentData, parentHeader, parentIndex+1)
+	}
+	if parentHeader.RightChild != 0 {
+		c.IndexStack[c.Depth] = int(parentHeader.NumCells)
+		return parentHeader.RightChild, true, nil
+	}
+	return 0, false, nil
+}
+
+func (c *IndexCursor) nextParentCellChild(parentData []byte, parentHeader *PageHeader, nextIndex int) (uint32, bool, error) {
+	c.IndexStack[c.Depth] = nextIndex
+	cellOffset, err := parentHeader.GetCellPointer(parentData, nextIndex)
+	if err != nil {
+		return 0, false, c.markInvalidAndReturn(err)
+	}
+	cell, err := ParseCell(parentHeader.PageType, parentData[cellOffset:], c.Btree.UsableSize)
+	if err != nil {
+		return 0, false, c.markInvalidAndReturn(err)
+	}
+	return cell.ChildPage, true, nil
 }
 
 // PrevIndex moves the cursor to the previous entry in the index
