@@ -117,50 +117,70 @@ func (m *ShadowTableManager) SaveIndex(index *InvertedIndex) error {
 	index.mu.RLock()
 	defer index.mu.RUnlock()
 
-	// Save structure record (id=10): total docs and avg length
+	if err := m.saveStructureRecord(index); err != nil {
+		return err
+	}
+	if err := m.saveIndexTerms(index); err != nil {
+		return err
+	}
+	if err := m.saveDocumentSizes(index); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *ShadowTableManager) saveStructureRecord(index *InvertedIndex) error {
 	structBlob := m.encodeStructureRecord(index.totalDocs, index.avgDocLength)
-	if _, err := m.db.ExecDML(
-		fmt.Sprintf("INSERT OR REPLACE INTO %s_data(id, block) VALUES(?, ?)", m.tableName),
+	if _, err := m.execShadowInsert(
+		"data",
+		"id, block",
+		"?, ?",
 		int64(10), structBlob,
 	); err != nil {
 		return fmt.Errorf("failed to save structure record: %w", err)
 	}
+	return nil
+}
 
-	// Save inverted index terms
-	segid := int64(1) // Single segment for simplicity
+func (m *ShadowTableManager) saveIndexTerms(index *InvertedIndex) error {
+	segid := int64(1)
 	for term, postings := range index.index {
-		blob := m.encodePostingList(postings)
-		pgno := int64(len(blob)) // Use blob size as page number placeholder
-
-		if _, err := m.db.ExecDML(
-			fmt.Sprintf("INSERT OR REPLACE INTO %s_idx(segid, term, pgno) VALUES(?, ?, ?)", m.tableName),
-			segid, term, pgno,
-		); err != nil {
-			return fmt.Errorf("failed to save term %s: %w", term, err)
-		}
-
-		// Store the actual posting list in _data
-		termID := hashTerm(term)
-		if _, err := m.db.ExecDML(
-			fmt.Sprintf("INSERT OR REPLACE INTO %s_data(id, block) VALUES(?, ?)", m.tableName),
-			termID, blob,
-		); err != nil {
-			return fmt.Errorf("failed to save posting list for %s: %w", term, err)
+		if err := m.saveIndexTerm(segid, term, postings); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
-	// Save document sizes
+func (m *ShadowTableManager) saveIndexTerm(segid int64, term string, postings []PostingList) error {
+	blob := m.encodePostingList(postings)
+	pgno := int64(len(blob))
+	if _, err := m.execShadowInsert("idx", "segid, term, pgno", "?, ?, ?", segid, term, pgno); err != nil {
+		return fmt.Errorf("failed to save term %s: %w", term, err)
+	}
+	termID := hashTerm(term)
+	if _, err := m.execShadowInsert("data", "id, block", "?, ?", termID, blob); err != nil {
+		return fmt.Errorf("failed to save posting list for %s: %w", term, err)
+	}
+	return nil
+}
+
+func (m *ShadowTableManager) saveDocumentSizes(index *InvertedIndex) error {
 	for docID, length := range index.docLengths {
 		szBlob := m.encodeVarint(int64(length))
-		if _, err := m.db.ExecDML(
-			fmt.Sprintf("INSERT OR REPLACE INTO %s_docsize(id, sz) VALUES(?, ?)", m.tableName),
-			int64(docID), szBlob,
-		); err != nil {
+		if _, err := m.execShadowInsert("docsize", "id, sz", "?, ?", int64(docID), szBlob); err != nil {
 			return fmt.Errorf("failed to save docsize for %d: %w", docID, err)
 		}
 	}
-
 	return nil
+}
+
+func (m *ShadowTableManager) execShadowInsert(suffix, columns, placeholders string, args ...interface{}) (int64, error) {
+	return m.db.ExecDML(
+		fmt.Sprintf("INSERT OR REPLACE INTO %s_%s(%s) VALUES(%s)", m.tableName, suffix, columns, placeholders),
+		args...,
+	)
 }
 
 // LoadIndex loads the inverted index from shadow tables.
