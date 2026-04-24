@@ -110,33 +110,38 @@ func splitStatements(input string) []string {
 
 	for {
 		tok := lex.NextToken()
-		switch tok.Type {
-		case parser.TK_EOF:
-			if start != -1 {
-				stmt := strings.TrimSpace(input[start:])
-				if stmt != "" {
-					statements = append(statements, stmt)
-				}
-			}
-			return statements
-		case parser.TK_SEMI:
-			if start != -1 {
-				stmt := strings.TrimSpace(input[start:tok.Pos])
-				if stmt != "" {
-					statements = append(statements, stmt)
-				}
-				start = -1
-			}
-		case parser.TK_COMMENT:
-			if start == -1 {
-				continue
-			}
-		default:
-			if start == -1 {
-				start = tok.Pos
-			}
+		if tok.Type == parser.TK_EOF {
+			return appendStatement(statements, input, start, len(input))
+		}
+		if tok.Type == parser.TK_COMMENT && start == -1 {
+			continue
+		}
+		if tok.Type == parser.TK_SEMI {
+			statements, start = splitAtSemicolon(statements, input, start, tok.Pos)
+			continue
+		}
+		if start == -1 {
+			start = tok.Pos
 		}
 	}
+}
+
+func splitAtSemicolon(statements []string, input string, start, end int) ([]string, int) {
+	if start == -1 {
+		return statements, start
+	}
+	return appendStatement(statements, input, start, end), -1
+}
+
+func appendStatement(statements []string, input string, start, end int) []string {
+	if start == -1 {
+			return statements
+	}
+	stmt := strings.TrimSpace(input[start:end])
+	if stmt == "" {
+		return statements
+	}
+	return append(statements, stmt)
 }
 
 func runStatement(db *sql.DB, stmt string) error {
@@ -147,34 +152,57 @@ func runStatement(db *sql.DB, stmt string) error {
 
 	rows, err := db.Query(stmt)
 	if err != nil {
-		result, execErr := db.Exec(stmt)
-		if execErr != nil {
-			return fmt.Errorf("execute statement: %w", execErr)
-		}
-		return reportResult(result)
+		return execStatement(db, stmt)
 	}
 	defer rows.Close()
 
+	return printRows(rows)
+}
+
+func execStatement(db *sql.DB, stmt string) error {
+	result, err := db.Exec(stmt)
+	if err != nil {
+		return fmt.Errorf("execute statement: %w", err)
+	}
+	return reportResult(result)
+}
+
+func printRows(rows *sql.Rows) error {
 	cols, err := rows.Columns()
 	if err != nil {
 		return fmt.Errorf("read columns: %w", err)
 	}
+	printColumns(cols)
+	values, scanArgs := makeScanTargets(len(cols))
+	return scanAndPrintRows(rows, values, scanArgs)
+}
+
+func printColumns(cols []string) {
 	if len(cols) > 0 {
 		fmt.Println(strings.Join(cols, "\t"))
 	}
+}
 
-	values := make([]any, len(cols))
-	scanArgs := make([]any, len(cols))
+func makeScanTargets(n int) ([]any, []any) {
+	values := make([]any, n)
+	scanArgs := make([]any, n)
 	for i := range values {
 		scanArgs[i] = &values[i]
 	}
+	return values, scanArgs
+}
 
+func scanAndPrintRows(rows *sql.Rows, values, scanArgs []any) error {
 	for rows.Next() {
 		if err := rows.Scan(scanArgs...); err != nil {
 			return fmt.Errorf("scan row: %w", err)
 		}
 		fmt.Println(formatRow(values))
 	}
+	return rowsError(rows)
+}
+
+func rowsError(rows *sql.Rows) error {
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("rows error: %w", err)
 	}
