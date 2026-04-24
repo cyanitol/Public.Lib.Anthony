@@ -1798,12 +1798,7 @@ func replaceExcludedRefs(e parser.Expression, colValueMap map[string]parser.Expr
 	}
 	switch expr := e.(type) {
 	case *parser.IdentExpr:
-		if strings.EqualFold(expr.Table, "excluded") {
-			if val, ok := colValueMap[expr.Name]; ok {
-				return val
-			}
-		}
-		return expr
+		return resolveExcludedIdent(expr, colValueMap)
 	case *parser.BinaryExpr:
 		return &parser.BinaryExpr{
 			Left:  replaceExcludedRefs(expr.Left, colValueMap),
@@ -1816,14 +1811,27 @@ func replaceExcludedRefs(e parser.Expression, colValueMap map[string]parser.Expr
 			Expr: replaceExcludedRefs(expr.Expr, colValueMap),
 		}
 	case *parser.FunctionExpr:
-		newArgs := make([]parser.Expression, len(expr.Args))
-		for i, arg := range expr.Args {
-			newArgs[i] = replaceExcludedRefs(arg, colValueMap)
-		}
-		return &parser.FunctionExpr{Name: expr.Name, Args: newArgs, Distinct: expr.Distinct}
+		return replaceExcludedRefsInFunc(expr, colValueMap)
 	default:
 		return e
 	}
+}
+
+func resolveExcludedIdent(expr *parser.IdentExpr, colValueMap map[string]parser.Expression) parser.Expression {
+	if strings.EqualFold(expr.Table, "excluded") {
+		if val, ok := colValueMap[expr.Name]; ok {
+			return val
+		}
+	}
+	return expr
+}
+
+func replaceExcludedRefsInFunc(expr *parser.FunctionExpr, colValueMap map[string]parser.Expression) *parser.FunctionExpr {
+	newArgs := make([]parser.Expression, len(expr.Args))
+	for i, arg := range expr.Args {
+		newArgs[i] = replaceExcludedRefs(arg, colValueMap)
+	}
+	return &parser.FunctionExpr{Name: expr.Name, Args: newArgs, Distinct: expr.Distinct}
 }
 
 // allTableColumnNames returns all column names from the table schema.

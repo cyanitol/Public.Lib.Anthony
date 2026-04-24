@@ -358,12 +358,7 @@ func (s *Stmt) inlineBytecodeCore(vm *vdbe.VDBE, compiled *vdbe.VDBE,
 			}
 		}
 
-		switch {
-		case instr.Opcode == vdbe.OpInit:
-			newInstr.Opcode = vdbe.OpNoop
-		case convertHalt && instr.Opcode == vdbe.OpHalt:
-			newInstr.Opcode = vdbe.OpNoop
-		case isMappedCursorOp(instr, cursorMap):
+		if shouldNoopInline(instr, convertHalt, cursorMap) {
 			newInstr.Opcode = vdbe.OpNoop
 		}
 
@@ -377,6 +372,16 @@ func (s *Stmt) inlineBytecodeCore(vm *vdbe.VDBE, compiled *vdbe.VDBE,
 }
 
 // adjustInstrWithMap adjusts instruction parameters with optional cursor mapping.
+func shouldNoopInline(instr *vdbe.Instruction, convertHalt bool, cursorMap map[int]int) bool {
+	if instr.Opcode == vdbe.OpInit {
+		return true
+	}
+	if convertHalt && instr.Opcode == vdbe.OpHalt {
+		return true
+	}
+	return isMappedCursorOp(instr, cursorMap)
+}
+
 func (s *Stmt) adjustInstrWithMap(instr *vdbe.Instruction,
 	offsets cteInlineOffsets, cursorMap map[int]int) vdbe.Instruction {
 

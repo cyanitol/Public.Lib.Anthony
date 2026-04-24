@@ -302,10 +302,6 @@ func (s *Stmt) emitJoinLevel(ctx *leftJoinCtx, joinIdx int) {
 	afterLoop := ctx.vm.NumOps()
 	if join.Type == parser.JoinLeft {
 		s.emitNullEmission(ctx, joinIdx)
-	}
-
-	// Fix rewind: if right table empty, jump here (null emission or next outer)
-	if join.Type == parser.JoinLeft {
 		ctx.vm.Program[rewindAddr].P2 = afterLoop
 	} else {
 		ctx.vm.Program[rewindAddr].P2 = ctx.vm.NumOps()
@@ -438,9 +434,6 @@ func (s *Stmt) emitJoinLevelSorter(ctx *leftSorterCtx, joinIdx int) {
 	afterLoop := ctx.vm.NumOps()
 	if join.Type == parser.JoinLeft {
 		s.emitNullEmissionSorter(ctx, joinIdx)
-	}
-
-	if join.Type == parser.JoinLeft {
 		ctx.vm.Program[rewindAddr].P2 = afterLoop
 	} else {
 		ctx.vm.Program[rewindAddr].P2 = ctx.vm.NumOps()

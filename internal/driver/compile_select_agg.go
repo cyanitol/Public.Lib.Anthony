@@ -661,6 +661,14 @@ func (s *Stmt) emitAggregateByName(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr,
 		s.emitMinUpdate(vm, fnExpr, table, tableName, accReg, gen)
 	case "MAX":
 		s.emitMaxUpdate(vm, fnExpr, table, tableName, accReg, gen)
+	default:
+		s.emitAggregateByNameExt(vm, fnExpr, table, tableName, accReg, gen)
+	}
+}
+
+func (s *Stmt) emitAggregateByNameExt(vm *vdbe.VDBE, fnExpr *parser.FunctionExpr,
+	table *schema.Table, tableName string, accReg int, gen *expr.CodeGenerator) {
+	switch fnExpr.Name {
 	case "GROUP_CONCAT":
 		s.emitGroupConcatUpdate(vm, fnExpr, table, tableName, accReg, gen)
 	case "JSON_GROUP_ARRAY":
@@ -1107,14 +1115,12 @@ func (s *Stmt) exprHasDataDependentWindowFunc(e parser.Expression) bool {
 		return s.exprHasDDWFInFunc(ex)
 	case *parser.BinaryExpr:
 		return s.exprHasDataDependentWindowFunc(ex.Left) || s.exprHasDataDependentWindowFunc(ex.Right)
-	case *parser.UnaryExpr:
-		return s.exprHasDataDependentWindowFunc(ex.Expr)
-	case *parser.ParenExpr:
-		return s.exprHasDataDependentWindowFunc(ex.Expr)
-	case *parser.CastExpr:
-		return s.exprHasDataDependentWindowFunc(ex.Expr)
 	case *parser.CaseExpr:
 		return s.exprHasDDWFInCase(ex)
+	default:
+		if inner := unwrapSingleExpr(e); inner != nil {
+			return s.exprHasDataDependentWindowFunc(inner)
+		}
 	}
 	return false
 }
@@ -1138,6 +1144,18 @@ func (s *Stmt) exprHasDDWFInCase(ex *parser.CaseExpr) bool {
 		}
 	}
 	return s.exprHasDataDependentWindowFunc(ex.ElseClause)
+}
+
+func unwrapSingleExpr(e parser.Expression) parser.Expression {
+	switch ex := e.(type) {
+	case *parser.UnaryExpr:
+		return ex.Expr
+	case *parser.ParenExpr:
+		return ex.Expr
+	case *parser.CastExpr:
+		return ex.Expr
+	}
+	return nil
 }
 
 // isDataDependentWindowFunc returns true for window functions that require
@@ -1204,14 +1222,18 @@ func (s *Stmt) findWindowOrderByInExpr(e parser.Expression, table *schema.Table)
 	case *parser.CastExpr:
 		return s.findWindowOrderBy(ex.Expr, table)
 	case *parser.CaseExpr:
-		for _, w := range ex.WhenClauses {
-			if found, cols, desc := s.findWindowOrderBy(w.Result, table); found {
-				return true, cols, desc
-			}
-		}
-		return s.findWindowOrderBy(ex.ElseClause, table)
+		return s.findWindowOrderByInCase(ex, table)
 	}
 	return false, nil, nil
+}
+
+func (s *Stmt) findWindowOrderByInCase(ex *parser.CaseExpr, table *schema.Table) (bool, []int, []bool) {
+	for _, w := range ex.WhenClauses {
+		if found, cols, desc := s.findWindowOrderBy(w.Result, table); found {
+			return true, cols, desc
+		}
+	}
+	return s.findWindowOrderBy(ex.ElseClause, table)
 }
 
 // compileWindowWithSorting compiles window functions with sorting

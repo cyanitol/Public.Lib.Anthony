@@ -425,23 +425,33 @@ func cmpDifferentTypes(a, b interface{}) (int, bool) {
 func cmpSameType(a, b interface{}) int {
 	switch av := a.(type) {
 	case int64:
-		if bv, ok := b.(int64); ok {
-			return cmpIntegers(av, bv)
-		}
-		if bv, ok := b.(float64); ok {
-			return cmpFloats(float64(av), bv)
-		}
+		return cmpNumericInt64(av, b)
 	case float64:
-		if bv, ok := b.(float64); ok {
-			return cmpFloats(av, bv)
-		}
-		if bv, ok := b.(int64); ok {
-			return cmpFloats(av, float64(bv))
-		}
+		return cmpNumericFloat64(av, b)
 	case string:
 		return cmpStrings(av, b.(string))
 	case []byte:
 		return cmpBytes(av, b.([]byte))
+	}
+	return 0
+}
+
+func cmpNumericInt64(av int64, b interface{}) int {
+	if bv, ok := b.(int64); ok {
+		return cmpIntegers(av, bv)
+	}
+	if bv, ok := b.(float64); ok {
+		return cmpFloats(float64(av), bv)
+	}
+	return 0
+}
+
+func cmpNumericFloat64(av float64, b interface{}) int {
+	if bv, ok := b.(float64); ok {
+		return cmpFloats(av, bv)
+	}
+	if bv, ok := b.(int64); ok {
+		return cmpFloats(av, float64(bv))
 	}
 	return 0
 }

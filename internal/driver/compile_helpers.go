@@ -281,7 +281,19 @@ func (s *Stmt) emitJoinSorterPopulation(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 		}
 	}
 
-	// Read extra ORDER BY expressions
+	if err := s.emitExtraOrderByAndInsert(vm, gen, orderInfo, numCols); err != nil {
+		return err
+	}
+
+	// Fix WHERE skip target to jump past the sorter insert
+	if hasWhere {
+		vm.Program[skipAddr].P2 = vm.NumOps()
+	}
+
+	return nil
+}
+
+func (s *Stmt) emitExtraOrderByAndInsert(vm *vdbe.VDBE, gen *expr.CodeGenerator, orderInfo *orderByColumnInfo, numCols int) error {
 	for i, orderExpr := range orderInfo.extraExprs {
 		reg, err := gen.GenerateExpr(orderExpr)
 		if err != nil {
@@ -289,18 +301,10 @@ func (s *Stmt) emitJoinSorterPopulation(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 		}
 		orderInfo.extraColRegs[i] = reg
 	}
-
-	// Copy extra columns to contiguous registers and insert
 	for i := range orderInfo.extraExprs {
 		vm.AddOp(vdbe.OpCopy, orderInfo.extraColRegs[i], numCols+i, 0)
 	}
 	vm.AddOp(vdbe.OpSorterInsert, 0, 0, orderInfo.sorterCols)
-
-	// Fix WHERE skip target to jump past the sorter insert
-	if hasWhere {
-		vm.Program[skipAddr].P2 = vm.NumOps()
-	}
-
 	return nil
 }
 

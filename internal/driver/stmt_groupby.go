@@ -355,32 +355,31 @@ func (s *Stmt) groupByCollations(groupBy []parser.Expression, table *schema.Tabl
 // calculateSorterColumns determines how many columns the sorter needs to store
 func (s *Stmt) calculateSorterColumns(stmt *parser.SelectStmt, numGroupBy int) int {
 	cols := numGroupBy
-
-	// Add columns needed for aggregate functions
 	for _, col := range stmt.Columns {
-		if !s.isAggregateExpr(col.Expr) {
-			continue
-		}
-		fnExpr := col.Expr.(*parser.FunctionExpr)
-		// COUNT(*) doesn't need a column for args (but may need one for filter)
-		if fnExpr.Star || len(fnExpr.Args) == 0 {
-			if fnExpr.Filter != nil {
-				cols++ // extra column for FILTER result
-			}
-			continue
-		}
-		// JSON_GROUP_OBJECT needs 2 columns (key + value)
-		if fnExpr.Name == "JSON_GROUP_OBJECT" && len(fnExpr.Args) >= 2 {
-			cols += 2
-		} else {
-			cols++
-		}
-		if fnExpr.Filter != nil {
-			cols++ // extra column for FILTER result
+		if s.isAggregateExpr(col.Expr) {
+			cols += aggregateSorterCols(col.Expr.(*parser.FunctionExpr))
 		}
 	}
-
 	return cols
+}
+
+func aggregateSorterCols(fnExpr *parser.FunctionExpr) int {
+	n := 0
+	if fnExpr.Star || len(fnExpr.Args) == 0 {
+		if fnExpr.Filter != nil {
+			n++
+		}
+		return n
+	}
+	if fnExpr.Name == "JSON_GROUP_OBJECT" && len(fnExpr.Args) >= 2 {
+		n += 2
+	} else {
+		n++
+	}
+	if fnExpr.Filter != nil {
+		n++
+	}
+	return n
 }
 
 // createGroupBySorterKeyInfo creates sorter key information for GROUP BY

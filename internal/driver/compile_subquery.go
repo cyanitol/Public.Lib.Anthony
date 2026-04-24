@@ -506,10 +506,15 @@ func isTruthy(v interface{}) bool {
 
 // projectRows selects columns from materialized rows based on the outer SELECT list.
 func (s *Stmt) projectRows(rows [][]interface{}, outer *parser.SelectStmt, colNames []string) ([][]interface{}, []string) {
-	// Build column index mapping
-	indices := make([]int, 0, len(outer.Columns))
-	names := make([]string, 0, len(outer.Columns))
-	for _, col := range outer.Columns {
+	indices, names := buildProjectionMap(outer.Columns, colNames)
+	result := applyProjection(rows, indices)
+	return result, names
+}
+
+func buildProjectionMap(columns []parser.ResultColumn, colNames []string) ([]int, []string) {
+	indices := make([]int, 0, len(columns))
+	names := make([]string, 0, len(columns))
+	for _, col := range columns {
 		if col.Star {
 			for i, name := range colNames {
 				indices = append(indices, i)
@@ -517,23 +522,30 @@ func (s *Stmt) projectRows(rows [][]interface{}, outer *parser.SelectStmt, colNa
 			}
 			continue
 		}
-		idx := -1
-		if ident, ok := col.Expr.(*parser.IdentExpr); ok {
-			for i, name := range colNames {
-				if strings.EqualFold(name, ident.Name) {
-					idx = i
-					break
-				}
-			}
-		}
+		idx := resolveColumnIndex(col, colNames)
 		if idx >= 0 {
 			name := selectColName(col, len(names))
 			indices = append(indices, idx)
 			names = append(names, name)
 		}
 	}
+	return indices, names
+}
 
-	// Project rows
+func resolveColumnIndex(col parser.ResultColumn, colNames []string) int {
+	ident, ok := col.Expr.(*parser.IdentExpr)
+	if !ok {
+		return -1
+	}
+	for i, name := range colNames {
+		if strings.EqualFold(name, ident.Name) {
+			return i
+		}
+	}
+	return -1
+}
+
+func applyProjection(rows [][]interface{}, indices []int) [][]interface{} {
 	result := make([][]interface{}, len(rows))
 	for i, row := range rows {
 		projected := make([]interface{}, len(indices))
@@ -544,7 +556,7 @@ func (s *Stmt) projectRows(rows [][]interface{}, outer *parser.SelectStmt, colNa
 		}
 		result[i] = projected
 	}
-	return result, names
+	return result
 }
 
 // mapSubqueryColumns maps outer query columns to subquery columns.

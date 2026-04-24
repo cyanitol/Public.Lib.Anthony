@@ -237,9 +237,6 @@ func (s *Stmt) emitJoinLevelAgg(ctx *leftAggCtx, joinIdx int) {
 	afterLoop := ctx.vm.NumOps()
 	if join.Type == parser.JoinLeft {
 		s.emitNullEmissionAgg(ctx, joinIdx)
-	}
-
-	if join.Type == parser.JoinLeft {
 		ctx.vm.Program[rewindAddr].P2 = afterLoop
 	} else {
 		ctx.vm.Program[rewindAddr].P2 = ctx.vm.NumOps()
