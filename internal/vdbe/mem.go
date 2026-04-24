@@ -823,28 +823,31 @@ func (m *Mem) Divide(other *Mem) error {
 		m.SetNull()
 		return nil
 	}
-
 	if m.IsInt() && other.IsInt() {
-		if other.i == 0 {
-			m.SetNull()
-			return nil
-		}
-		if m.i == math.MinInt64 && other.i == -1 {
-			m.SetReal(float64(m.i) / float64(other.i))
-			return nil
-		}
-		m.i = m.i / other.i
-		return nil
+		return m.divideInt(other)
 	}
+	return m.divideReal(other.RealValue())
+}
 
-	v2 := other.RealValue()
-	if v2 == 0.0 {
+func (m *Mem) divideInt(other *Mem) error {
+	if other.i == 0 {
 		m.SetNull()
 		return nil
 	}
+	if m.i == math.MinInt64 && other.i == -1 {
+		m.SetReal(float64(m.i) / float64(other.i))
+		return nil
+	}
+	m.i /= other.i
+	return nil
+}
 
-	v1 := m.RealValue()
-	m.SetReal(v1 / v2)
+func (m *Mem) divideReal(divisor float64) error {
+	if divisor == 0.0 {
+		m.SetNull()
+		return nil
+	}
+	m.SetReal(m.RealValue() / divisor)
 	return nil
 }
 
