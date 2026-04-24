@@ -172,33 +172,43 @@ func (s *Stmt) validateAndExpandInsertValues(stmt *parser.InsertStmt, table *sch
 	if len(stmt.Values) == 0 {
 		return nil, fmt.Errorf("INSERT requires VALUES clause")
 	}
-
-	// Reject explicit writes to generated columns
 	if err := validateNoGeneratedColumns(stmt.Columns, table); err != nil {
 		return nil, err
 	}
-
-	if len(stmt.Columns) > 0 {
-		for _, row := range stmt.Values {
-			if len(row) != len(stmt.Columns) {
-				return nil, fmt.Errorf("%d values for %d columns", len(row), len(stmt.Columns))
-			}
-		}
+	if err := validateInsertColumnValueCounts(stmt.Columns, stmt.Values); err != nil {
+		return nil, err
 	}
-
 	expandedValues := expandInsertDefaults(stmt, table)
-	numCols := len(table.Columns)
-	hasVirtualRowid := findRowidAliasInColumns(stmt.Columns, table) >= 0
-	for _, row := range expandedValues {
-		expected := numCols
-		if hasVirtualRowid {
-			expected++
-		}
-		if len(row) != expected {
-			return nil, fmt.Errorf("table %s has %d columns but %d values were supplied", table.Name, numCols, len(row))
-		}
+	if err := validateExpandedInsertRows(stmt.Columns, expandedValues, table); err != nil {
+		return nil, err
 	}
 	return expandedValues, nil
+}
+
+func validateInsertColumnValueCounts(columns []string, rows [][]parser.Expression) error {
+	if len(columns) == 0 {
+		return nil
+	}
+	for _, row := range rows {
+		if len(row) != len(columns) {
+			return fmt.Errorf("%d values for %d columns", len(row), len(columns))
+		}
+	}
+	return nil
+}
+
+func validateExpandedInsertRows(columns []string, rows [][]parser.Expression, table *schema.Table) error {
+	numCols := len(table.Columns)
+	expected := numCols
+	if findRowidAliasInColumns(columns, table) >= 0 {
+		expected++
+	}
+	for _, row := range rows {
+		if len(row) != expected {
+			return fmt.Errorf("table %s has %d columns but %d values were supplied", table.Name, numCols, len(row))
+		}
+	}
+	return nil
 }
 
 // validateNoGeneratedColumns returns an error if any explicitly named column
@@ -618,16 +628,20 @@ func findInsertRowidCol(names []string, table *schema.Table) int {
 			return i
 		}
 	}
-	// Check for explicit rowid aliases (rowid, _rowid_, oid) not in schema.
 	for i, name := range names {
-		lower := strings.ToLower(name)
-		if lower == "rowid" || lower == "_rowid_" || lower == "oid" {
-			if table.GetColumnIndex(name) < 0 {
-				return i
-			}
+		if isExplicitInsertRowidAlias(name, table) {
+			return i
 		}
 	}
 	return -1
+}
+
+func isExplicitInsertRowidAlias(name string, table *schema.Table) bool {
+	lower := strings.ToLower(name)
+	if lower != "rowid" && lower != "_rowid_" && lower != "oid" {
+		return false
+	}
+	return table.GetColumnIndex(name) < 0
 }
 
 // emitInsertRowid emits the opcode that places the rowid into rowidReg.

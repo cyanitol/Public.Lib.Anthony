@@ -86,7 +86,10 @@ func (s *Stmt) handleExpandedSpecialSelect(vm *vdbe.VDBE, stmt *parser.SelectStm
 		result, err := s.compileSelectWithPragmaTVF(vm, stmt, args)
 		return result, err, true
 	}
-	return s.handleTVFSelect(vm, stmt, args)
+	if result, err, handled := s.handleTVFSelect(vm, stmt, args); handled {
+		return result, err, true
+	}
+	return nil, nil, false
 }
 
 // handleTVFSelect handles standalone TVFs and correlated TVF cross-joins.

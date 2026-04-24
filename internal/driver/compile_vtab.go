@@ -47,54 +47,61 @@ func (s *Stmt) compileVTabSelect(vm *vdbe.VDBE, stmt *parser.SelectStmt,
 	// Collect argv for Filter based on BestIndex output
 	argv := buildFilterArgv(info, constraintValues)
 
-	// Open cursor and run query
-	cursor, err := vt.Open()
+	cursor, err := openAndFilterVTabCursor(vt, info, argv, table.Name)
 	if err != nil {
-		return nil, fmt.Errorf("virtual table %s: Open failed: %w", table.Name, err)
+		return nil, err
 	}
 	defer cursor.Close()
-
-	if err := cursor.Filter(info.IdxNum, info.IdxStr, argv); err != nil {
-		return nil, fmt.Errorf("virtual table %s: Filter failed: %w", table.Name, err)
-	}
 
 	// Resolve output columns
 	vtabCols := vtabColumnNames(table)
 	outCols, colIndices := resolveVTabColumns(stmt.Columns, vtabCols)
 
 	// Collect all rows
-	allCols := vtabCols // need all columns for WHERE evaluation
-	allIndices := make([]int, len(allCols))
-	for i := range allIndices {
-		allIndices[i] = i
-	}
+	allIndices := fullColumnIndices(vtabCols)
 	allRows, err := collectVTabRows(cursor, allIndices)
 	if err != nil {
 		return nil, fmt.Errorf("virtual table %s: scan failed: %w", table.Name, err)
 	}
+	rows := postProcessVTabRows(stmt, info, allRows, vtabCols, args, colIndices, allIndices, outCols)
 
-	// Post-filter with WHERE (vtab may not have handled all constraints)
+	return emitVTabBytecode(vm, rows, outCols)
+}
+
+func openAndFilterVTabCursor(vt vtab.VirtualTable, info *vtab.IndexInfo, argv []interface{}, tableName string) (vtab.VirtualCursor, error) {
+	cursor, err := vt.Open()
+	if err != nil {
+		return nil, fmt.Errorf("virtual table %s: Open failed: %w", tableName, err)
+	}
+	if err := cursor.Filter(info.IdxNum, info.IdxStr, argv); err != nil {
+		_ = cursor.Close()
+		return nil, fmt.Errorf("virtual table %s: Filter failed: %w", tableName, err)
+	}
+	return cursor, nil
+}
+
+func fullColumnIndices(cols []string) []int {
+	indices := make([]int, len(cols))
+	for i := range indices {
+		indices[i] = i
+	}
+	return indices
+}
+
+func postProcessVTabRows(stmt *parser.SelectStmt, info *vtab.IndexInfo, allRows [][]interface{}, vtabCols []string,
+	args []driver.NamedValue, colIndices, allIndices []int, outCols []string) [][]interface{} {
+
 	if stmt.Where != nil {
 		allRows = filterVTabRowsWhere(allRows, stmt.Where, vtabCols, args)
 	}
-
-	// Project to requested columns
 	rows := projectVTabRows(allRows, colIndices, allIndices)
-
-	// Apply DISTINCT
 	if stmt.Distinct {
 		rows = deduplicateVTabRows(rows)
 	}
-
-	// Apply ORDER BY
 	if len(stmt.OrderBy) > 0 && !info.OrderByConsumed {
 		sortVTabRows(rows, stmt.OrderBy, outCols)
 	}
-
-	// Apply LIMIT/OFFSET
-	rows = applyVTabLimit(rows, stmt)
-
-	return emitVTabBytecode(vm, rows, outCols)
+	return applyVTabLimit(rows, stmt)
 }
 
 // buildVTabIndexInfo builds an IndexInfo struct from a WHERE clause.
@@ -150,30 +157,22 @@ func classifyVTabConstraint(e *parser.BinaryExpr, table *schema.Table) (int, vta
 	return col, op, ok
 }
 
+var vtabConstraintOps = map[parser.BinaryOp]vtab.ConstraintOp{
+	parser.OpEq:    vtab.ConstraintEQ,
+	parser.OpGt:    vtab.ConstraintGT,
+	parser.OpLe:    vtab.ConstraintLE,
+	parser.OpLt:    vtab.ConstraintLT,
+	parser.OpGe:    vtab.ConstraintGE,
+	parser.OpNe:    vtab.ConstraintNE,
+	parser.OpMatch: vtab.ConstraintMatch,
+	parser.OpLike:  vtab.ConstraintLike,
+	parser.OpGlob:  vtab.ConstraintGlob,
+}
+
 // binaryOpToConstraint maps parser BinaryOp to vtab ConstraintOp.
 func binaryOpToConstraint(op parser.BinaryOp) (vtab.ConstraintOp, bool) {
-	switch op {
-	case parser.OpEq:
-		return vtab.ConstraintEQ, true
-	case parser.OpGt:
-		return vtab.ConstraintGT, true
-	case parser.OpLe:
-		return vtab.ConstraintLE, true
-	case parser.OpLt:
-		return vtab.ConstraintLT, true
-	case parser.OpGe:
-		return vtab.ConstraintGE, true
-	case parser.OpNe:
-		return vtab.ConstraintNE, true
-	case parser.OpMatch:
-		return vtab.ConstraintMatch, true
-	case parser.OpLike:
-		return vtab.ConstraintLike, true
-	case parser.OpGlob:
-		return vtab.ConstraintGlob, true
-	default:
-		return 0, false
-	}
+	result, ok := vtabConstraintOps[op]
+	return result, ok
 }
 
 // resolveVTabColumnIndex finds the column index for an expression.
@@ -199,23 +198,34 @@ func evalConstraintValue(expr parser.Expression, args []driver.NamedValue) inter
 	case *parser.LiteralExpr:
 		return evalLiteralToInterface(e)
 	case *parser.VariableExpr:
-		for _, a := range args {
-			if e.Name != "" && a.Name == e.Name {
-				return a.Value
-			}
-		}
-		if len(args) > 0 {
-			return args[0].Value
-		}
+		return evalConstraintVariableValue(e, args)
 	case *parser.UnaryExpr:
-		if e.Op == parser.OpNeg {
-			if lit, ok := e.Expr.(*parser.LiteralExpr); ok {
-				v := evalLiteralToInterface(lit)
-				return negateValue(v)
-			}
-		}
+		return evalNegatedConstraintValue(e)
 	}
 	return nil
+}
+
+func evalConstraintVariableValue(expr *parser.VariableExpr, args []driver.NamedValue) interface{} {
+	for _, a := range args {
+		if expr.Name != "" && a.Name == expr.Name {
+			return a.Value
+		}
+	}
+	if len(args) > 0 {
+		return args[0].Value
+	}
+	return nil
+}
+
+func evalNegatedConstraintValue(expr *parser.UnaryExpr) interface{} {
+	if expr.Op != parser.OpNeg {
+		return nil
+	}
+	lit, ok := expr.Expr.(*parser.LiteralExpr)
+	if !ok {
+		return nil
+	}
+	return negateValue(evalLiteralToInterface(lit))
 }
 
 // evalLiteralToInterface converts a literal to an interface{} value.
@@ -465,39 +475,55 @@ func compareVTabValues(a, b interface{}, desc bool, nullsFirst *bool) bool {
 
 // compareInterfaces compares two interface values.
 func compareInterfaces(a, b interface{}) int {
-	if a == nil && b == nil {
-		return 0
+	if cmp, ok := compareNilInterfaces(a, b); ok {
+		return cmp
 	}
-	if a == nil {
-		return -1
+	if cmp, ok := compareNumericInterfaces(a, b); ok {
+		return cmp
 	}
-	if b == nil {
-		return 1
-	}
+	return compareStringInterfaces(a, b)
+}
 
-	// Try numeric comparison first
+func compareNilInterfaces(a, b interface{}) (int, bool) {
+	switch {
+	case a == nil && b == nil:
+		return 0, true
+	case a == nil:
+		return -1, true
+	case b == nil:
+		return 1, true
+	default:
+		return 0, false
+	}
+}
+
+func compareNumericInterfaces(a, b interface{}) (int, bool) {
 	af, aOk := vtabToFloat64(a)
 	bf, bOk := vtabToFloat64(b)
-	if aOk && bOk {
-		if af < bf {
-			return -1
-		}
-		if af > bf {
-			return 1
-		}
-		return 0
+	if !aOk || !bOk {
+		return 0, false
 	}
+	switch {
+	case af < bf:
+		return -1, true
+	case af > bf:
+		return 1, true
+	default:
+		return 0, true
+	}
+}
 
-	// Fall back to string comparison
+func compareStringInterfaces(a, b interface{}) int {
 	sa := fmt.Sprintf("%v", a)
 	sb := fmt.Sprintf("%v", b)
-	if sa < sb {
+	switch {
+	case sa < sb:
 		return -1
-	}
-	if sa > sb {
+	case sa > sb:
 		return 1
+	default:
+		return 0
 	}
-	return 0
 }
 
 // vtabToFloat64 converts a numeric interface value to float64.
@@ -695,28 +721,42 @@ func scanVTabRows(vt vtab.VirtualTable, where parser.Expression,
 		return nil, err
 	}
 
+	return collectMatchedVTabRows(cursor, where, vtabCols, args)
+}
+
+func collectMatchedVTabRows(cursor vtab.VirtualCursor, where parser.Expression,
+	vtabCols []string, args []driver.NamedValue) ([]vtabMatchedRow, error) {
+
 	var rows []vtabMatchedRow
 	for !cursor.EOF() {
-		rowid, err := cursor.Rowid()
+		row, err := readMatchedVTabRow(cursor, vtabCols)
 		if err != nil {
 			return nil, err
 		}
-		currentRow := make([]interface{}, len(vtabCols))
-		for i := range vtabCols {
-			currentRow[i], _ = cursor.Column(i)
-		}
-		if where != nil && !matchesVTabWhere(where, currentRow, vtabCols, args) {
+		if where != nil && !matchesVTabWhere(where, row.currentRow, vtabCols, args) {
 			if err := cursor.Next(); err != nil {
 				return nil, err
 			}
 			continue
 		}
-		rows = append(rows, vtabMatchedRow{rowid: rowid, currentRow: currentRow})
+		rows = append(rows, row)
 		if err := cursor.Next(); err != nil {
 			return nil, err
 		}
 	}
 	return rows, nil
+}
+
+func readMatchedVTabRow(cursor vtab.VirtualCursor, vtabCols []string) (vtabMatchedRow, error) {
+	rowid, err := cursor.Rowid()
+	if err != nil {
+		return vtabMatchedRow{}, err
+	}
+	currentRow := make([]interface{}, len(vtabCols))
+	for i := range vtabCols {
+		currentRow[i], _ = cursor.Column(i)
+	}
+	return vtabMatchedRow{rowid: rowid, currentRow: currentRow}, nil
 }
 
 // buildVTabUpdateArgv builds argv for a vtab Update(UPDATE) call.
