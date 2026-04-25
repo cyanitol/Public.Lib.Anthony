@@ -638,21 +638,7 @@ func TestSavepointOnReadOnlyTx(t *testing.T) {
 
 	tx := dtx.(*Tx)
 
-	// Try savepoint operations on read-only transaction
-	err = tx.Savepoint("sp1")
-	if err == nil || err.Error() != "cannot create savepoint in read-only transaction" {
-		t.Errorf("expected read-only error, got: %v", err)
-	}
-
-	err = tx.ReleaseSavepoint("sp1")
-	if err == nil || err.Error() != "cannot release savepoint in read-only transaction" {
-		t.Errorf("expected read-only error, got: %v", err)
-	}
-
-	err = tx.RollbackToSavepoint("sp1")
-	if err == nil || err.Error() != "cannot rollback to savepoint in read-only transaction" {
-		t.Errorf("expected read-only error, got: %v", err)
-	}
+	txExpectReadOnlySavepointErrors(t, tx)
 }
 
 func txExpectError(t *testing.T, err error, wantMsg string) {
@@ -660,6 +646,13 @@ func txExpectError(t *testing.T, err error, wantMsg string) {
 	if err == nil || err.Error() != wantMsg {
 		t.Errorf("expected %q error, got: %v", wantMsg, err)
 	}
+}
+
+func txExpectReadOnlySavepointErrors(t *testing.T, tx *Tx) {
+	t.Helper()
+	txExpectError(t, tx.Savepoint("sp1"), "cannot create savepoint in read-only transaction")
+	txExpectError(t, tx.ReleaseSavepoint("sp1"), "cannot release savepoint in read-only transaction")
+	txExpectError(t, tx.RollbackToSavepoint("sp1"), "cannot rollback to savepoint in read-only transaction")
 }
 
 func TestSavepointWithoutActiveTx(t *testing.T) {

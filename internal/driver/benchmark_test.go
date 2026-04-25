@@ -32,6 +32,66 @@ func setupBenchmarkDB(b *testing.B, useMemory bool) (*sql.DB, func()) {
 	return db, cleanup
 }
 
+func benchmarkCreateUsersTable(b *testing.B, db *sql.DB) {
+	b.Helper()
+	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)")
+	if err != nil {
+		b.Fatalf("failed to create table: %v", err)
+	}
+}
+
+func benchmarkLimitIterations(b *testing.B, max int) int {
+	iterations := b.N
+	if iterations > max {
+		iterations = max
+		b.N = iterations
+	}
+	return iterations
+}
+
+func benchmarkInsertBatchIterations(b *testing.B, db *sql.DB, iterations, rowsPerBatch int) {
+	for i := 0; i < iterations; i++ {
+		tx, err := db.Begin()
+		if err != nil {
+			b.Fatalf("failed to begin transaction: %v", err)
+		}
+
+		stmt, err := tx.Prepare("INSERT INTO users (name, age) VALUES (?, ?)")
+		if err != nil {
+			b.Fatalf("failed to prepare statement: %v", err)
+		}
+
+		for j := 0; j < rowsPerBatch; j++ {
+			if _, err := stmt.Exec(fmt.Sprintf("User%d", i*rowsPerBatch+j), 20+j%50); err != nil {
+				stmt.Close()
+				b.Fatalf("failed to insert: %v", err)
+			}
+		}
+
+		stmt.Close()
+		if err := tx.Commit(); err != nil {
+			b.Fatalf("failed to commit: %v", err)
+		}
+	}
+}
+
+func benchmarkMemoryVsDiskCase(b *testing.B, useMemory bool) {
+	db, cleanup := setupBenchmarkDB(b, useMemory)
+	defer cleanup()
+
+	benchmarkCreateUsersTable(b, db)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	iterations := benchmarkLimitIterations(b, 10000)
+	for i := 0; i < iterations; i++ {
+		if _, err := db.Exec("INSERT INTO users (name, age) VALUES (?, ?)", "John", 30); err != nil {
+			b.Fatalf("failed to insert: %v", err)
+		}
+	}
+}
+
 // BenchmarkInsert benchmarks single INSERT operations
 func BenchmarkInsert(b *testing.B) {
 	db, cleanup := setupBenchmarkDB(b, true)
@@ -71,45 +131,13 @@ func BenchmarkInsertBatch(b *testing.B) {
 	db, cleanup := setupBenchmarkDB(b, true)
 	defer cleanup()
 
-	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)")
-	if err != nil {
-		b.Fatalf("failed to create table: %v", err)
-	}
+	benchmarkCreateUsersTable(b, db)
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	// Limit iterations to avoid cache overflow (each iteration inserts 1000 rows)
-	iterations := b.N
-	if iterations > 10 {
-		iterations = 10
-		b.N = iterations
-	}
-
-	for i := 0; i < iterations; i++ {
-		tx, err := db.Begin()
-		if err != nil {
-			b.Fatalf("failed to begin transaction: %v", err)
-		}
-
-		stmt, err := tx.Prepare("INSERT INTO users (name, age) VALUES (?, ?)")
-		if err != nil {
-			b.Fatalf("failed to prepare statement: %v", err)
-		}
-
-		for j := 0; j < 1000; j++ {
-			_, err = stmt.Exec(fmt.Sprintf("User%d", i*1000+j), 20+j%50)
-			if err != nil {
-				b.Fatalf("failed to insert: %v", err)
-			}
-		}
-
-		stmt.Close()
-
-		if err := tx.Commit(); err != nil {
-			b.Fatalf("failed to commit: %v", err)
-		}
-	}
+	iterations := benchmarkLimitIterations(b, 10)
+	benchmarkInsertBatchIterations(b, db, iterations, 1000)
 }
 
 // BenchmarkSelect benchmarks simple SELECT queries
@@ -555,57 +583,11 @@ func BenchmarkPreparedStatement(b *testing.B) {
 // BenchmarkMemoryVsDisk compares in-memory vs disk performance for inserts
 func BenchmarkMemoryVsDisk(b *testing.B) {
 	b.Run("Memory", func(b *testing.B) {
-		db, cleanup := setupBenchmarkDB(b, true)
-		defer cleanup()
-
-		_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)")
-		if err != nil {
-			b.Fatalf("failed to create table: %v", err)
-		}
-
-		b.ResetTimer()
-		b.ReportAllocs()
-
-		// Limit iterations to avoid cache overflow
-		iterations := b.N
-		if iterations > 10000 {
-			iterations = 10000
-			b.N = iterations
-		}
-
-		for i := 0; i < iterations; i++ {
-			_, err := db.Exec("INSERT INTO users (name, age) VALUES (?, ?)", "John", 30)
-			if err != nil {
-				b.Fatalf("failed to insert: %v", err)
-			}
-		}
+		benchmarkMemoryVsDiskCase(b, true)
 	})
 
 	b.Run("Disk", func(b *testing.B) {
-		db, cleanup := setupBenchmarkDB(b, false)
-		defer cleanup()
-
-		_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)")
-		if err != nil {
-			b.Fatalf("failed to create table: %v", err)
-		}
-
-		b.ResetTimer()
-		b.ReportAllocs()
-
-		// Limit iterations to avoid cache overflow
-		iterations := b.N
-		if iterations > 10000 {
-			iterations = 10000
-			b.N = iterations
-		}
-
-		for i := 0; i < iterations; i++ {
-			_, err := db.Exec("INSERT INTO users (name, age) VALUES (?, ?)", "John", 30)
-			if err != nil {
-				b.Fatalf("failed to insert: %v", err)
-			}
-		}
+		benchmarkMemoryVsDiskCase(b, false)
 	})
 }
 

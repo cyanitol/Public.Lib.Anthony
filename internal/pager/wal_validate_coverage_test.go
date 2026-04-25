@@ -7,35 +7,27 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	_ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
-// wvcOpenDB opens a file-backed database for wal_validate_coverage tests.
+// wvcOpenDB keeps existing file-local call sites stable while delegating to the
+// shared pager_test DB helper.
 func wvcOpenDB(t *testing.T, path string) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite_internal", path)
-	if err != nil {
-		t.Fatalf("sql.Open(%q): %v", path, err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
+	return openPagerTestDB(t, path)
 }
 
-// wvcMustExec runs a SQL statement or fatally fails the test.
+// wvcMustExec keeps existing test bodies stable while delegating to the shared
+// pager_test execution helper.
 func wvcMustExec(t *testing.T, db *sql.DB, q string, args ...interface{}) {
 	t.Helper()
-	if _, err := db.Exec(q, args...); err != nil {
-		t.Fatalf("exec %q: %v", q, err)
-	}
+	mustExecPagerTest(t, db, q, args...)
 }
 
-// wvcExec runs a SQL statement and logs any error as non-fatal.
+// wvcExec keeps existing non-fatal checkpoint/journal-mode calls stable while
+// delegating to the shared pager_test logging helper.
 func wvcExec(t *testing.T, db *sql.DB, q string, args ...interface{}) {
 	t.Helper()
-	if _, err := db.Exec(q, args...); err != nil {
-		t.Logf("exec %q: %v (non-fatal)", q, err)
-	}
+	logExecPagerTest(t, db, q, args...)
 }
 
 // ---------------------------------------------------------------------------
@@ -47,15 +39,15 @@ func wvcExec(t *testing.T, db *sql.DB, q string, args ...interface{}) {
 func TestWALValidate_ValidFrameCheckpoint(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "vf_valid.db")
-	db := wvcOpenDB(t, dbPath)
+	db := openPagerTestDB(t, dbPath)
 
-	wvcMustExec(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, data TEXT)")
-	wvcMustExec(t, db, "PRAGMA journal_mode=WAL")
+	mustExecPagerTest(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, data TEXT)")
+	mustExecPagerTest(t, db, "PRAGMA journal_mode=WAL")
 
 	for i := 0; i < 60; i++ {
-		wvcMustExec(t, db, "INSERT INTO t (data) VALUES (?)", strings.Repeat("A", 400))
+		mustExecPagerTest(t, db, "INSERT INTO t (data) VALUES (?)", strings.Repeat("A", 400))
 	}
-	wvcExec(t, db, "PRAGMA wal_checkpoint(FULL)")
+	logExecPagerTest(t, db, "PRAGMA wal_checkpoint(FULL)")
 
 	var n int
 	if err := db.QueryRow("SELECT COUNT(*) FROM t").Scan(&n); err != nil {
@@ -72,16 +64,12 @@ func TestWALValidate_SaltMismatchOnReopen(t *testing.T) {
 	dbPath := filepath.Join(dir, "vf_salt.db")
 
 	func() {
-		db, err := sql.Open("sqlite_internal", dbPath)
-		if err != nil {
-			t.Fatalf("phase1 open: %v", err)
-		}
-		defer db.Close()
+		db := openPagerTestDB(t, dbPath)
 
-		wvcMustExec(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, data TEXT)")
-		wvcMustExec(t, db, "PRAGMA journal_mode=WAL")
+		mustExecPagerTest(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, data TEXT)")
+		mustExecPagerTest(t, db, "PRAGMA journal_mode=WAL")
 		for i := 0; i < 40; i++ {
-			wvcMustExec(t, db, "INSERT INTO t (data) VALUES (?)", strings.Repeat("S", 300))
+			mustExecPagerTest(t, db, "INSERT INTO t (data) VALUES (?)", strings.Repeat("S", 300))
 		}
 		// Close without checkpoint so WAL stays on disk.
 	}()
@@ -92,11 +80,7 @@ func TestWALValidate_SaltMismatchOnReopen(t *testing.T) {
 	}
 
 	// Reopen: triggers WAL recovery which calls validateFrame on each stored frame.
-	db2, err := sql.Open("sqlite_internal", dbPath)
-	if err != nil {
-		t.Fatalf("phase2 open: %v", err)
-	}
-	defer db2.Close()
+	db2 := openPagerTestDB(t, dbPath)
 
 	var n int
 	if err := db2.QueryRow("SELECT COUNT(*) FROM t").Scan(&n); err != nil {
@@ -110,25 +94,25 @@ func TestWALValidate_SaltMismatchOnReopen(t *testing.T) {
 func TestWALValidate_MultipleCheckpointModes(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "vf_modes.db")
-	db := wvcOpenDB(t, dbPath)
+	db := openPagerTestDB(t, dbPath)
 
-	wvcMustExec(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, data TEXT)")
-	wvcMustExec(t, db, "PRAGMA journal_mode=WAL")
+	mustExecPagerTest(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, data TEXT)")
+	mustExecPagerTest(t, db, "PRAGMA journal_mode=WAL")
 
 	for i := 0; i < 80; i++ {
-		wvcMustExec(t, db, "INSERT INTO t (data) VALUES (?)", strings.Repeat("M", 350))
+		mustExecPagerTest(t, db, "INSERT INTO t (data) VALUES (?)", strings.Repeat("M", 350))
 	}
 
-	wvcExec(t, db, "PRAGMA wal_checkpoint(PASSIVE)")
+	logExecPagerTest(t, db, "PRAGMA wal_checkpoint(PASSIVE)")
 	for i := 0; i < 20; i++ {
-		wvcMustExec(t, db, "INSERT INTO t (data) VALUES (?)", strings.Repeat("N", 350))
+		mustExecPagerTest(t, db, "INSERT INTO t (data) VALUES (?)", strings.Repeat("N", 350))
 	}
-	wvcExec(t, db, "PRAGMA wal_checkpoint(FULL)")
+	logExecPagerTest(t, db, "PRAGMA wal_checkpoint(FULL)")
 	for i := 0; i < 10; i++ {
-		wvcMustExec(t, db, "INSERT INTO t (data) VALUES (?)", strings.Repeat("O", 350))
+		mustExecPagerTest(t, db, "INSERT INTO t (data) VALUES (?)", strings.Repeat("O", 350))
 	}
-	wvcExec(t, db, "PRAGMA wal_checkpoint(RESTART)")
-	wvcExec(t, db, "PRAGMA wal_checkpoint(TRUNCATE)")
+	logExecPagerTest(t, db, "PRAGMA wal_checkpoint(RESTART)")
+	logExecPagerTest(t, db, "PRAGMA wal_checkpoint(TRUNCATE)")
 }
 
 // ---------------------------------------------------------------------------
@@ -141,16 +125,16 @@ func TestWALValidate_MultipleCheckpointModes(t *testing.T) {
 func TestWALValidate_CheckpointFramesToDB_IncrementalBatches(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "ckpt_inc.db")
-	db := wvcOpenDB(t, dbPath)
+	db := openPagerTestDB(t, dbPath)
 
-	wvcMustExec(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, data TEXT)")
-	wvcMustExec(t, db, "PRAGMA journal_mode=WAL")
+	mustExecPagerTest(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, data TEXT)")
+	mustExecPagerTest(t, db, "PRAGMA journal_mode=WAL")
 
 	for batch := 0; batch < 5; batch++ {
 		for i := 0; i < 40; i++ {
-			wvcMustExec(t, db, "INSERT INTO t (data) VALUES (?)", strings.Repeat("B", 300))
+			mustExecPagerTest(t, db, "INSERT INTO t (data) VALUES (?)", strings.Repeat("B", 300))
 		}
-		wvcExec(t, db, "PRAGMA wal_checkpoint(PASSIVE)")
+		logExecPagerTest(t, db, "PRAGMA wal_checkpoint(PASSIVE)")
 	}
 
 	var n int
@@ -168,22 +152,22 @@ func TestWALValidate_CheckpointFramesToDB_IncrementalBatches(t *testing.T) {
 func TestWALValidate_CheckpointFramesToDB_UpdateOverwrite(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "ckpt_upd.db")
-	db := wvcOpenDB(t, dbPath)
+	db := openPagerTestDB(t, dbPath)
 
-	wvcMustExec(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, data TEXT)")
-	wvcMustExec(t, db, "PRAGMA journal_mode=WAL")
+	mustExecPagerTest(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, data TEXT)")
+	mustExecPagerTest(t, db, "PRAGMA journal_mode=WAL")
 
 	// Seed rows.
 	for i := 0; i < 20; i++ {
-		wvcMustExec(t, db, "INSERT INTO t (data) VALUES (?)", strings.Repeat("C", 200))
+		mustExecPagerTest(t, db, "INSERT INTO t (data) VALUES (?)", strings.Repeat("C", 200))
 	}
 
 	// Update the same rows repeatedly so WAL accumulates duplicate page frames.
 	for round := 0; round < 5; round++ {
-		wvcMustExec(t, db, "UPDATE t SET data = ?", strings.Repeat("D", 200+round*10))
+		mustExecPagerTest(t, db, "UPDATE t SET data = ?", strings.Repeat("D", 200+round*10))
 	}
 
-	wvcExec(t, db, "PRAGMA wal_checkpoint(FULL)")
+	logExecPagerTest(t, db, "PRAGMA wal_checkpoint(FULL)")
 }
 
 // TestWALValidate_CheckpointFramesToDB_ReopenAndCheckpoint writes frames,
@@ -195,26 +179,18 @@ func TestWALValidate_CheckpointFramesToDB_ReopenAndCheckpoint(t *testing.T) {
 	dbPath := filepath.Join(dir, "ckpt_ro_ck.db")
 
 	func() {
-		db, err := sql.Open("sqlite_internal", dbPath)
-		if err != nil {
-			t.Fatalf("setup: %v", err)
-		}
-		defer db.Close()
-		wvcMustExec(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
-		wvcMustExec(t, db, "PRAGMA journal_mode=WAL")
+		db := openPagerTestDB(t, dbPath)
+		mustExecPagerTest(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
+		mustExecPagerTest(t, db, "PRAGMA journal_mode=WAL")
 		for i := 0; i < 60; i++ {
-			wvcMustExec(t, db, "INSERT INTO t (v) VALUES (?)", strings.Repeat("E", 400))
+			mustExecPagerTest(t, db, "INSERT INTO t (v) VALUES (?)", strings.Repeat("E", 400))
 		}
 	}()
 
-	db2, err := sql.Open("sqlite_internal", dbPath)
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
-	defer db2.Close()
+	db2 := openPagerTestDB(t, dbPath)
 
-	wvcExec(t, db2, "PRAGMA journal_mode=WAL")
-	wvcExec(t, db2, "PRAGMA wal_checkpoint(FULL)")
+	logExecPagerTest(t, db2, "PRAGMA journal_mode=WAL")
+	logExecPagerTest(t, db2, "PRAGMA wal_checkpoint(FULL)")
 
 	var n int
 	if err := db2.QueryRow("SELECT COUNT(*) FROM t").Scan(&n); err != nil {

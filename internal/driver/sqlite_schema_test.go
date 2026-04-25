@@ -269,27 +269,34 @@ func testAlterTable(t *testing.T, db *sql.DB) {
 		t.Logf("sql after ALTER TABLE: %q (may not show new column in all cases)", sql)
 	}
 
-	// Test 22: Rename table and check sqlite_master
-	_, err = db.Exec("ALTER TABLE t1 RENAME TO t1_renamed")
+	testAlterTableRenameCheck(t, db, &count)
+	testAlterTableOriginalNameGone(t, db, &count)
+}
+
+func testAlterTableRenameCheck(t *testing.T, db *sql.DB, count *int64) {
+	t.Helper()
+	_, err := db.Exec("ALTER TABLE t1 RENAME TO t1_renamed")
 	if err != nil {
 		t.Fatalf("failed to rename table: %v", err)
 	}
 
-	err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='t1_renamed'").Scan(&count)
+	err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='t1_renamed'").Scan(count)
 	if err != nil {
 		t.Fatalf("failed to find renamed table: %v", err)
 	}
-	if count != 1 {
-		t.Errorf("expected 1 entry for renamed table, got %d", count)
+	if *count != 1 {
+		t.Errorf("expected 1 entry for renamed table, got %d", *count)
 	}
+}
 
-	// Test 23: Verify old name is gone
-	err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='t1'").Scan(&count)
+func testAlterTableOriginalNameGone(t *testing.T, db *sql.DB, count *int64) {
+	t.Helper()
+	err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='t1'").Scan(count)
 	if err != nil {
 		t.Fatalf("failed to check old table name: %v", err)
 	}
-	if count != 0 {
-		t.Errorf("old table name should not exist, got count=%d", count)
+	if *count != 0 {
+		t.Errorf("old table name should not exist, got count=%d", *count)
 	}
 }
 

@@ -6,6 +6,35 @@ import (
 	"testing"
 )
 
+func mcdcCTEAssertResults(t *testing.T, db *sql.DB, query string, want []int64) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+
+	var got []int64
+	for rows.Next() {
+		var v int64
+		if err := rows.Scan(&v); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got = append(got, v)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows error: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v rows, want %v", len(got), len(want))
+	}
+	for i, g := range got {
+		if g != want[i] {
+			t.Errorf("row[%d] = %v, want %v", i, g, want[i])
+		}
+	}
+}
+
 // ============================================================================
 // MC/DC: inlineCTESingleInsert – opcode noop-out guard
 // stmt_cte.go line 266
@@ -67,30 +96,7 @@ func TestMCDC_CTE_InlineSingleInsert_HaltOrInit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			db := openMCDCDB(t)
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-			var got []int64
-			for rows.Next() {
-				var v int64
-				if err := rows.Scan(&v); err != nil {
-					t.Fatalf("scan: %v", err)
-				}
-				got = append(got, v)
-			}
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows error: %v", err)
-			}
-			if len(got) != len(tt.want) {
-				t.Fatalf("got %v rows, want %v", len(got), len(tt.want))
-			}
-			for i, g := range got {
-				if g != tt.want[i] {
-					t.Errorf("row[%d] = %v, want %v", i, g, tt.want[i])
-				}
-			}
+			mcdcCTEAssertResults(t, db, tt.query, tt.want)
 		})
 	}
 }

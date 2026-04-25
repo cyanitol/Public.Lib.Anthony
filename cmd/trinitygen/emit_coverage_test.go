@@ -4,7 +4,6 @@ package main
 
 import (
 	"bytes"
-	"strings"
 	"testing"
 )
 
@@ -153,10 +152,7 @@ func TestEmitSetup_ViaEmitTestCase(t *testing.T) {
 	t.Run("no_setup", func(t *testing.T) {
 		var buf bytes.Buffer
 		emitTestCase(&buf, TestSpec{Name: "t1", Query: "SELECT 1"})
-		out := buf.String()
-		if strings.Contains(out, "setup:") {
-			t.Errorf("expected no setup key, got: %s", out)
-		}
+		assertNotContains(t, buf.String(), "setup:")
 	})
 
 	t.Run("single_setup_stmt", func(t *testing.T) {
@@ -167,12 +163,8 @@ func TestEmitSetup_ViaEmitTestCase(t *testing.T) {
 			Query: "SELECT 1",
 		})
 		out := buf.String()
-		if !strings.Contains(out, "setup:") {
-			t.Errorf("expected setup key, got: %s", out)
-		}
-		if !strings.Contains(out, "CREATE TABLE x(id INTEGER)") {
-			t.Errorf("expected setup SQL in output, got: %s", out)
-		}
+		assertContains(t, out, "setup:")
+		assertContains(t, out, "CREATE TABLE x(id INTEGER)")
 	})
 
 	t.Run("multiple_setup_stmts", func(t *testing.T) {
@@ -186,12 +178,8 @@ func TestEmitSetup_ViaEmitTestCase(t *testing.T) {
 			Query: "SELECT v FROM y",
 		})
 		out := buf.String()
-		if !strings.Contains(out, "setup:") {
-			t.Errorf("expected setup key, got: %s", out)
-		}
-		if !strings.Contains(out, "INSERT INTO y") {
-			t.Errorf("expected second setup stmt, got: %s", out)
-		}
+		assertContains(t, out, "setup:")
+		assertContains(t, out, "INSERT INTO y")
 	})
 }
 
@@ -201,10 +189,7 @@ func TestEmitWantRows_ViaEmitTestCase(t *testing.T) {
 	t.Run("no_rows", func(t *testing.T) {
 		var buf bytes.Buffer
 		emitTestCase(&buf, TestSpec{Name: "r0", Exec: "DELETE FROM t"})
-		out := buf.String()
-		if strings.Contains(out, "wantRows:") {
-			t.Errorf("expected no wantRows, got: %s", out)
-		}
+		assertNotContains(t, buf.String(), "wantRows:")
 	})
 
 	t.Run("single_row_single_col", func(t *testing.T) {
@@ -217,12 +202,8 @@ func TestEmitWantRows_ViaEmitTestCase(t *testing.T) {
 			},
 		})
 		out := buf.String()
-		if !strings.Contains(out, "wantRows:") {
-			t.Errorf("expected wantRows key, got: %s", out)
-		}
-		if !strings.Contains(out, "int64(1)") {
-			t.Errorf("expected int64(1) in output, got: %s", out)
-		}
+		assertContains(t, out, "wantRows:")
+		assertContains(t, out, "int64(1)")
 	})
 
 	t.Run("multiple_rows_multiple_cols", func(t *testing.T) {
@@ -236,12 +217,8 @@ func TestEmitWantRows_ViaEmitTestCase(t *testing.T) {
 			},
 		})
 		out := buf.String()
-		if !strings.Contains(out, `"alice"`) {
-			t.Errorf("expected alice in output, got: %s", out)
-		}
-		if !strings.Contains(out, `"bob"`) {
-			t.Errorf("expected bob in output, got: %s", out)
-		}
+		assertContains(t, out, `"alice"`)
+		assertContains(t, out, `"bob"`)
 	})
 
 	t.Run("row_with_nil", func(t *testing.T) {
@@ -253,9 +230,6 @@ func TestEmitWantRows_ViaEmitTestCase(t *testing.T) {
 				{{GoLiteral: "nil"}},
 			},
 		})
-		out := buf.String()
-		if !strings.Contains(out, "nil") {
-			t.Errorf("expected nil literal in output, got: %s", out)
-		}
+		assertContains(t, buf.String(), "nil")
 	})
 }

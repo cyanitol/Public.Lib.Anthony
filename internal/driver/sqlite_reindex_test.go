@@ -443,45 +443,51 @@ func TestReindexAfterDelete(t *testing.T) {
 	defer db.Close()
 
 	t.Run("reindex_after_delete", func(t *testing.T) {
-		// Create table
-		_, err := db.Exec(`
-			CREATE TABLE t9(id INTEGER PRIMARY KEY, value INTEGER);
-			CREATE INDEX idx_value ON t9(value);
-		`)
-		if err != nil {
-			t.Fatalf("failed to create table: %v", err)
-		}
-
-		// Insert 20 rows
-		for i := 1; i <= 20; i++ {
-			_, err = db.Exec("INSERT INTO t9(value) VALUES(?)", i*10)
-			if err != nil {
-				t.Fatalf("insert failed: %v", err)
-			}
-		}
-
-		// Delete half the rows
-		_, err = db.Exec("DELETE FROM t9 WHERE value > 100")
-		if err != nil {
-			t.Fatalf("delete failed: %v", err)
-		}
-
-		// REINDEX
-		_, err = db.Exec("REINDEX t9")
-		if err != nil {
-			t.Errorf("REINDEX failed: %v", err)
-		}
-
-		// Verify count
-		var count int64
-		err = db.QueryRow("SELECT COUNT(*) FROM t9").Scan(&count)
-		if err != nil {
-			t.Fatalf("count failed: %v", err)
-		}
-		if count != 10 {
-			t.Errorf("expected 10 rows, got %d", count)
-		}
+		reindexDeleteSetup(t, db)
+		reindexDeletePopulate(t, db)
+		reindexDeleteVerify(t, db)
 	})
+}
+
+func reindexDeleteSetup(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec(`
+		CREATE TABLE t9(id INTEGER PRIMARY KEY, value INTEGER);
+		CREATE INDEX idx_value ON t9(value);
+	`)
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+}
+
+func reindexDeletePopulate(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for i := 1; i <= 20; i++ {
+		if _, err := db.Exec("INSERT INTO t9(value) VALUES(?)", i*10); err != nil {
+			t.Fatalf("insert failed: %v", err)
+		}
+	}
+
+	_, err := db.Exec("DELETE FROM t9 WHERE value > 100")
+	if err != nil {
+		t.Fatalf("delete failed: %v", err)
+	}
+
+	_, err = db.Exec("REINDEX t9")
+	if err != nil {
+		t.Errorf("REINDEX failed: %v", err)
+	}
+}
+
+func reindexDeleteVerify(t *testing.T, db *sql.DB) {
+	t.Helper()
+	var count int64
+	if err := db.QueryRow("SELECT COUNT(*) FROM t9").Scan(&count); err != nil {
+		t.Fatalf("count failed: %v", err)
+	}
+	if count != 10 {
+		t.Errorf("expected 10 rows, got %d", count)
+	}
 }
 
 // TestReindexEmptyTable tests REINDEX on an empty table

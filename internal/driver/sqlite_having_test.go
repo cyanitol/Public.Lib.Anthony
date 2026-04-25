@@ -4,7 +4,6 @@ package driver
 import (
 	"database/sql"
 	"fmt"
-	"reflect"
 	"testing"
 )
 
@@ -632,43 +631,5 @@ func havingCompareRow(t *testing.T, i int, gotRow, wantRow []interface{}) {
 
 // compareHavingValues compares two values accounting for type conversions
 func compareHavingValues(got, want interface{}) bool {
-	// Handle nil
-	if got == nil && want == nil {
-		return true
-	}
-	if got == nil || want == nil {
-		return false
-	}
-
-	// Handle byte slices (common for strings)
-	if gotBytes, ok := got.([]byte); ok {
-		if wantStr, ok := want.(string); ok {
-			return string(gotBytes) == wantStr
-		}
-	}
-
-	// Handle numeric types - convert to float64 for comparison
-	gotFloat, gotIsNum := toFloat64Having(got)
-	wantFloat, wantIsNum := toFloat64Having(want)
-	if gotIsNum && wantIsNum {
-		return gotFloat == wantFloat
-	}
-
-	// Direct comparison
-	return got == want
-}
-
-// toFloat64Having converts various numeric types to float64
-func toFloat64Having(v interface{}) (float64, bool) {
-	rv := reflect.ValueOf(v)
-	switch rv.Kind() {
-	case reflect.Float32, reflect.Float64:
-		return rv.Float(), true
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return float64(rv.Int()), true
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return float64(rv.Uint()), true
-	default:
-		return 0, false
-	}
+	return driverValueEqual(got, want)
 }

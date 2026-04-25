@@ -45,24 +45,7 @@ func queryOrderBy(t *testing.T, db *sql.DB, query string) [][]interface{} {
 	}
 
 	for rows.Next() {
-		values := make([]interface{}, len(cols))
-		valuePtrs := make([]interface{}, len(cols))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
-			t.Fatalf("scan failed: %v", err)
-		}
-
-		// Convert []byte to string for easier comparison
-		for i, v := range values {
-			if b, ok := v.([]byte); ok {
-				values[i] = string(b)
-			}
-		}
-
-		results = append(results, values)
+		results = append(results, queryOrderByScanRow(t, rows, len(cols)))
 	}
 
 	if err := rows.Err(); err != nil {
@@ -70,6 +53,28 @@ func queryOrderBy(t *testing.T, db *sql.DB, query string) [][]interface{} {
 	}
 
 	return results
+}
+
+func queryOrderByScanRow(t *testing.T, rows *sql.Rows, numCols int) []interface{} {
+	t.Helper()
+	values := make([]interface{}, numCols)
+	valuePtrs := make([]interface{}, numCols)
+	for i := range values {
+		valuePtrs[i] = &values[i]
+	}
+	if err := rows.Scan(valuePtrs...); err != nil {
+		t.Fatalf("scan failed: %v", err)
+	}
+	return queryOrderByNormalizeValues(values)
+}
+
+func queryOrderByNormalizeValues(values []interface{}) []interface{} {
+	for i, v := range values {
+		if b, ok := v.([]byte); ok {
+			values[i] = string(b)
+		}
+	}
+	return values
 }
 
 // TestSQLiteOrderBySingleColumn tests ORDER BY with a single column

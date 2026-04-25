@@ -10,54 +10,42 @@ import (
 // TestEmptyTableQuery tests that querying an empty table returns
 // a valid result set with zero rows and no error.
 func TestEmptyTableQuery(t *testing.T) {
+	emptyTableAssertQuery(t)
+}
+
+func emptyTableAssertQuery(t *testing.T) {
+	t.Helper()
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	// Open database - driver will create a new database file
 	db, err := sql.Open(DriverName, dbPath)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
 	defer db.Close()
 
-	// Create an empty table
-	_, err = db.Exec("CREATE TABLE empty_test (id INTEGER PRIMARY KEY, name TEXT)")
-	if err != nil {
+	if _, err = db.Exec("CREATE TABLE empty_test (id INTEGER PRIMARY KEY, name TEXT)"); err != nil {
 		t.Fatalf("failed to create table: %v", err)
 	}
 
-	// Query the empty table - should not return an error
 	rows, err := db.Query("SELECT * FROM empty_test")
 	if err != nil {
 		t.Fatalf("Query() returned error for empty table: %v", err)
 	}
 	defer rows.Close()
 
-	// Check that we can get columns (table schema exists)
-	cols, err := rows.Columns()
-	if err != nil {
-		t.Fatalf("Columns() returned error: %v", err)
-	}
+	verifyColumnNames(t, rows, []string{"id", "name"})
 
-	if len(cols) != 2 {
-		t.Errorf("expected 2 columns, got %d", len(cols))
-	}
-
-	// Iterate over rows - should have zero iterations, no error
 	rowCount := 0
 	for rows.Next() {
 		rowCount++
 	}
-
 	if rowCount != 0 {
 		t.Errorf("expected 0 rows from empty table, got %d", rowCount)
 	}
-
-	// Check for iteration errors
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows.Err() returned error after iteration: %v", err)
 	}
-
 	t.Log("Successfully queried empty table with no errors")
 }
 

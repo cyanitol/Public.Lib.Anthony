@@ -26,16 +26,7 @@ func TestDatabaseSchemaPersistence(t *testing.T) {
 		"CREATE TABLE table2 (id INTEGER PRIMARY KEY, value INTEGER)",
 		"CREATE INDEX idx_name ON table1(name)",
 	}
-	for _, sql := range create {
-		stmt, err := c1.Prepare(sql)
-		if err != nil {
-			t.Fatalf("prepare %q: %v", sql, err)
-		}
-		if _, err := stmt.(*Stmt).ExecContext(ctxBackground(), nil); err != nil {
-			t.Fatalf("exec %q: %v", sql, err)
-		}
-		stmt.Close()
-	}
+	schemaPersistenceExecStatements(t, c1, create)
 	c1.Close()
 
 	conn2, err := drv.Open(dbPath)
@@ -44,8 +35,32 @@ func TestDatabaseSchemaPersistence(t *testing.T) {
 	}
 	c2 := conn2.(*Conn)
 
-	for _, sql := range []string{"SELECT * FROM table1", "SELECT * FROM table2"} {
-		stmt, err := c2.Prepare(sql)
+	schemaPersistenceVerifyQueries(t, c2, []string{"SELECT * FROM table1", "SELECT * FROM table2"})
+	c2.Close()
+}
+
+func ctxBackground() context.Context {
+	return context.Background()
+}
+
+func schemaPersistenceExecStatements(t *testing.T, conn *Conn, stmts []string) {
+	t.Helper()
+	for _, sql := range stmts {
+		stmt, err := conn.Prepare(sql)
+		if err != nil {
+			t.Fatalf("prepare %q: %v", sql, err)
+		}
+		if _, err := stmt.(*Stmt).ExecContext(ctxBackground(), nil); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+		stmt.Close()
+	}
+}
+
+func schemaPersistenceVerifyQueries(t *testing.T, conn *Conn, queries []string) {
+	t.Helper()
+	for _, sql := range queries {
+		stmt, err := conn.Prepare(sql)
 		if err != nil {
 			t.Fatalf("prepare %q after reopen: %v", sql, err)
 		}
@@ -56,9 +71,4 @@ func TestDatabaseSchemaPersistence(t *testing.T) {
 		rows.Close()
 		stmt.Close()
 	}
-	c2.Close()
-}
-
-func ctxBackground() context.Context {
-	return context.Background()
 }

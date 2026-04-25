@@ -545,11 +545,7 @@ func jarQueryRows(t *testing.T, db *sql.DB, query string) [][]interface{} {
 		}
 		row := make([]interface{}, len(cols))
 		for i, v := range vals {
-			if b, ok := v.([]byte); ok {
-				row[i] = string(b)
-			} else {
-				row[i] = v
-			}
+			row[i] = jarNormalizeValue(v)
 		}
 		result = append(result, row)
 	}
@@ -557,4 +553,11 @@ func jarQueryRows(t *testing.T, db *sql.DB, query string) [][]interface{} {
 		t.Fatalf("jarQueryRows err: %v", err)
 	}
 	return result
+}
+
+func jarNormalizeValue(v interface{}) interface{} {
+	if b, ok := v.([]byte); ok {
+		return string(b)
+	}
+	return v
 }

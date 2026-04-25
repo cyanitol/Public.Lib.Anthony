@@ -209,32 +209,31 @@ func TestBlobBindingParams(t *testing.T) {
 		t.Fatalf("failed to create table: %v", err)
 	}
 
-	// Bind blob data
-	blobData := []byte{0x12, 0x34, 0x56}
-	_, err = db.Exec("INSERT INTO t1 VALUES(?)", blobData)
+	blobAssertBindingParams(t, db, []byte{0x12, 0x34, 0x56})
+}
+
+func blobAssertBindingParams(t *testing.T, db *sql.DB, blobData []byte) {
+	t.Helper()
+	_, err := db.Exec("INSERT INTO t1 VALUES(?)", blobData)
 	if err != nil {
 		t.Fatalf("failed to insert: %v", err)
 	}
 
 	var result []byte
-	err = db.QueryRow("SELECT a FROM t1").Scan(&result)
-	if err != nil {
+	if err := db.QueryRow("SELECT a FROM t1").Scan(&result); err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
-
 	if !bytes.Equal(result, blobData) {
 		t.Errorf("got %v, want %v", result, blobData)
 	}
 
-	// Delete using literal blob (bound blob comparison not yet supported)
 	_, err = db.Exec("DELETE FROM t1 WHERE a = X'123456'")
 	if err != nil {
 		t.Fatalf("failed to delete: %v", err)
 	}
 
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
-	if err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count); err != nil {
 		t.Fatalf("failed to count: %v", err)
 	}
 	if count != 0 {

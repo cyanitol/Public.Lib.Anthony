@@ -988,17 +988,19 @@ func TestNullHandling(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			var result interface{}
-			err := db.QueryRow(tt.expr).Scan(&result)
-			if err != nil {
-				if err != sql.ErrNoRows {
-					t.Fatalf("query failed: %v", err)
-				}
-			}
-
-			if tt.wantNil && result != nil {
-				t.Errorf("expected nil, got %v", result)
-			}
+			funcAssertNullHandling(t, db, tt.expr, tt.wantNil)
 		})
+	}
+}
+
+func funcAssertNullHandling(t *testing.T, db *sql.DB, expr string, wantNil bool) {
+	t.Helper()
+	var result interface{}
+	err := db.QueryRow(expr).Scan(&result)
+	if err != nil && err != sql.ErrNoRows {
+		t.Fatalf("query failed: %v", err)
+	}
+	if wantNil && result != nil {
+		t.Errorf("expected nil, got %v", result)
 	}
 }

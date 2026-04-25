@@ -80,40 +80,17 @@ func TestOCCConcurrentWriters(t *testing.T) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
-	if _, err := db.Exec("CREATE TABLE counter (id INTEGER PRIMARY KEY, v INTEGER)"); err != nil {
-		t.Fatalf("create table: %v", err)
-	}
-	if _, err := db.Exec("INSERT INTO counter (id, v) VALUES (1, 0)"); err != nil {
-		t.Fatalf("insert initial row: %v", err)
-	}
+	occSeedCounter(t, db)
 
 	const numWorkers = 10
 	const maxRetries = 5
-	var wg sync.WaitGroup
-	var failCount int64
-
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := doCounterWithRetry(db, maxRetries); err != nil {
-				atomic.AddInt64(&failCount, 1)
-			}
-		}()
-	}
-	wg.Wait()
+	failCount := occRunCounterWorkers(db, numWorkers, maxRetries)
 
 	if n := atomic.LoadInt64(&failCount); n > 0 {
 		t.Errorf("%d goroutine(s) failed to commit after retries", n)
 	}
 
-	var finalVal int
-	if err := db.QueryRow("SELECT v FROM counter WHERE id = 1").Scan(&finalVal); err != nil {
-		t.Fatalf("read final counter: %v", err)
-	}
-	if finalVal != numWorkers {
-		t.Errorf("counter = %d, want %d", finalVal, numWorkers)
-	}
+	occAssertCounter(t, db, numWorkers)
 }
 
 // TestOCCVersionMonotonicity verifies that the writeVersion advances by exactly
@@ -155,6 +132,43 @@ func TestOCCVersionMonotonicity(t *testing.T) {
 		if err := runMonotonicityRound(t, writer, observer, i); err != nil {
 			t.Errorf("round %d: %v", i, err)
 		}
+	}
+}
+
+func occSeedCounter(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec("CREATE TABLE counter (id INTEGER PRIMARY KEY, v INTEGER)"); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO counter (id, v) VALUES (1, 0)"); err != nil {
+		t.Fatalf("insert initial row: %v", err)
+	}
+}
+
+func occRunCounterWorkers(db *sql.DB, numWorkers, maxRetries int) int64 {
+	var wg sync.WaitGroup
+	var failCount int64
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := doCounterWithRetry(db, maxRetries); err != nil {
+				atomic.AddInt64(&failCount, 1)
+			}
+		}()
+	}
+	wg.Wait()
+	return failCount
+}
+
+func occAssertCounter(t *testing.T, db *sql.DB, want int) {
+	t.Helper()
+	var finalVal int
+	if err := db.QueryRow("SELECT v FROM counter WHERE id = 1").Scan(&finalVal); err != nil {
+		t.Fatalf("read final counter: %v", err)
+	}
+	if finalVal != want {
+		t.Errorf("counter = %d, want %d", finalVal, want)
 	}
 }
 

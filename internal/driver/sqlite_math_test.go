@@ -4,7 +4,6 @@ package driver
 import (
 	"database/sql"
 	"fmt"
-	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -616,22 +615,7 @@ func compareInt64(t *testing.T, result interface{}, expected int64) {
 
 func compareFloat64(t *testing.T, result interface{}, expected float64) {
 	t.Helper()
-	switch got := result.(type) {
-	case float64:
-		if math.IsInf(expected, 1) && math.IsInf(got, 1) {
-			return // Both positive infinity
-		}
-		if math.IsInf(expected, -1) && math.IsInf(got, -1) {
-			return // Both negative infinity
-		}
-		if math.Abs(got-expected) > 0.001 {
-			t.Errorf("expected %v, got %v", expected, got)
-		}
-	case int64:
-		if math.Abs(float64(got)-expected) > 0.001 {
-			t.Errorf("expected %v, got %v (converted from int)", expected, got)
-		}
-	default:
+	if !driverFloatCloseEnough(result, expected) {
 		t.Errorf("expected float64 %v, got %T %v", expected, result, result)
 	}
 }

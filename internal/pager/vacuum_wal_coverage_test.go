@@ -7,35 +7,27 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	_ "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
-// vacwOpenDB opens a file-backed database for vacuum+WAL coverage tests.
+// vacwOpenDB keeps the existing file-local call sites but delegates to the
+// shared pager_test DB helper.
 func vacwOpenDB(t *testing.T, path string) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite_internal", path)
-	if err != nil {
-		t.Fatalf("sql.Open(%q): %v", path, err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
+	return openPagerTestDB(t, path)
 }
 
-// vacwMustExec runs a statement or fatally fails the test.
+// vacwMustExec keeps existing test bodies stable while delegating to the
+// shared pager_test execution helper.
 func vacwMustExec(t *testing.T, db *sql.DB, q string, args ...interface{}) {
 	t.Helper()
-	if _, err := db.Exec(q, args...); err != nil {
-		t.Fatalf("exec %q: %v", q, err)
-	}
+	mustExecPagerTest(t, db, q, args...)
 }
 
-// vacwExec runs a statement and logs (non-fatal) any error.
+// vacwExec keeps existing non-fatal checkpoint/journal-mode calls stable while
+// delegating to the shared pager_test logging helper.
 func vacwExec(t *testing.T, db *sql.DB, q string, args ...interface{}) {
 	t.Helper()
-	if _, err := db.Exec(q, args...); err != nil {
-		t.Logf("exec %q: %v (non-fatal)", q, err)
-	}
+	logExecPagerTest(t, db, q, args...)
 }
 
 // ---------------------------------------------------------------------------
@@ -47,14 +39,14 @@ func vacwExec(t *testing.T, db *sql.DB, q string, args ...interface{}) {
 func TestVacuumWAL_VacuumToFile_Basic(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "vac_basic.db")
-	db := vacwOpenDB(t, dbPath)
+	db := openPagerTestDB(t, dbPath)
 
-	vacwMustExec(t, db, "CREATE TABLE items (id INTEGER PRIMARY KEY, val TEXT)")
+	mustExecPagerTest(t, db, "CREATE TABLE items (id INTEGER PRIMARY KEY, val TEXT)")
 	for i := 0; i < 50; i++ {
-		vacwMustExec(t, db, "INSERT INTO items (val) VALUES (?)", strings.Repeat("x", 400))
+		mustExecPagerTest(t, db, "INSERT INTO items (val) VALUES (?)", strings.Repeat("x", 400))
 	}
-	vacwMustExec(t, db, "DELETE FROM items WHERE id % 3 = 0")
-	vacwMustExec(t, db, "VACUUM")
+	mustExecPagerTest(t, db, "DELETE FROM items WHERE id % 3 = 0")
+	mustExecPagerTest(t, db, "VACUUM")
 
 	var n int
 	if err := db.QueryRow("SELECT COUNT(*) FROM items").Scan(&n); err != nil {
@@ -68,17 +60,17 @@ func TestVacuumWAL_VacuumToFile_Basic(t *testing.T) {
 func TestVacuumWAL_VacuumToFile_MultiTable(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "vac_multi.db")
-	db := vacwOpenDB(t, dbPath)
+	db := openPagerTestDB(t, dbPath)
 
-	vacwMustExec(t, db, "CREATE TABLE a (id INTEGER PRIMARY KEY, v TEXT)")
-	vacwMustExec(t, db, "CREATE TABLE b (id INTEGER PRIMARY KEY, v TEXT)")
+	mustExecPagerTest(t, db, "CREATE TABLE a (id INTEGER PRIMARY KEY, v TEXT)")
+	mustExecPagerTest(t, db, "CREATE TABLE b (id INTEGER PRIMARY KEY, v TEXT)")
 	for i := 0; i < 30; i++ {
-		vacwMustExec(t, db, "INSERT INTO a (v) VALUES (?)", strings.Repeat("a", 300))
-		vacwMustExec(t, db, "INSERT INTO b (v) VALUES (?)", strings.Repeat("b", 300))
+		mustExecPagerTest(t, db, "INSERT INTO a (v) VALUES (?)", strings.Repeat("a", 300))
+		mustExecPagerTest(t, db, "INSERT INTO b (v) VALUES (?)", strings.Repeat("b", 300))
 	}
-	vacwMustExec(t, db, "DELETE FROM a WHERE id > 10")
-	vacwMustExec(t, db, "DELETE FROM b WHERE id > 10")
-	vacwMustExec(t, db, "VACUUM")
+	mustExecPagerTest(t, db, "DELETE FROM a WHERE id > 10")
+	mustExecPagerTest(t, db, "DELETE FROM b WHERE id > 10")
+	mustExecPagerTest(t, db, "VACUUM")
 }
 
 // TestVacuumWAL_CopyDatabaseToTarget_VacuumInto exercises copyDatabaseToTarget

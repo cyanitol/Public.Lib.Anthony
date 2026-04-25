@@ -8,51 +8,33 @@ import (
 
 // TestCreateDropIndex tests CREATE INDEX and DROP INDEX statements.
 func TestCreateDropIndex(t *testing.T) {
+	ddlAssertCreateDropIndex(t)
+}
+
+func ddlAssertCreateDropIndex(t *testing.T) {
+	t.Helper()
 	db, err := sql.Open("sqlite_internal", ":memory:")
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
 	defer db.Close()
 
-	// Create a table first
-	_, err = db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
+	for _, stmt := range []struct {
+		sql  string
+		fail string
+	}{
+		{"CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)", "failed to create table"},
+		{"CREATE INDEX idx_users_email ON users(email)", "failed to create index"},
+		{"CREATE UNIQUE INDEX idx_users_name ON users(name)", "failed to create unique index"},
+		{"CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)", "failed to create index with IF NOT EXISTS"},
+		{"DROP INDEX idx_users_email", "failed to drop index"},
+		{"DROP INDEX IF EXISTS idx_nonexistent", "failed to drop index with IF EXISTS"},
+	} {
+		if _, err = db.Exec(stmt.sql); err != nil {
+			t.Fatalf("%s: %v", stmt.fail, err)
+		}
 	}
-
-	// Create an index
-	_, err = db.Exec("CREATE INDEX idx_users_email ON users(email)")
-	if err != nil {
-		t.Fatalf("failed to create index: %v", err)
-	}
-
-	// Create unique index
-	_, err = db.Exec("CREATE UNIQUE INDEX idx_users_name ON users(name)")
-	if err != nil {
-		t.Fatalf("failed to create unique index: %v", err)
-	}
-
-	// Test IF NOT EXISTS
-	_, err = db.Exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
-	if err != nil {
-		t.Fatalf("failed to create index with IF NOT EXISTS: %v", err)
-	}
-
-	// Drop an index
-	_, err = db.Exec("DROP INDEX idx_users_email")
-	if err != nil {
-		t.Fatalf("failed to drop index: %v", err)
-	}
-
-	// Test IF EXISTS
-	_, err = db.Exec("DROP INDEX IF EXISTS idx_nonexistent")
-	if err != nil {
-		t.Fatalf("failed to drop index with IF EXISTS: %v", err)
-	}
-
-	// Drop without IF EXISTS should fail
-	_, err = db.Exec("DROP INDEX idx_nonexistent")
-	if err == nil {
+	if _, err = db.Exec("DROP INDEX idx_nonexistent"); err == nil {
 		t.Fatal("expected error when dropping nonexistent index without IF EXISTS")
 	}
 }

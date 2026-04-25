@@ -30,12 +30,6 @@ func assertFuncResult(t *testing.T, fnName string, result Value, err error, want
 	return result, true
 }
 
-// assertDateQuery checks a SQL query returns a non-NULL string equal to want.
-func assertDateQuery(t *testing.T, db interface{ Query(string, []interface{}) (interface{}, error) }, sql, want string) {
-	t.Helper()
-	// This is a placeholder; the real helper is defined elsewhere.
-}
-
 // assertTrigResult checks that a function returns a float without error.
 func assertTrigResult(t *testing.T, fnName string, result Value, err error) {
 	t.Helper()

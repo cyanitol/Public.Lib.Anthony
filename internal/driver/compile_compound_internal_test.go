@@ -64,21 +64,30 @@ func TestFlattenCompoundBothSides(t *testing.T) {
 	}
 
 	ops, sels := flattenCompound(top)
+	assertFlattenCompoundResult(t, ops, sels, []parser.CompoundOp{
+		parser.CompoundUnion,
+		parser.CompoundUnion,
+		parser.CompoundUnion,
+	}, []*parser.SelectStmt{sel1, sel2, sel3, sel4})
+}
 
-	// Expected: ops = [UNION, UNION, UNION], sels = [sel1, sel2, sel3, sel4]
-	if len(ops) != 3 {
-		t.Errorf("expected 3 ops, got %d", len(ops))
+func assertFlattenCompoundResult(t *testing.T, ops []parser.CompoundOp, sels []*parser.SelectStmt, wantOps []parser.CompoundOp, wantSels []*parser.SelectStmt) {
+	t.Helper()
+	if len(ops) != len(wantOps) {
+		t.Fatalf("expected %d ops, got %d", len(wantOps), len(ops))
 	}
-	if len(sels) != 4 {
-		t.Errorf("expected 4 selects, got %d", len(sels))
+	if len(sels) != len(wantSels) {
+		t.Fatalf("expected %d selects, got %d", len(wantSels), len(sels))
 	}
 	for i, op := range ops {
-		if op != parser.CompoundUnion {
-			t.Errorf("ops[%d]: expected UNION, got %v", i, op)
+		if op != wantOps[i] {
+			t.Errorf("ops[%d]: expected %v, got %v", i, wantOps[i], op)
 		}
 	}
-	if sels[0] != sel1 || sels[1] != sel2 || sels[2] != sel3 || sels[3] != sel4 {
-		t.Error("selects are not in expected order")
+	for i, sel := range sels {
+		if sel != wantSels[i] {
+			t.Errorf("sels[%d]: expected %p, got %p", i, wantSels[i], sel)
+		}
 	}
 }
 

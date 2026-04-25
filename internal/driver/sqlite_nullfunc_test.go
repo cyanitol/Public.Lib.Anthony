@@ -2,6 +2,7 @@
 package driver
 
 import (
+	"database/sql"
 	"testing"
 )
 
@@ -950,61 +951,48 @@ func TestSQLiteNullFunctionEdgeCases(t *testing.T) {
 	db := setupMemoryDB(t)
 	defer db.Close()
 
-	t.Run("coalesce-preserves-null-in-middle", func(t *testing.T) {
-		// Once a non-NULL value is found, remaining arguments should not be evaluated
-		result := querySingle(t, db, "SELECT coalesce(NULL, 42, NULL, 100)")
-		if !valuesEqual(result, int64(42)) {
-			t.Errorf("expected 42, got %v", result)
-		}
-	})
-
-	t.Run("nullif-type-coercion", func(t *testing.T) {
-		// This engine does not perform type coercion between text '5' and integer 5,
-		// so nullif('5', 5) treats them as different and returns '5'.
-		result := querySingle(t, db, "SELECT nullif('5', 5)")
-		if !valuesEqual(result, "5") {
-			t.Errorf("expected '5', got %v", result)
-		}
-	})
-
-	t.Run("iif-evaluates-only-selected-branch", func(t *testing.T) {
-		// The false branch should not be evaluated if condition is true
-		result := querySingle(t, db, "SELECT iif(1, 'yes', 1/0)")
-		if !valuesEqual(result, "yes") {
-			t.Errorf("expected 'yes', got %v", result)
-		}
-	})
-
-	t.Run("multiple-coalesce-same-query", func(t *testing.T) {
-		execSQL(t, db, "CREATE TABLE t1(a INTEGER, b INTEGER, c INTEGER, d INTEGER)")
-		execSQL(t, db, "INSERT INTO t1 VALUES(NULL, 2, NULL, 4)")
-
-		row := queryRow(t, db, "SELECT coalesce(a, 1), coalesce(b, 2), coalesce(c, 3), coalesce(d, 4) FROM t1")
-		want := []interface{}{int64(1), int64(2), int64(3), int64(4)}
-
-		if len(row) != len(want) {
-			t.Fatalf("expected %d values, got %d", len(want), len(row))
-		}
-
-		for i, w := range want {
-			if !valuesEqual(row[i], w) {
-				t.Errorf("column %d: expected %v, got %v", i, w, row[i])
+	for _, tc := range []struct {
+		name  string
+		query string
+		want  interface{}
+		setup []string
+	}{
+		{"coalesce-preserves-null-in-middle", "SELECT coalesce(NULL, 42, NULL, 100)", int64(42), nil},
+		{"nullif-type-coercion", "SELECT nullif('5', 5)", "5", nil},
+		{"iif-evaluates-only-selected-branch", "SELECT iif(1, 'yes', 1/0)", "yes", nil},
+		{"multiple-coalesce-same-query", "SELECT coalesce(a, 1), coalesce(b, 2), coalesce(c, 3), coalesce(d, 4) FROM t1", []interface{}{int64(1), int64(2), int64(3), int64(4)}, []string{"CREATE TABLE t1(a INTEGER, b INTEGER, c INTEGER, d INTEGER)", "INSERT INTO t1 VALUES(NULL, 2, NULL, 4)"}},
+		{"nullif-with-case-sensitive-text", "SELECT nullif('Hello', 'hello')", "Hello", nil},
+		{"ifnull-chain", "SELECT ifnull(ifnull(ifnull(NULL, NULL), NULL), 'final')", "final", nil},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			for _, stmt := range tc.setup {
+				execSQL(t, db, stmt)
 			}
-		}
-	})
+			nullFuncAssertEdgeCase(t, db, tc.query, tc.want)
+		})
+	}
+}
 
-	t.Run("nullif-with-case-sensitive-text", func(t *testing.T) {
-		// SQLite text comparison is case-sensitive by default
-		result := querySingle(t, db, "SELECT nullif('Hello', 'hello')")
-		if !valuesEqual(result, "Hello") {
-			t.Errorf("expected 'Hello', got %v", result)
+func nullFuncAssertEdgeCase(t *testing.T, db *sql.DB, query string, want interface{}) {
+	t.Helper()
+	row := queryRow(t, db, query)
+	if len(row) == 1 {
+		if !valuesEqual(row[0], want) {
+			t.Errorf("expected %v, got %v", want, row[0])
 		}
-	})
-
-	t.Run("ifnull-chain", func(t *testing.T) {
-		result := querySingle(t, db, "SELECT ifnull(ifnull(ifnull(NULL, NULL), NULL), 'final')")
-		if !valuesEqual(result, "final") {
-			t.Errorf("expected 'final', got %v", result)
+		return
+	}
+	wantRow, ok := want.([]interface{})
+	if !ok {
+		t.Fatalf("expected scalar want for %q, got %T", query, want)
+	}
+	if len(row) != len(wantRow) {
+		t.Fatalf("expected %d values, got %d", len(wantRow), len(row))
+	}
+	for i, w := range wantRow {
+		if !valuesEqual(row[i], w) {
+			t.Errorf("column %d: expected %v, got %v", i, w, row[i])
 		}
-	})
+	}
 }

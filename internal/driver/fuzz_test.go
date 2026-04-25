@@ -194,44 +194,44 @@ func FuzzPreparedStatement(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, sqlStr string, param string) {
-		// Skip extremely long inputs
-		if len(sqlStr) > 10000 || len(param) > 10000 {
-		}
-
-		// Create in-memory database
-		db, err := sql.Open(DriverName, ":memory:")
-		if err != nil {
-			t.Fatalf("failed to open database: %v", err)
-		}
-		defer db.Close()
-
-		// Should not panic
-		defer func() {
-			if r := recover(); r != nil {
-				t.Errorf("Prepared statement panicked\nSQL: %q\nParam: %q\nPanic: %v",
-					sqlStr, param, r)
-			}
-		}()
-
-		// Try to prepare and execute
-		stmt, err := db.Prepare(sqlStr)
-		if err == nil {
-			defer stmt.Close()
-
-			// Try to execute with parameter
-			rows, err := stmt.Query(param)
-			if err == nil {
-				for rows.Next() {
-					var dummy interface{}
-					_ = rows.Scan(&dummy)
-				}
-				rows.Close()
-			} else {
-				// Try as exec
-				_, _ = stmt.Exec(param)
-			}
-		}
+		fuzzRunPreparedStatement(t, sqlStr, param)
 	})
+}
+
+func fuzzRunPreparedStatement(t *testing.T, sqlStr, param string) {
+	t.Helper()
+	if len(sqlStr) > 10000 || len(param) > 10000 {
+		return
+	}
+
+	db, err := sql.Open(DriverName, ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Prepared statement panicked\nSQL: %q\nParam: %q\nPanic: %v", sqlStr, param, r)
+		}
+	}()
+
+	stmt, err := db.Prepare(sqlStr)
+	if err != nil {
+		return
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.Query(param)
+	if err == nil {
+		for rows.Next() {
+			var dummy interface{}
+			_ = rows.Scan(&dummy)
+		}
+		rows.Close()
+		return
+	}
+	_, _ = stmt.Exec(param)
 }
 
 // FuzzTransaction tests transaction operations with random SQL sequences

@@ -518,34 +518,32 @@ func TestExplainBytecode(t *testing.T) {
 		t.Fatalf("failed to create table: %v", err)
 	}
 
-	// EXPLAIN a simple SELECT
+	explainAssertBytecode(t, db)
+}
+
+func explainAssertBytecode(t *testing.T, db *sql.DB) {
+	t.Helper()
 	rows, err := db.Query("EXPLAIN SELECT * FROM test WHERE id = 42")
 	if err != nil {
 		t.Fatalf("failed to explain query: %v", err)
 	}
 	defer rows.Close()
 
-	// Verify we get bytecode columns
 	cols, err := rows.Columns()
 	if err != nil {
 		t.Fatalf("failed to get columns: %v", err)
 	}
-
-	// EXPLAIN output should have columns like addr, opcode, p1, p2, p3, p4, p5, comment
 	if len(cols) < 5 {
 		t.Errorf("expected at least 5 columns in EXPLAIN output, got %d: %v", len(cols), cols)
 	}
 
-	// Count rows (opcodes)
 	rowCount := 0
 	for rows.Next() {
 		rowCount++
 	}
-
 	if rowCount == 0 {
 		t.Error("EXPLAIN returned no opcodes")
 	}
-
 	if err := rows.Err(); err != nil {
 		t.Fatalf("error iterating rows: %v", err)
 	}

@@ -217,39 +217,11 @@ func BenchmarkDriverJoin(b *testing.B) {
 	db := setupBenchDB(b)
 	defer db.Close()
 
-	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
-	if err != nil {
-		b.Fatal(err)
-	}
-	_, err = db.Exec("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, amount REAL)")
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	// Insert test data
-	for i := 0; i < 50; i++ {
-		_, err = db.Exec("INSERT INTO users (name) VALUES (?)", "User"+string(rune(i)))
-		if err != nil {
-			b.Fatal(err)
-		}
-		_, err = db.Exec("INSERT INTO orders (user_id, amount) VALUES (?, ?)", i+1, float64(i)*10.5)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
+	benchSetupJoinData(b, db)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		rows, err := db.Query("SELECT u.name, o.amount FROM users u JOIN orders o ON u.id = o.user_id")
-		if err != nil {
-			b.Fatal(err)
-		}
-		for rows.Next() {
-			var name string
-			var amount float64
-			_ = rows.Scan(&name, &amount)
-		}
-		rows.Close()
+		benchQueryJoinRows(b, db)
 	}
 }
 
@@ -307,4 +279,36 @@ func tempFile(b *testing.B) string {
 	f.Close()
 	os.Remove(name)
 	return name
+}
+
+func benchSetupJoinData(b *testing.B, db *sql.DB) {
+	b.Helper()
+	if _, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"); err != nil {
+		b.Fatal(err)
+	}
+	if _, err := db.Exec("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, amount REAL)"); err != nil {
+		b.Fatal(err)
+	}
+	for i := 0; i < 50; i++ {
+		if _, err := db.Exec("INSERT INTO users (name) VALUES (?)", "User"+string(rune(i))); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := db.Exec("INSERT INTO orders (user_id, amount) VALUES (?, ?)", i+1, float64(i)*10.5); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func benchQueryJoinRows(b *testing.B, db *sql.DB) {
+	b.Helper()
+	rows, err := db.Query("SELECT u.name, o.amount FROM users u JOIN orders o ON u.id = o.user_id")
+	if err != nil {
+		b.Fatal(err)
+	}
+	for rows.Next() {
+		var name string
+		var amount float64
+		_ = rows.Scan(&name, &amount)
+	}
+	rows.Close()
 }

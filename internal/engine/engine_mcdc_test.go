@@ -9,14 +9,8 @@ import (
 )
 
 // helper: open a fresh in-memory-style database in a temp dir.
-func openTestDB(t *testing.T) *Engine {
-	t.Helper()
-	db, err := Open(filepath.Join(t.TempDir(), "mcdc.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
+func openMCDCDB(t *testing.T) *Engine {
+	return openEngineTestDB(t, "mcdc.db")
 }
 
 // ---------------------------------------------------------------------------
@@ -62,9 +56,9 @@ func TestMCDC_SelectFrom_NilOrEmpty(t *testing.T) {
 		},
 	}
 
-	db := openTestDB(t)
-	mustExec(t, db, `CREATE TABLE mcdc_tbl (id INTEGER)`)
-	mustExec(t, db, `INSERT INTO mcdc_tbl VALUES (7)`)
+	db := openMCDCDB(t)
+	mustEngineExec(t, db, `CREATE TABLE mcdc_tbl (id INTEGER)`)
+	mustEngineExec(t, db, `INSERT INTO mcdc_tbl VALUES (7)`)
 
 	for _, tc := range tests {
 		tc := tc
@@ -98,11 +92,11 @@ func TestMCDC_SelectFrom_NilOrEmpty(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMCDC_CollectQueryTables_JoinCondition(t *testing.T) {
-	db := openTestDB(t)
-	mustExec(t, db, `CREATE TABLE left_t  (id INTEGER, val TEXT)`)
-	mustExec(t, db, `CREATE TABLE right_t (id INTEGER, lbl TEXT)`)
-	mustExec(t, db, `INSERT INTO left_t  VALUES (1, 'a')`)
-	mustExec(t, db, `INSERT INTO right_t VALUES (1, 'x')`)
+	db := openMCDCDB(t)
+	mustEngineExec(t, db, `CREATE TABLE left_t  (id INTEGER, val TEXT)`)
+	mustEngineExec(t, db, `CREATE TABLE right_t (id INTEGER, lbl TEXT)`)
+	mustEngineExec(t, db, `INSERT INTO left_t  VALUES (1, 'a')`)
+	mustEngineExec(t, db, `INSERT INTO right_t VALUES (1, 'x')`)
 
 	tests := []struct {
 		name    string
@@ -158,11 +152,11 @@ func TestMCDC_CollectQueryTables_JoinCondition(t *testing.T) {
 
 // TestMCDC_FindTableByName_Integration exercises findTableByName paths via SQL.
 func TestMCDC_FindTableByName_Integration(t *testing.T) {
-	db := openTestDB(t)
-	mustExec(t, db, `CREATE TABLE alpha (id INTEGER, val TEXT)`)
-	mustExec(t, db, `CREATE TABLE beta  (id INTEGER, ref INTEGER)`)
-	mustExec(t, db, `INSERT INTO alpha VALUES (1, 'hello')`)
-	mustExec(t, db, `INSERT INTO beta  VALUES (1, 1)`)
+	db := openMCDCDB(t)
+	mustEngineExec(t, db, `CREATE TABLE alpha (id INTEGER, val TEXT)`)
+	mustEngineExec(t, db, `CREATE TABLE beta  (id INTEGER, ref INTEGER)`)
+	mustEngineExec(t, db, `INSERT INTO alpha VALUES (1, 'hello')`)
+	mustEngineExec(t, db, `INSERT INTO beta  VALUES (1, 1)`)
 
 	tests := []struct {
 		name    string
@@ -229,7 +223,7 @@ func TestMCDC_CompileDropTable_IfExists(t *testing.T) {
 			// case 1: A=false — table exists, drops normally
 			name: "MCDC_DropTable_A_false_tableExists",
 			setup: func(db *Engine) {
-				mustExec(t, db, `CREATE TABLE drop_me (id INTEGER)`)
+				mustEngineExec(t, db, `CREATE TABLE drop_me (id INTEGER)`)
 			},
 			sql: `DROP TABLE drop_me`,
 		},
@@ -252,7 +246,7 @@ func TestMCDC_CompileDropTable_IfExists(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			db := openTestDB(t)
+			db := openMCDCDB(t)
 			tc.setup(db)
 			_, err := db.Execute(tc.sql)
 			if tc.wantErr && err == nil {
@@ -287,8 +281,8 @@ func TestMCDC_CompileDropIndex_IfExists(t *testing.T) {
 			// case 1: A=false — index exists
 			name: "MCDC_DropIndex_A_false_indexExists",
 			setup: func(db *Engine) {
-				mustExec(t, db, `CREATE TABLE idx_tbl (id INTEGER, name TEXT)`)
-				mustExec(t, db, `CREATE INDEX idx_name ON idx_tbl (name)`)
+				mustEngineExec(t, db, `CREATE TABLE idx_tbl (id INTEGER, name TEXT)`)
+				mustEngineExec(t, db, `CREATE INDEX idx_name ON idx_tbl (name)`)
 			},
 			sql: `DROP INDEX idx_name`,
 		},
@@ -311,7 +305,7 @@ func TestMCDC_CompileDropIndex_IfExists(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			db := openTestDB(t)
+			db := openMCDCDB(t)
 			tc.setup(db)
 			_, err := db.Execute(tc.sql)
 			if tc.wantErr && err == nil {
@@ -344,7 +338,7 @@ func TestMCDC_CompileDropIndex_IfExists(t *testing.T) {
 func TestMCDC_IsNoTransaction_Tolerated(t *testing.T) {
 	// case 1 & 2 combined: no pager transaction active; pager.Commit
 	// returns ErrNoTransaction (A=true, B=true) → tolerated → nil error.
-	db := openTestDB(t)
+	db := openMCDCDB(t)
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
@@ -357,7 +351,7 @@ func TestMCDC_IsNoTransaction_Tolerated(t *testing.T) {
 func TestMCDC_IsNoTransaction_DoubleRollback(t *testing.T) {
 	// case 3: Rollback on a completed transaction (done=true) → error
 	// from the done-check, not from isNoTransaction.
-	db := openTestDB(t)
+	db := openMCDCDB(t)
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
@@ -411,8 +405,8 @@ func TestMCDC_OpenWithOptions_PageCount(t *testing.T) {
 				if err != nil {
 					t.Fatalf("initial open: %v", err)
 				}
-				mustExec(t, db, `CREATE TABLE t (id INTEGER)`)
-				mustExec(t, db, `INSERT INTO t VALUES (1)`)
+				mustEngineExec(t, db, `CREATE TABLE t (id INTEGER)`)
+				mustEngineExec(t, db, `INSERT INTO t VALUES (1)`)
 				db.Close()
 			}
 
@@ -505,9 +499,9 @@ func TestMCDC_EngineClose_TransactionGuard(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMCDC_RowsScan_LenMismatch(t *testing.T) {
-	db := openTestDB(t)
-	mustExec(t, db, `CREATE TABLE scan_tbl (a INTEGER, b TEXT)`)
-	mustExec(t, db, `INSERT INTO scan_tbl VALUES (1, 'hello')`)
+	db := openMCDCDB(t)
+	mustEngineExec(t, db, `CREATE TABLE scan_tbl (a INTEGER, b TEXT)`)
+	mustEngineExec(t, db, `INSERT INTO scan_tbl VALUES (1, 'hello')`)
 
 	tests := []struct {
 		name    string
@@ -575,9 +569,9 @@ func TestMCDC_RowsScan_LenMismatch(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMCDC_ScanInto_HandledAndError(t *testing.T) {
-	db := openTestDB(t)
-	mustExec(t, db, `CREATE TABLE scantype_tbl (n INTEGER)`)
-	mustExec(t, db, `INSERT INTO scantype_tbl VALUES (99)`)
+	db := openMCDCDB(t)
+	mustEngineExec(t, db, `CREATE TABLE scantype_tbl (n INTEGER)`)
+	mustEngineExec(t, db, `INSERT INTO scantype_tbl VALUES (99)`)
 
 	tests := []struct {
 		name    string
@@ -636,9 +630,9 @@ func TestMCDC_ScanInto_HandledAndError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMCDC_ResolveOneTableColName(t *testing.T) {
-	db := openTestDB(t)
-	mustExec(t, db, `CREATE TABLE colname_tbl (id INTEGER, name TEXT)`)
-	mustExec(t, db, `INSERT INTO colname_tbl VALUES (5, 'bob')`)
+	db := openMCDCDB(t)
+	mustEngineExec(t, db, `CREATE TABLE colname_tbl (id INTEGER, name TEXT)`)
+	mustEngineExec(t, db, `INSERT INTO colname_tbl VALUES (5, 'bob')`)
 
 	tests := []struct {
 		name       string
@@ -691,8 +685,8 @@ func TestMCDC_ResolveOneTableColName(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMCDC_TriggerExecuteStatement_BtreeGuard(t *testing.T) {
-	db := openTestDB(t)
-	mustExec(t, db, `CREATE TABLE trig_tbl (id INTEGER, val TEXT)`)
+	db := openMCDCDB(t)
+	mustEngineExec(t, db, `CREATE TABLE trig_tbl (id INTEGER, val TEXT)`)
 
 	makeCtx := func(btree interface{}) *TriggerContext {
 		return &TriggerContext{

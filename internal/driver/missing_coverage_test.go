@@ -194,6 +194,11 @@ func TestEmptyStringMemoryDatabase(t *testing.T) {
 
 // TestOrderByWithCollation tests ORDER BY with COLLATE expressions
 func TestOrderByWithCollation(t *testing.T) {
+	missingCovAssertOrderByWithCollation(t)
+}
+
+func missingCovAssertOrderByWithCollation(t *testing.T) {
+	t.Helper()
 	drv := &Driver{}
 	conn, err := drv.Open(":memory:")
 	if err != nil {
@@ -202,39 +207,29 @@ func TestOrderByWithCollation(t *testing.T) {
 	defer conn.Close()
 
 	c := conn.(*Conn)
-
 	stmt, _ := c.Prepare(`CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT COLLATE NOCASE)`)
-	_, err = stmt.Exec(nil)
-	if err != nil {
+	if _, err = stmt.Exec(nil); err != nil {
 		t.Fatalf("Failed to create table: %v", err)
 	}
 	stmt.Close()
 
-	// Insert test data
-	testData := []string{"apple", "BANANA", "cherry", "APPLE"}
-	for i, name := range testData {
+	for i, name := range []string{"apple", "BANANA", "cherry", "APPLE"} {
 		stmt, _ := c.Prepare("INSERT INTO test (id, name) VALUES (?, ?)")
-		_, err = stmt.Exec([]driver.Value{i + 1, name})
-		if err != nil {
+		if _, err = stmt.Exec([]driver.Value{i + 1, name}); err != nil {
 			t.Fatalf("Failed to insert %s: %v", name, err)
 		}
 		stmt.Close()
 	}
 
-	// Test ORDER BY with explicit COLLATE
 	stmt2, _ := c.Prepare("SELECT name FROM test ORDER BY name COLLATE NOCASE")
 	rows, err := stmt2.Query(nil)
 	if err != nil {
 		t.Fatalf("Failed to query with COLLATE: %v", err)
 	}
 
-	count := 0
 	values := make([]driver.Value, 1)
-	for {
-		err := rows.Next(values)
-		if err != nil {
-			break
-		}
+	count := 0
+	for rows.Next(values) == nil {
 		count++
 	}
 	rows.Close()

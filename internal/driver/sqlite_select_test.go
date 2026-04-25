@@ -942,15 +942,18 @@ func selectRunErrorCase(t *testing.T, db *sql.DB, setup []string, query string, 
 	t.Helper()
 	selectRunSetupStmts(t, db, setup)
 	rows, err := db.Query(query)
-	if err == nil && rows != nil {
+	if rows != nil {
 		rows.Close()
 	}
-	switch {
-	case !wantErr && err != nil:
+
+	if err != nil && !wantErr {
 		t.Fatalf("unexpected error: %v", err)
-	case wantErr && err == nil:
+	}
+	if wantErr && err == nil {
 		t.Logf("expected error containing '%s', got nil (engine accepts this)", errorMsg)
-	case wantErr && err != nil:
+		return
+	}
+	if wantErr && err != nil {
 		t.Logf("Got expected error: %v", err)
 	}
 }

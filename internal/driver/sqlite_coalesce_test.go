@@ -3,7 +3,6 @@ package driver
 
 import (
 	"database/sql"
-	"math"
 	"path/filepath"
 	"testing"
 )
@@ -643,117 +642,7 @@ func coalesceVerifyResults(t *testing.T, results, want []interface{}) {
 
 // compareValues compares two values, handling NULL, integers, floats, strings, and blobs
 func compareValues(got, want interface{}) bool {
-	// Handle NULL cases
-	if coalesceCompareNulls(got, want) {
-		return got == nil && want == nil
-	}
-	if got == nil || want == nil {
-		return false
-	}
-
-	// Handle byte slices (blobs)
-	if coalesceIsByteSlice(got) {
-		return coalesceCompareBytes(got, want)
-	}
-
-	// Handle integers (int64)
-	if coalesceIsInt64(want) {
-		return coalesceCompareInt64(got, want)
-	}
-
-	// Handle floats (float64)
-	if coalesceIsFloat64(want) {
-		return coalesceCompareFloat64(got, want)
-	}
-
-	// Handle strings
-	if coalesceIsString(want) {
-		return coalesceCompareString(got, want)
-	}
-
-	// Fallback: direct comparison
-	return got == want
-}
-
-// coalesceCompareNulls checks if both values are nil
-func coalesceCompareNulls(got, want interface{}) bool {
-	return got == nil && want == nil
-}
-
-// coalesceIsByteSlice checks if value is a byte slice
-func coalesceIsByteSlice(v interface{}) bool {
-	_, ok := v.([]byte)
-	return ok
-}
-
-// coalesceIsInt64 checks if value is int64
-func coalesceIsInt64(v interface{}) bool {
-	_, ok := v.(int64)
-	return ok
-}
-
-// coalesceIsFloat64 checks if value is float64
-func coalesceIsFloat64(v interface{}) bool {
-	_, ok := v.(float64)
-	return ok
-}
-
-// coalesceIsString checks if value is string
-func coalesceIsString(v interface{}) bool {
-	_, ok := v.(string)
-	return ok
-}
-
-// coalesceCompareBytes compares byte slices
-func coalesceCompareBytes(got, want interface{}) bool {
-	gotBytes := got.([]byte)
-	wantBytes, ok := want.([]byte)
-	if !ok {
-		return false
-	}
-	if len(gotBytes) != len(wantBytes) {
-		return false
-	}
-	for i := range gotBytes {
-		if gotBytes[i] != wantBytes[i] {
-			return false
-		}
-	}
-	return true
-}
-
-// coalesceCompareInt64 compares int64 values
-func coalesceCompareInt64(got, want interface{}) bool {
-	wantInt := want.(int64)
-	gotInt, ok := got.(int64)
-	return ok && gotInt == wantInt
-}
-
-// coalesceCompareFloat64 compares float64 values with special handling
-func coalesceCompareFloat64(got, want interface{}) bool {
-	wantFloat := want.(float64)
-	gotFloat, ok := got.(float64)
-	if !ok {
-		return false
-	}
-	// Use epsilon comparison for floats
-	if math.IsNaN(wantFloat) && math.IsNaN(gotFloat) {
-		return true
-	}
-	if math.IsInf(wantFloat, 1) && math.IsInf(gotFloat, 1) {
-		return true
-	}
-	if math.IsInf(wantFloat, -1) && math.IsInf(gotFloat, -1) {
-		return true
-	}
-	return math.Abs(gotFloat-wantFloat) < 1e-9
-}
-
-// coalesceCompareString compares string values
-func coalesceCompareString(got, want interface{}) bool {
-	wantStr := want.(string)
-	gotStr, ok := got.(string)
-	return ok && gotStr == wantStr
+	return driverValueEqual(got, want)
 }
 
 // containsSubstring checks if a string contains a substring

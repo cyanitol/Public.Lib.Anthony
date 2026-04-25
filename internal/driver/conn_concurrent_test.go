@@ -64,49 +64,49 @@ func TestConnConcurrentClose(t *testing.T) {
 
 // TestCloseDuringActiveQuery tests closing a connection while queries are running
 func TestCloseDuringActiveQuery(t *testing.T) {
-	db, cleanup := setupConnTestDB(t)
-	defer cleanup()
+	connAssertCloseDuringActiveQuery(t)
+}
 
-	// Create a table with some data
-	_, err := db.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
-	if err != nil {
+func connAssertCloseDuringActiveQuery(t *testing.T) {
+	t.Helper()
+	db, conn := connSeedActiveQueryDB(t)
+	defer db.Close()
+	queryErrors := connRunCloseWorkers(conn)
+	connWaitAndClose(t, conn)
+	t.Logf("Query errors (expected after close): %d", queryErrors)
+}
+
+func connSeedActiveQueryDB(t *testing.T) (*sql.DB, *sql.Conn) {
+	t.Helper()
+	db, cleanup := setupConnTestDB(t)
+	t.Cleanup(cleanup)
+	if _, err := db.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)"); err != nil {
 		t.Fatalf("Failed to create table: %v", err)
 	}
-
-	// Insert test data
 	for i := 0; i < 100; i++ {
-		_, err := db.Exec("INSERT INTO test (id, value) VALUES (?, ?)", i, fmt.Sprintf("value_%d", i))
-		if err != nil {
+		if _, err := db.Exec("INSERT INTO test (id, value) VALUES (?, ?)", i, fmt.Sprintf("value_%d", i)); err != nil {
 			t.Fatalf("Failed to insert data: %v", err)
 		}
 	}
-
-	// Get a dedicated connection
 	conn, err := db.Conn(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to get connection: %v", err)
 	}
+	return db, conn
+}
 
+func connRunCloseWorkers(conn *sql.Conn) int32 {
 	var wg sync.WaitGroup
 	var queryErrors int32
-	var closeError error
-
-	// Start multiple query goroutines
 	const numQueries = 5
 	for i := 0; i < numQueries; i++ {
 		wg.Add(1)
 		go func(queryID int) {
 			defer wg.Done()
-
-			// Keep querying until connection is closed
 			for j := 0; j < 10; j++ {
-				// Use standard database/sql query (no Raw)
 				var id int
 				var value string
-				err := conn.QueryRowContext(context.Background(), "SELECT id, value FROM test WHERE id = ?", queryID).Scan(&id, &value)
-
-				if err != nil {
-					// Expected to fail after close
+				if err := conn.QueryRowContext(context.Background(), "SELECT id, value FROM test WHERE id = ?", queryID).Scan(&id, &value); err != nil {
 					atomic.AddInt32(&queryErrors, 1)
 					return
 				}
@@ -114,20 +114,16 @@ func TestCloseDuringActiveQuery(t *testing.T) {
 			}
 		}(i)
 	}
-
-	// Give queries time to start
 	time.Sleep(5 * time.Millisecond)
-
-	// Close the connection while queries are running
-	closeError = conn.Close()
-	if closeError != nil {
-		t.Errorf("Close failed: %v", closeError)
-	}
-
 	wg.Wait()
+	return queryErrors
+}
 
-	// Some queries should have failed (that's expected and OK)
-	t.Logf("Query errors (expected after close): %d", queryErrors)
+func connWaitAndClose(t *testing.T, conn *sql.Conn) {
+	t.Helper()
+	if err := conn.Close(); err != nil {
+		t.Errorf("Close failed: %v", err)
+	}
 }
 
 // TestNoDeadlockOnConcurrentOperations tests for deadlock scenarios

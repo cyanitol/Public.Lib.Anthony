@@ -143,6 +143,39 @@ T5: Assertion helper consolidation (~300 lines saved)
     Repeated patterns: iterate rows, scan into variables, compare with expected.
   Action: Create compareQueryResults(t, db, query, expected [][]interface{}) helper.
 
+HIGH PRIORITY REPO-WIDE AUDIT FINDINGS (2026-04-25)
+===================================================
+
+R1: Engine test DB/bootstrap helper duplication
+  Scope: internal/engine/*_test.go
+  Pattern: repeated `Open(tempdir+"/test.db")`, close/cleanup wiring, and `Execute` wrappers
+  Risk: low
+  Action: centralize file-backed engine-open + execute/assert helpers in shared engine test helper(s)
+
+R2: SQL-driver-backed test DB setup duplication outside driver package
+  Scope: internal/functions/*_test.go, internal/testing/slt/*_test.go, internal/pager/*_test.go, cmd/anthony/*_test.go
+  Pattern: repeated `sql.Open("sqlite_internal", ":memory:"|tempfile)` plus cleanup and tiny query helpers
+  Risk: low
+  Action: add package-local shared helpers to collapse repeated open/query-one/assert patterns
+
+R3: Pager coverage test data/setup duplication
+  Scope: internal/pager/freelist_coverage_test.go and neighboring pager coverage tests
+  Pattern: repeated payload creation, row insertion loops, count/freelist query helpers
+  Risk: low
+  Action: extract scenario helpers for repeated population/delete/reinsert flows
+
+R4: Command-layer test harness duplication
+  Scope: cmd/anthony/main_test.go and similar CLI tests
+  Pattern: repeated DB open, stdout capture, statement execution wrappers
+  Risk: low
+  Action: centralize stdout/db harness helpers and reuse them across CLI tests
+
+R5: Generated/shared test helper coverage beyond driver package
+  Scope: repo-wide test support
+  Pattern: one-off helper files now exist, but only internal/driver has a generator-backed shared helper
+  Risk: medium
+  Action: evaluate and introduce targeted generator/shared-helper support where repeated test boilerplate is stable enough to justify it
+
 PRIORITY ORDER
 ==============
 DONE:   Steps 1-4, 8-13, 17-22 (~650 lines saved/refactored)

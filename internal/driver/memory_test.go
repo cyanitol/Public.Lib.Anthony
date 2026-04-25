@@ -132,45 +132,48 @@ func TestMemoryDatabaseTransaction(t *testing.T) {
 }
 
 func TestMemoryDatabaseUpdate(t *testing.T) {
+	memoryAssertUpdate(t)
+}
+
+func memoryAssertUpdate(t *testing.T) {
+	t.Helper()
 	db, err := sql.Open(DriverName, ":memory:")
 	if err != nil {
 		t.Fatalf("failed to open memory database: %v", err)
 	}
 	defer db.Close()
 
-	// Create and populate table
-	_, err = db.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
-	if err != nil {
+	memorySeedUpdate(t, db)
+	memoryAssertUpdatedValue(t, db)
+}
+
+func memorySeedUpdate(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)"); err != nil {
 		t.Fatalf("failed to create table: %v", err)
 	}
-
-	_, err = db.Exec("INSERT INTO test (value) VALUES ('old')")
-	if err != nil {
+	if _, err := db.Exec("INSERT INTO test (value) VALUES ('old')"); err != nil {
 		t.Fatalf("failed to insert data: %v", err)
 	}
+}
 
-	// Update
+func memoryAssertUpdatedValue(t *testing.T, db *sql.DB) {
+	t.Helper()
 	result, err := db.Exec("UPDATE test SET value = 'new' WHERE id = 1")
 	if err != nil {
 		t.Fatalf("failed to update: %v", err)
 	}
-
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		t.Fatalf("failed to get rows affected: %v", err)
 	}
-
 	if rowsAffected != 1 {
 		t.Errorf("got %d rows affected, want 1", rowsAffected)
 	}
-
-	// Verify update
 	var value string
-	err = db.QueryRow("SELECT value FROM test WHERE id = 1").Scan(&value)
-	if err != nil {
+	if err := db.QueryRow("SELECT value FROM test WHERE id = 1").Scan(&value); err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
-
 	if value != "new" {
 		t.Errorf("got value %q, want %q", value, "new")
 	}

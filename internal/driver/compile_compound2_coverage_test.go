@@ -60,6 +60,27 @@ func queryCC2(t *testing.T, db *sql.DB, q string) [][]interface{} {
 	return result
 }
 
+func cc2AssertRowCount(t *testing.T, rows [][]interface{}, want int) {
+	t.Helper()
+	if len(rows) != want {
+		t.Fatalf("want %d rows, got %d", want, len(rows))
+	}
+}
+
+func cc2AssertNilCell(t *testing.T, rows [][]interface{}, row, col int) {
+	t.Helper()
+	if rows[row][col] != nil {
+		t.Errorf("want nil at row %d col %d, got %v", row, col, rows[row][col])
+	}
+}
+
+func cc2AssertNonNilCell(t *testing.T, rows [][]interface{}, row, col int) {
+	t.Helper()
+	if rows[row][col] == nil {
+		t.Errorf("want non-nil at row %d col %d, got nil", row, col)
+	}
+}
+
 // TestCompileCompound2NullDedup exercises the rowKey nil branch (line 211).
 // UNION deduplicates rows; when a row contains NULL, rowKey must handle nil values.
 func TestCompileCompound2NullDedup(t *testing.T) {
@@ -71,12 +92,8 @@ func TestCompileCompound2NullDedup(t *testing.T) {
 		// Two SELECTs returning NULL; UNION deduplicates via rowKey.
 		// rowKey is called with a row containing nil, hitting the nil branch.
 		rows := queryCC2(t, db, "SELECT NULL UNION SELECT NULL")
-		if len(rows) != 1 {
-			t.Fatalf("want 1 row after NULL dedup, got %d", len(rows))
-		}
-		if rows[0][0] != nil {
-			t.Errorf("want nil, got %v", rows[0][0])
-		}
+		cc2AssertRowCount(t, rows, 1)
+		cc2AssertNilCell(t, rows, 0, 0)
 	})
 
 	t.Run("union_dedup_mixed_null_and_int", func(t *testing.T) {
@@ -101,16 +118,9 @@ func TestCompileCompound2NullNullOrdering(t *testing.T) {
 		// UNION ALL with multiple NULLs then ORDER BY: compareCompoundNull is
 		// called with both values nil, returning (0, true) and continuing.
 		rows := queryCC2(t, db, "SELECT NULL UNION ALL SELECT NULL UNION ALL SELECT 1 ORDER BY 1")
-		if len(rows) != 3 {
-			t.Fatalf("want 3 rows, got %d", len(rows))
-		}
-		// NULLs sort first in ASC (default SQLite behavior)
-		if rows[0][0] != nil {
-			t.Errorf("want nil first, got %v", rows[0][0])
-		}
-		if rows[1][0] != nil {
-			t.Errorf("want nil second, got %v", rows[1][0])
-		}
+		cc2AssertRowCount(t, rows, 3)
+		cc2AssertNilCell(t, rows, 0, 0)
+		cc2AssertNilCell(t, rows, 1, 0)
 	})
 
 	t.Run("null_null_order_desc", func(t *testing.T) {
@@ -120,16 +130,9 @@ func TestCompileCompound2NullNullOrdering(t *testing.T) {
 		// Also exercises a==nil with nf=false (DESC -> nullsFirst=false) at line 394.
 		rows := queryCC2(t, db,
 			"SELECT NULL UNION ALL SELECT NULL UNION ALL SELECT 5 ORDER BY 1 DESC")
-		if len(rows) != 3 {
-			t.Fatalf("want 3 rows, got %d", len(rows))
-		}
-		// DESC: non-null (5) comes first, NULLs last
-		if rows[0][0] == nil {
-			t.Errorf("want non-nil first in DESC, got nil")
-		}
-		if rows[2][0] != nil {
-			t.Errorf("want nil last in DESC, got %v", rows[2][0])
-		}
+		cc2AssertRowCount(t, rows, 3)
+		cc2AssertNonNilCell(t, rows, 0, 0)
+		cc2AssertNilCell(t, rows, 2, 0)
 	})
 
 	t.Run("null_last_explicit_nulls_last", func(t *testing.T) {
@@ -139,13 +142,8 @@ func TestCompileCompound2NullNullOrdering(t *testing.T) {
 		// This hits the a==nil && !nf branch at line 394.
 		rows := queryCC2(t, db,
 			"SELECT NULL UNION ALL SELECT 3 UNION ALL SELECT 1 ORDER BY 1 ASC NULLS LAST")
-		if len(rows) != 3 {
-			t.Fatalf("want 3 rows, got %d", len(rows))
-		}
-		// NULLS LAST: integers first, then NULL
-		if rows[len(rows)-1][0] != nil {
-			t.Errorf("want nil last with NULLS LAST, got %v", rows[len(rows)-1][0])
-		}
+		cc2AssertRowCount(t, rows, 3)
+		cc2AssertNilCell(t, rows, 2, 0)
 	})
 
 	t.Run("null_first_explicit_nulls_first_desc", func(t *testing.T) {
@@ -155,13 +153,8 @@ func TestCompileCompound2NullNullOrdering(t *testing.T) {
 		// This exercises the b==nil && nf branch at line 401.
 		rows := queryCC2(t, db,
 			"SELECT 10 UNION ALL SELECT NULL UNION ALL SELECT 5 ORDER BY 1 DESC NULLS FIRST")
-		if len(rows) != 3 {
-			t.Fatalf("want 3 rows, got %d", len(rows))
-		}
-		// NULLS FIRST with DESC: NULL first, then 10, then 5
-		if rows[0][0] != nil {
-			t.Errorf("want nil first with NULLS FIRST, got %v", rows[0][0])
-		}
+		cc2AssertRowCount(t, rows, 3)
+		cc2AssertNilCell(t, rows, 0, 0)
 	})
 }
 

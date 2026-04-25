@@ -48,27 +48,24 @@ func TestConvertValue(t *testing.T) {
 				t.Errorf("ConvertValue() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !tt.wantErr {
-				// For time.Time, just check it's not nil
-				if _, ok := tt.input.(time.Time); ok {
-					if result == nil {
-						t.Errorf("ConvertValue() = nil, want time.Time")
-					}
-					return
-				}
-				// For byte slices, use DeepEqual
-				if reflect.TypeOf(result) == reflect.TypeOf([]byte{}) {
-					if !reflect.DeepEqual(result, tt.expected) {
-						t.Errorf("ConvertValue() = %v, want %v", result, tt.expected)
-					}
-					return
-				}
-				// For other types
-				if result != tt.expected {
-					t.Errorf("ConvertValue() = %v, want %v", result, tt.expected)
-				}
-			}
+			assertConvertedValue(t, tt.input, result, tt.expected, tt.wantErr)
 		})
+	}
+}
+
+func assertConvertedValue(t *testing.T, input, result, expected interface{}, wantErr bool) {
+	t.Helper()
+	if wantErr {
+		return
+	}
+	if _, ok := input.(time.Time); ok {
+		if result == nil {
+			t.Errorf("ConvertValue() = nil, want time.Time")
+		}
+		return
+	}
+	if !reflect.DeepEqual(result, expected) {
+		t.Errorf("ConvertValue() = %v, want %v", result, expected)
 	}
 }
 

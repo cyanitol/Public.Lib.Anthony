@@ -70,6 +70,11 @@ func TestCountWithPreparedStatement(t *testing.T) {
 
 // TestCountWithParameters tests COUNT with WHERE clause using parameters
 func TestCountWithParameters(t *testing.T) {
+	countAssertParameters(t)
+}
+
+func countAssertParameters(t *testing.T) {
+	t.Helper()
 	dbFile := t.TempDir() + "/test_count_params.db"
 
 	db, err := sql.Open(DriverName, dbFile)
@@ -78,46 +83,20 @@ func TestCountWithParameters(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create and populate table
-	_, err = db.Exec("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, price INTEGER)")
-	if err != nil {
+	if _, err = db.Exec("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, price INTEGER)"); err != nil {
 		t.Fatalf("failed to create table: %v", err)
 	}
-
-	_, err = db.Exec("INSERT INTO products (id, name, price) VALUES (1, 'Widget', 10)")
-	if err != nil {
-		t.Fatalf("failed to insert row 1: %v", err)
+	for _, row := range []struct {
+		id    int
+		name  string
+		price int
+	}{{1, "Widget", 10}, {2, "Gadget", 20}, {3, "Doohickey", 15}} {
+		if _, err = db.Exec("INSERT INTO products (id, name, price) VALUES (?, ?, ?)", row.id, row.name, row.price); err != nil {
+			t.Fatalf("failed to insert row %d: %v", row.id, err)
+		}
 	}
 
-	_, err = db.Exec("INSERT INTO products (id, name, price) VALUES (2, 'Gadget', 20)")
-	if err != nil {
-		t.Fatalf("failed to insert row 2: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO products (id, name, price) VALUES (3, 'Doohickey', 15)")
-	if err != nil {
-		t.Fatalf("failed to insert row 3: %v", err)
-	}
-
-	// Test COUNT with WHERE clause - note: WHERE is not yet implemented in this simplified version
-	// This test is here for future validation
-	t.Run("COUNT(*) total", func(t *testing.T) {
-		stmt, err := db.Prepare("SELECT COUNT(*) FROM products")
-		if err != nil {
-			t.Fatalf("failed to prepare statement: %v", err)
-		}
-		defer stmt.Close()
-
-		var count int
-		err = stmt.QueryRow().Scan(&count)
-		if err != nil {
-			t.Fatalf("failed to query: %v", err)
-		}
-
-		if count != 3 {
-			t.Errorf("COUNT(*) = %d, want 3", count)
-		}
-	})
+	countPreparedScanCount(t, db, "SELECT COUNT(*) FROM products", 3, "COUNT(*)")
 }
 
 // TestMultipleAggregates tests multiple aggregate functions in one query

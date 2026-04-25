@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+
+	"github.com/cyanitol/Public.Lib.Anthony/internal/schema"
 )
 
 // attachRegistryCreateAttachedDB creates and populates the database to be attached.
@@ -66,15 +68,23 @@ func attachRegistryOpenAndAttach(t *testing.T, mainPath, attachPath string) *Con
 func attachRegistryEnsureSchemaLoaded(t *testing.T, c *Conn) (int, int) {
 	t.Helper()
 	attachedDB, _ := c.dbRegistry.GetDatabase("two")
+	return attachRegistrySchemaStats(t, attachedDB)
+}
+
+func attachRegistrySchemaStats(t *testing.T, attachedDB *schema.Database) (int, int) {
+	t.Helper()
 	attachedTables := 0
 	pageCount := 0
-	if attachedDB != nil && attachedDB.Schema != nil {
+	if attachedDB == nil {
+		return attachedTables, pageCount
+	}
+	if attachedDB.Schema != nil {
 		attachedTables = len(attachedDB.Schema.Tables)
 	}
-	if attachedDB != nil && attachedDB.Pager != nil {
+	if attachedDB.Pager != nil {
 		pageCount = int(attachedDB.Pager.PageCount())
 	}
-	if attachedDB != nil && attachedDB.Schema != nil && attachedDB.Btree != nil {
+	if attachedDB.Schema != nil && attachedDB.Btree != nil {
 		if err := attachedDB.Schema.LoadFromMaster(attachedDB.Btree); err != nil {
 			t.Fatalf("failed to load schema from attached database: %v", err)
 		}

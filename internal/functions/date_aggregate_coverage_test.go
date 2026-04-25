@@ -2,35 +2,9 @@
 package functions_test
 
 import (
-	"database/sql"
 	"strings"
 	"testing"
 )
-
-// queryStringArg is like queryOneString but accepts a single bound argument.
-func queryStringArg(t *testing.T, db *sql.DB, query string, arg interface{}) (string, bool) {
-	t.Helper()
-	row := db.QueryRow(query, arg)
-	var s sql.NullString
-	if err := row.Scan(&s); err != nil {
-		t.Fatalf("queryStringArg(%q): %v", query, err)
-	}
-	if !s.Valid {
-		return "", true
-	}
-	return s.String, false
-}
-
-// queryFloat scans a single float64 column.
-func queryFloat(t *testing.T, db *sql.DB, query string) float64 {
-	t.Helper()
-	row := db.QueryRow(query)
-	var f float64
-	if err := row.Scan(&f); err != nil {
-		t.Fatalf("queryFloat(%q): %v", query, err)
-	}
-	return f
-}
 
 // TestDateAggregate_ApplyWeekdayAlreadyOnDay covers applyWeekday when the
 // current day equals the target — daysToAdd==0 branch (line 546-548).
@@ -89,7 +63,7 @@ func TestDateAggregate_WeekdayAllDays(t *testing.T) {
 
 	for d := 0; d <= 6; d++ {
 		mod := "weekday " + string(rune('0'+d))
-		got, isNull := queryStringArg(t, db, `SELECT date('now', ?)`, mod)
+		got, isNull := queryOneString(t, db, `SELECT date('now', ?)`, mod)
 		if isNull {
 			t.Errorf("date('now', %q) returned NULL", mod)
 			continue
@@ -101,27 +75,13 @@ func TestDateAggregate_WeekdayAllDays(t *testing.T) {
 	}
 }
 
-// TestDateAggregate_HandleDateArithmeticMultipleModifiers covers
-// handleDateArithmetic with consecutive modifiers of different unit types.
-// assertDateQueryResult checks that sqlStr returns the expected non-NULL string value.
-func assertDateQueryResult(t *testing.T, db *sql.DB, sqlStr, want string) {
-	t.Helper()
-	got, isNull := queryOneString(t, db, sqlStr)
-	if isNull {
-		t.Fatalf("%s returned NULL", sqlStr)
-	}
-	if got != want {
-		t.Errorf("%s = %q, want %q", sqlStr, got, want)
-	}
-}
-
 func TestDateAggregate_HandleDateArithmeticMultipleModifiers(t *testing.T) {
 	db := openTestDB(t)
 
-	assertDateQueryResult(t, db, `SELECT date('2024-01-01', '+1 month', '-3 days')`, "2024-01-29")
-	assertDateQueryResult(t, db, `SELECT date('2022-03-15', '+2 years')`, "2024-03-15")
-	assertDateQueryResult(t, db, `SELECT date('2024-03-01', '-3 months')`, "2023-12-01")
-	assertDateQueryResult(t, db, `SELECT date('2024-01-01', '+48 hours')`, "2024-01-03")
+	assertDateQuery(t, db, `SELECT date('2024-01-01', '+1 month', '-3 days')`, "2024-01-29")
+	assertDateQuery(t, db, `SELECT date('2022-03-15', '+2 years')`, "2024-03-15")
+	assertDateQuery(t, db, `SELECT date('2024-03-01', '-3 months')`, "2023-12-01")
+	assertDateQuery(t, db, `SELECT date('2024-01-01', '+48 hours')`, "2024-01-03")
 }
 
 // TestDateAggregate_HandleDateArithmeticMinutes covers the 'minutes' unit.

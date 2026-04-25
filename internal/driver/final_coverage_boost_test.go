@@ -337,26 +337,40 @@ func TestSelectStarFromMultipleTables(t *testing.T) {
 
 // TestParameterizedQueries tests various parameter binding scenarios
 func TestParameterizedQueries(t *testing.T) {
+	paramAssertQueryReuse(t)
+}
+
+func paramAssertQueryReuse(t *testing.T) {
+	t.Helper()
+	db, cleanup := paramVariedDB(t)
+	defer cleanup()
+	paramVariedSeed(t, db)
+	paramVariedVerify(t, db)
+}
+
+func paramVariedDB(t *testing.T) (*sql.DB, func()) {
+	t.Helper()
 	dbFile := t.TempDir() + "/test_params_varied.db"
 
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer db.Close()
+	return db, func() { db.Close() }
+}
 
-	_, err = db.Exec("CREATE TABLE param_varied (id INTEGER, text_val TEXT, int_val INTEGER)")
-	if err != nil {
+func paramVariedSeed(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec("CREATE TABLE param_varied (id INTEGER, text_val TEXT, int_val INTEGER)"); err != nil {
 		t.Fatalf("CREATE TABLE failed: %v", err)
 	}
-
-	// Test with multiple parameter types
-	_, err = db.Exec("INSERT INTO param_varied VALUES (?, ?, ?)", 1, "test", 100)
-	if err != nil {
+	if _, err := db.Exec("INSERT INTO param_varied VALUES (?, ?, ?)", 1, "test", 100); err != nil {
 		t.Errorf("INSERT with mixed params failed: %v", err)
 	}
+}
 
-	// Test prepared statement reuse
+func paramVariedVerify(t *testing.T, db *sql.DB) {
+	t.Helper()
 	stmt, err := db.Prepare("INSERT INTO param_varied VALUES (?, ?, ?)")
 	if err != nil {
 		t.Fatalf("Prepare failed: %v", err)
@@ -364,16 +378,13 @@ func TestParameterizedQueries(t *testing.T) {
 	defer stmt.Close()
 
 	for i := 2; i <= 5; i++ {
-		_, err = stmt.Exec(i, "text", i*10)
-		if err != nil {
+		if _, err := stmt.Exec(i, "text", i*10); err != nil {
 			t.Errorf("Prepared statement Exec %d failed: %v", i, err)
 		}
 	}
 
-	// Verify
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM param_varied").Scan(&count)
-	if err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM param_varied").Scan(&count); err != nil {
 		t.Errorf("COUNT failed: %v", err)
 	}
 	if count != 5 {

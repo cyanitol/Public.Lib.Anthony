@@ -180,7 +180,7 @@ func TestSQLiteExpressions(t *testing.T) {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			exprTestSetup(t, db, tt.setup)
-			exprTestEval(t, db, tt.expr, tt.want, tt.wantErr)
+			exprAssertResult(t, db, tt.expr, tt.want, tt.wantErr)
 		})
 	}
 }
@@ -197,29 +197,24 @@ func exprTestSetup(t *testing.T, db *sql.DB, setup string) {
 }
 
 // exprTestEval evaluates an expression and compares the result.
-func exprTestEval(t *testing.T, db *sql.DB, expr string, want interface{}, wantErr bool) {
+func exprAssertResult(t *testing.T, db *sql.DB, expr string, want interface{}, wantErr bool) {
 	t.Helper()
 	query := "SELECT " + expr + " FROM test1"
-	var result interface{}
-	err := db.QueryRow(query).Scan(&result)
-
 	if wantErr {
-		if err == nil {
-			t.Errorf("expected error, got none")
-		}
+		exprAssertError(t, db, query)
 		return
 	}
-	if err != nil {
-		if want == nil && err == sql.ErrNoRows {
-			return
-		}
-		t.Fatalf("query failed: %v (query: %s)", err, query)
-	}
-	if result == nil && want == nil {
-		return
-	}
+	result := querySingle(t, db, query)
 	if !compareExprValues(result, want) {
 		t.Errorf("expr = %q\ngot  = %v (type %T)\nwant = %v (type %T)", expr, result, result, want, want)
+	}
+}
+
+func exprAssertError(t *testing.T, db *sql.DB, query string) {
+	t.Helper()
+	var result interface{}
+	if err := db.QueryRow(query).Scan(&result); err == nil {
+		t.Errorf("expected error, got none")
 	}
 }
 

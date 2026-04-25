@@ -72,18 +72,22 @@ func cdccRows(t *testing.T, db *sql.DB, q string, args ...interface{}) []string 
 		if err := rows.Scan(ptrs...); err != nil {
 			t.Fatalf("cdccRows scan: %v", err)
 		}
-		if vals[0] == nil {
-			out = append(out, "NULL")
-		} else if b, ok := vals[0].([]byte); ok {
-			out = append(out, string(b))
-		} else {
-			out = append(out, fmt.Sprintf("%v", vals[0]))
-		}
+		out = append(out, cdccFirstColumnString(vals[0]))
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("cdccRows err: %v", err)
 	}
 	return out
+}
+
+func cdccFirstColumnString(v interface{}) string {
+	if v == nil {
+		return "NULL"
+	}
+	if b, ok := v.([]byte); ok {
+		return string(b)
+	}
+	return fmt.Sprintf("%v", v)
 }
 
 // TestCompileDMLCTECoverage is the top-level test function that exercises all

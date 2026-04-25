@@ -8,6 +8,46 @@ import (
 	"testing"
 )
 
+func advancedMustExec(t *testing.T, db *sql.DB, query string, args ...interface{}) sql.Result {
+	t.Helper()
+	result, err := db.Exec(query, args...)
+	if err != nil {
+		t.Fatalf("exec %q: %v", query, err)
+	}
+	return result
+}
+
+func advancedMustQueryInt(t *testing.T, db *sql.DB, query string) int {
+	t.Helper()
+	var value int
+	if err := db.QueryRow(query).Scan(&value); err != nil {
+		t.Fatalf("query %q: %v", query, err)
+	}
+	return value
+}
+
+func advancedAssertRowsAffected(t *testing.T, result sql.Result, want int64) {
+	t.Helper()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		t.Fatalf("rows affected: %v", err)
+	}
+	if rows != want {
+		t.Errorf("rowsAffected = %d, want %d", rows, want)
+	}
+}
+
+func advancedAssertLastInsertID(t *testing.T, result sql.Result, want int64) {
+	t.Helper()
+	lastID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("last insert id: %v", err)
+	}
+	if lastID != want {
+		t.Errorf("lastInsertId = %d, want %d", lastID, want)
+	}
+}
+
 // TestTxCommit tests Tx.Commit with 71.4% coverage
 func TestTxCommitSuccess(t *testing.T) {
 	db, err := sql.Open(DriverName, ":memory:")
@@ -497,38 +537,15 @@ func TestComplexUpdate(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec("CREATE TABLE test (id INTEGER, value INTEGER, name TEXT)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO test VALUES (1, 10, 'a'), (2, 20, 'b'), (3, 30, 'c')")
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
+	advancedMustExec(t, db, "CREATE TABLE test (id INTEGER, value INTEGER, name TEXT)")
+	advancedMustExec(t, db, "INSERT INTO test VALUES (1, 10, 'a'), (2, 20, 'b'), (3, 30, 'c')")
 
 	// Update with complex WHERE clause
-	result, err := db.Exec("UPDATE test SET value = value + 5 WHERE id > 1")
-	if err != nil {
-		t.Fatalf("failed to update: %v", err)
-	}
-
-	rows, err := result.RowsAffected()
-	if err != nil {
-		t.Fatalf("failed to get rows affected: %v", err)
-	}
-
-	if rows != 2 {
-		t.Errorf("rowsAffected = %d, want 2", rows)
-	}
+	result := advancedMustExec(t, db, "UPDATE test SET value = value + 5 WHERE id > 1")
+	advancedAssertRowsAffected(t, result, 2)
 
 	// Verify update
-	var value int
-	err = db.QueryRow("SELECT value FROM test WHERE id = 2").Scan(&value)
-	if err != nil {
-		t.Fatalf("failed to query: %v", err)
-	}
-
+	value := advancedMustQueryInt(t, db, "SELECT value FROM test WHERE id = 2")
 	if value != 25 {
 		t.Errorf("value = %d, want 25", value)
 	}
@@ -542,38 +559,18 @@ func TestInsertWithExplicitRowidValue(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, data TEXT)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
+	advancedMustExec(t, db, "CREATE TABLE test (id INTEGER PRIMARY KEY, data TEXT)")
 
 	// Insert with explicit primary key
-	result, err := db.Exec("INSERT INTO test (id, data) VALUES (100, 'test')")
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
+	result := advancedMustExec(t, db, "INSERT INTO test (id, data) VALUES (100, 'test')")
+	advancedAssertLastInsertID(t, result, 100)
 
+	// Insert without explicit id
+	result = advancedMustExec(t, db, "INSERT INTO test (data) VALUES ('auto')")
 	lastID, err := result.LastInsertId()
 	if err != nil {
 		t.Fatalf("failed to get last insert id: %v", err)
 	}
-
-	if lastID != 100 {
-		t.Errorf("lastInsertId = %d, want 100", lastID)
-	}
-
-	// Insert without explicit id
-	result, err = db.Exec("INSERT INTO test (data) VALUES ('auto')")
-	if err != nil {
-		t.Fatalf("failed to insert auto: %v", err)
-	}
-
-	lastID, err = result.LastInsertId()
-	if err != nil {
-		t.Fatalf("failed to get last insert id: %v", err)
-	}
-
-	// Should be auto-incremented
 	if lastID <= 100 {
 		t.Errorf("auto lastInsertId = %d, should be > 100", lastID)
 	}

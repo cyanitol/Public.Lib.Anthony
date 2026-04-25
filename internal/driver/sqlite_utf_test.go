@@ -344,26 +344,8 @@ func TestSQLiteUTFWithTable(t *testing.T) {
 		t.Fatalf("failed to create table: %v", err)
 	}
 
-	// Insert test data
-	testData := []struct {
-		text string
-		val  int
-	}{
-		{"hello", 1},
-		{"world", 2},
-		{"café", 3},
-		{"日本語", 4},
-		{"", 5},
-	}
-
-	for _, td := range testData {
-		_, err = db.Exec("INSERT INTO utf_test(text, val) VALUES(?, ?)", td.text, td.val)
-		if err != nil {
-			t.Fatalf("failed to insert test data: %v", err)
-		}
-	}
-
-	tests := []struct {
+	utfInsertTestData(t, db)
+	utfRunTableTests(t, db, []struct {
 		name  string
 		query string
 		want  interface{}
@@ -393,22 +375,43 @@ func TestSQLiteUTFWithTable(t *testing.T) {
 			query: "SELECT upper(text) FROM utf_test WHERE val = 1",
 			want:  "HELLO",
 		},
-	}
+	})
+}
 
+func utfInsertTestData(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for _, td := range []struct {
+		text string
+		val  int
+	}{
+		{"hello", 1},
+		{"world", 2},
+		{"café", 3},
+		{"日本語", 4},
+		{"", 5},
+	} {
+		if _, err := db.Exec("INSERT INTO utf_test(text, val) VALUES(?, ?)", td.text, td.val); err != nil {
+			t.Fatalf("failed to insert test data: %v", err)
+		}
+	}
+}
+
+func utfRunTableTests(t *testing.T, db *sql.DB, tests []struct {
+	name  string
+	query string
+	want  interface{}
+}) {
+	t.Helper()
 	for _, tt := range tests {
-		tt := tt // Capture range variable
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			var result interface{}
-			err := db.QueryRow(tt.query).Scan(&result)
-			if err != nil {
+			if err := db.QueryRow(tt.query).Scan(&result); err != nil {
 				t.Fatalf("query failed: %v", err)
 			}
-
-			// Convert byte arrays to strings for comparison
 			if b, ok := result.([]byte); ok {
 				result = string(b)
 			}
-
 			if result != tt.want {
 				t.Errorf("got %v (%T), want %v (%T)", result, result, tt.want, tt.want)
 			}

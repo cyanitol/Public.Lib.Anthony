@@ -385,89 +385,104 @@ func TestMCDC_Stmt_CompileUseCache(t *testing.T) {
 func TestMCDC_Stmt_CacheVdbeIfAppropriate(t *testing.T) {
 	t.Parallel()
 
-	t.Run("A=T B=T C=T D=T E=T: SELECT cached", func(t *testing.T) {
-		t.Parallel()
-		db := openMCDCDB(t)
-		mustExec(t, db, "CREATE TABLE cv1(id INTEGER); INSERT INTO cv1 VALUES(1)")
-		// Run the same SELECT twice; second run exercises the cache hit path
-		rows, err := db.Query("SELECT id FROM cv1")
-		if err != nil {
-			t.Fatalf("query: %v", err)
-		}
-		rows.Close()
-		rows, err = db.Query("SELECT id FROM cv1")
-		if err != nil {
-			t.Fatalf("query 2: %v", err)
-		}
-		rows.Close()
+	runStmtMCDCCacheCases(t, []stmtMCDCCacheCase{
+		{
+			name: "A=T B=T C=T D=T E=T: SELECT cached",
+			run: func(t *testing.T) {
+				t.Parallel()
+				db := openMCDCDB(t)
+				mustExec(t, db, "CREATE TABLE cv1(id INTEGER); INSERT INTO cv1 VALUES(1)")
+				// Run the same SELECT twice; second run exercises the cache hit path
+				mcdcQueryAndClose(t, db, "SELECT id FROM cv1")
+				mcdcQueryAndClose(t, db, "SELECT id FROM cv1")
+			},
+		},
+		{
+			name: "Flip A=F: bind param skips caching",
+			run: func(t *testing.T) {
+				t.Parallel()
+				db := openMCDCDB(t)
+				mustExec(t, db, "CREATE TABLE cv2(id INTEGER); INSERT INTO cv2 VALUES(2)")
+				mcdcQueryAndClose(t, db, "SELECT id FROM cv2 WHERE id=?", 2)
+			},
+		},
+		{
+			name: "Flip B=F: no cache configured",
+			run: func(t *testing.T) {
+				t.Parallel()
+				dbFile := t.TempDir() + "/cv_nocache.db"
+				db, err := sql.Open(DriverName, dbFile+"?stmt_cache_size=0")
+				if err != nil {
+					t.Fatalf("open: %v", err)
+				}
+				t.Cleanup(func() { db.Close() })
+				mustExec(t, db, "CREATE TABLE cv3(id INTEGER); INSERT INTO cv3 VALUES(3)")
+				mcdcQueryAndClose(t, db, "SELECT id FROM cv3")
+			},
+		},
+		{
+			name: "Flip D=F: DDL not cacheable",
+			run: func(t *testing.T) {
+				t.Parallel()
+				db := openMCDCDB(t)
+				// DDL sets isCacheable()=false; CREATE TABLE is non-cacheable
+				mustExec(t, db, "CREATE TABLE cv4(id INTEGER)")
+				mustExec(t, db, "DROP TABLE cv4")
+			},
+		},
+		{
+			name: "Flip E=F: attached DB present",
+			run: func(t *testing.T) {
+				t.Parallel()
+				// Both DBs must share the same directory so the security sandbox allows ATTACH.
+				tmpDir := t.TempDir()
+				mainPath := filepath.Join(tmpDir, "cv5_main.db")
+				auxPath := filepath.Join(tmpDir, "cv5_aux.db")
+
+				auxDB, err := sql.Open(DriverName, auxPath)
+				if err != nil {
+					t.Fatalf("open aux: %v", err)
+				}
+				mustExec(t, auxDB, "CREATE TABLE aux2(id INTEGER)")
+				auxDB.Close()
+
+				db, err := sql.Open(DriverName, mainPath)
+				if err != nil {
+					t.Fatalf("open main: %v", err)
+				}
+				t.Cleanup(func() { db.Close() })
+
+				mustExec(t, db, "CREATE TABLE cv5(id INTEGER)")
+				mustExec(t, db, "INSERT INTO cv5 VALUES(5)")
+				// ATTACH using relative name so security sandbox permits it
+				mustExec(t, db, "ATTACH DATABASE 'cv5_aux.db' AS aux2")
+				mcdcQueryAndClose(t, db, "SELECT id FROM cv5")
+				mustExec(t, db, "DETACH DATABASE aux2")
+			},
+		},
 	})
+}
 
-	t.Run("Flip A=F: bind param skips caching", func(t *testing.T) {
-		t.Parallel()
-		db := openMCDCDB(t)
-		mustExec(t, db, "CREATE TABLE cv2(id INTEGER); INSERT INTO cv2 VALUES(2)")
-		rows, err := db.Query("SELECT id FROM cv2 WHERE id=?", 2)
-		if err != nil {
-			t.Fatalf("query: %v", err)
-		}
-		rows.Close()
-	})
+type stmtMCDCCacheCase struct {
+	name string
+	run  func(*testing.T)
+}
 
-	t.Run("Flip B=F: no cache configured", func(t *testing.T) {
-		t.Parallel()
-		dbFile := t.TempDir() + "/cv_nocache.db"
-		db, err := sql.Open(DriverName, dbFile+"?stmt_cache_size=0")
-		if err != nil {
-			t.Fatalf("open: %v", err)
-		}
-		t.Cleanup(func() { db.Close() })
-		mustExec(t, db, "CREATE TABLE cv3(id INTEGER); INSERT INTO cv3 VALUES(3)")
-		rows, qerr := db.Query("SELECT id FROM cv3")
-		if qerr != nil {
-			t.Fatalf("query: %v", qerr)
-		}
-		rows.Close()
-	})
+func runStmtMCDCCacheCases(t *testing.T, cases []stmtMCDCCacheCase) {
+	t.Helper()
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, tc.run)
+	}
+}
 
-	t.Run("Flip D=F: DDL not cacheable", func(t *testing.T) {
-		t.Parallel()
-		db := openMCDCDB(t)
-		// DDL sets isCacheable()=false; CREATE TABLE is non-cacheable
-		mustExec(t, db, "CREATE TABLE cv4(id INTEGER)")
-		mustExec(t, db, "DROP TABLE cv4")
-	})
-
-	t.Run("Flip E=F: attached DB present", func(t *testing.T) {
-		t.Parallel()
-		// Both DBs must share the same directory so the security sandbox allows ATTACH.
-		tmpDir := t.TempDir()
-		mainPath := filepath.Join(tmpDir, "cv5_main.db")
-		auxPath := filepath.Join(tmpDir, "cv5_aux.db")
-
-		auxDB, err := sql.Open(DriverName, auxPath)
-		if err != nil {
-			t.Fatalf("open aux: %v", err)
-		}
-		mustExec(t, auxDB, "CREATE TABLE aux2(id INTEGER)")
-		auxDB.Close()
-
-		db, err := sql.Open(DriverName, mainPath)
-		if err != nil {
-			t.Fatalf("open main: %v", err)
-		}
-		t.Cleanup(func() { db.Close() })
-
-		mustExec(t, db, "CREATE TABLE cv5(id INTEGER)")
-		mustExec(t, db, "INSERT INTO cv5 VALUES(5)")
-		// ATTACH using relative name so security sandbox permits it
-		mustExec(t, db, "ATTACH DATABASE 'cv5_aux.db' AS aux2")
-		rows, qerr := db.Query("SELECT id FROM cv5")
-		if qerr != nil {
-			t.Fatalf("query: %v", qerr)
-		}
-		rows.Close()
-		mustExec(t, db, "DETACH DATABASE aux2")
-	})
+func mcdcQueryAndClose(t *testing.T, db *sql.DB, query string, args ...interface{}) {
+	t.Helper()
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	rows.Close()
 }
 
 // ============================================================================

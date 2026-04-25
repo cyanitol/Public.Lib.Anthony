@@ -158,6 +158,14 @@ func TestStmtCacheLRU(t *testing.T) {
 
 // TestStmtCacheParameterized tests that parameterized queries are not cached.
 func TestStmtCacheParameterized(t *testing.T) {
+	hits := stmtCacheParameterQueryHits(t)
+	if hits != 0 {
+		t.Errorf("Expected 0 hits for parameterized queries, got %d", hits)
+	}
+}
+
+func stmtCacheParameterQueryHits(t *testing.T) uint64 {
+	t.Helper()
 	// Create temporary database file
 	tmpFile, err := os.CreateTemp("", "test_cache_*.db")
 	if err != nil {
@@ -211,9 +219,7 @@ func TestStmtCacheParameterized(t *testing.T) {
 
 	// Cache should not have any hits (parameterized queries aren't cached)
 	hits, _ := conn.stmtCache.GetMetrics()
-	if hits != 0 {
-		t.Errorf("Expected 0 hits for parameterized queries, got %d", hits)
-	}
+	return hits
 }
 
 // TestStmtCacheThreadSafety tests concurrent access to the cache.
