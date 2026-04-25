@@ -10,15 +10,19 @@ Target raised: cyclomatic complexity <= 8 across the entire codebase, including 
 Status (2026-04-24):
 - Full test suite passes under `go test ./...`
 - PRODUCTION COMPLEXITY GATE ACHIEVED: `gocyclo -over 8 .` reports ZERO production overages
-- Test complexity > 8 remains (198 test functions); this will require helper
-  extraction, generated-test consolidation, and selective decomposition of oversized cases
+- Test complexity > 8: 274 functions remaining (down from 543)
+  - pager: 0 remaining (was 54) — FULLY CLEAN
+  - btree: 7 remaining (was 104)
+  - vdbe: 44 remaining (was 92)
+  - driver: 176 remaining (was 186) — largest remaining target
+  - all other packages: 47 combined
 - Publication-grade / peer-review readiness depends on test complexity reduction,
   roadmap backlog, and TODO feature gaps in `doc/TODO.txt`
 
 Next implementation slices:
-1. Reduce test complexity overages via shared test helpers (T1-T5 below)
-2. Add package-local test helpers to collapse repeated MC/DC and coverage scaffolding
-3. Re-run `gocyclo -over 8 .` after each slice and track the remaining overages
+1. Reduce driver test complexity overages (176 functions, highest priority)
+2. Reduce vdbe test complexity overages (44 functions)
+3. Reduce remaining small-package overages (47 functions across 12 packages)
 
 Current remaining production complexity audit (`gocyclo -over 8 .`):
   *** NONE — all production functions are at complexity ≤ 8 ***
