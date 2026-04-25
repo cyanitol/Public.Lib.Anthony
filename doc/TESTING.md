@@ -682,6 +682,29 @@ Using pooled connections provides:
 - **Automatic cleanup** - No manual Close() required
 - **Consistent state** - Connections are reset between tests
 
+## Generated Test Helpers
+
+Some package-local test helpers are generated or centrally shared to keep large
+coverage suites consistent. When editing the driver test helper generator, run:
+
+```bash
+nix-shell --run "go generate ./internal/driver"
+```
+
+Keep generated helper files checked in, and prefer the shared helper patterns
+before adding new per-test open/query/assert scaffolding.
+
+## Quality Workflow
+
+Before opening review or merging a larger change, run the full quality gate:
+
+```bash
+make quality-gates
+```
+
+For day-to-day work, `make check` is the fast pre-flight path, while
+`make commit` includes the full build-and-test gate.
+
 ## Running Specific Tests
 
 ### By Package

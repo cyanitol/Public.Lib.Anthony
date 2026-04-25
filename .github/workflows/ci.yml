@@ -24,24 +24,8 @@ jobs:
       - name: Install gocyclo
         run: go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
 
-      - name: Check formatting (gofmt)
-        run: |
-          UNFORMATTED=$(CGO_ENABLED=0 gofmt -l .)
-          if [ -n "$UNFORMATTED" ]; then
-            echo "The following files need formatting:"
-            echo "$UNFORMATTED"
-            exit 1
-          fi
+      - name: Run quality gate
+        run: make quality
 
-      - name: Check cyclomatic complexity (gocyclo)
-        run: |
-          FILES=$(find . -name '*.go' ! -name '*_test.go')
-          if [ -n "$FILES" ]; then
-            CGO_ENABLED=0 gocyclo -over 11 $FILES
-          fi
-
-      - name: Run go vet
-        run: CGO_ENABLED=0 go vet ./...
-
-      - name: Run tests
-        run: CGO_ENABLED=0 go test -p 4 -parallel 4 ./...
+      - name: Run benchmark smoke tests
+        run: CGO_ENABLED=0 go test -run '^$' -bench 'Benchmark(DriverJoin|InsertBatch|MemoryVsDisk)$' -benchtime=1x ./internal/driver

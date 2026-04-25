@@ -1,4 +1,4 @@
-.PHONY: all build test test-fast test-ci test-short test-cover test-cover-report test-cover-func test-race lint check clean help commit check-spdx check-complexity check-complexity-all check-complexity-prod check-fmt bench vet quality-gates complexity complexity-all complexity-prod
+.PHONY: all build test test-fast test-ci test-short test-cover test-cover-report test-cover-func test-race lint check clean help commit check-spdx check-generated check-complexity check-complexity-all check-complexity-prod check-fmt bench bench-smoke fuzz-smoke vet generate quality quality-smoke quality-gates complexity complexity-all complexity-prod
 
 # Test configuration
 TEST_PARALLEL ?= 4
@@ -13,6 +13,16 @@ all: test build
 build:
 	go build ./...
 
+# Run go generate across the repository
+generate:
+	go generate ./...
+
+# Verify generated files are up to date and the tree stays clean after generation
+check-generated:
+	@echo "Checking generated files..."
+	@/bin/bash scripts/check-generated.sh
+	@echo "✓ Generated files are up to date"
+
 
 # Run performance comparison benchmark (Anthony vs sqlite3 if available)
 bench:
@@ -26,6 +36,10 @@ bench:
 		echo "sqlite3 not found; running Anthony benchmark only"; \
 		BENCH_DURATION=$$BENCH_DURATION SKIP_SQLITE=1 /bin/bash scripts/bench.sh; \
 	fi
+
+# Run short benchmark smoke tests for hot paths
+bench-smoke:
+	CGO_ENABLED=0 go test -run '^$$' -bench 'Benchmark(DriverJoin|InsertBatch|MemoryVsDisk)$$' -benchtime=1x ./internal/driver
 
 # Run all tests
 test:
@@ -61,6 +75,12 @@ test-cover-func:
 # Run tests with race detection (CGO required for -race, but set explicitly)
 test-race:
 	CGO_ENABLED=1 go test -race ./...
+
+# Run short fuzz smoke tests for core fuzz targets
+fuzz-smoke:
+	CGO_ENABLED=0 go test -run '^(FuzzSQL|FuzzPreparedStatement|FuzzTransaction|FuzzConcurrentAccess)$$' ./internal/driver
+	CGO_ENABLED=0 go test -run '^(FuzzParse|FuzzLexer|FuzzParseExpression|FuzzParseTableName|FuzzParseCreateTable)$$' ./internal/parser
+	CGO_ENABLED=0 go test -run '^(FuzzDecodeRecord|FuzzEncodeRecord|FuzzEncodeDecodeRoundTrip|FuzzVarint)$$' ./internal/vdbe
 
 # Run cyclomatic complexity check across the whole tree (including tests)
 complexity: complexity-all
@@ -99,8 +119,8 @@ clean-all: clean
 	rm -rf .gocache/
 	go clean -cache -testcache
 
-# Static analysis: fmt, spdx, complexity, vet
-lint: check-fmt check-spdx check-complexity vet
+# Static analysis: fmt, spdx, generated files, complexity, vet
+lint: check-fmt check-spdx check-generated check-complexity vet
 	@echo ""
 	@echo "All lint checks passed."
 
@@ -115,8 +135,17 @@ commit: check test
 	@echo "✓ All pre-commit checks passed!"
 	@echo "Ready to commit."
 
+# Repository quality gate
+quality:
+	@/bin/bash scripts/quality.sh
+
+# Quality gate plus benchmark smoke checks
+quality-smoke: quality bench-smoke
+	@echo ""
+	@echo "Quality smoke checks passed."
+
 # Publication-grade quality gates
-quality-gates: check-fmt check-spdx check-complexity vet build test
+quality-gates: quality
 	@echo ""
 	@echo "All quality gates passed."
 
@@ -170,6 +199,7 @@ help:
 	@echo "  all              - Run tests and build"
 	@echo "  build            - Build the project"
 	@echo "  test             - Run all tests"
+	@echo "  generate         - Run go generate ./..."
 	@echo "  test-fast        - Fast parallel testing for development"
 	@echo "  test-ci          - CI testing with JSON output and trimpath"
 	@echo "  test-short       - Short mode skipping slow tests"
@@ -177,18 +207,23 @@ help:
 	@echo "  test-cover-report - Generate HTML coverage report"
 	@echo "  test-cover-func  - Show per-function coverage"
 	@echo "  test-race        - Run tests with race detection"
+	@echo "  bench-smoke      - Run short benchmark smoke tests"
+	@echo "  fuzz-smoke       - Run short fuzz smoke tests"
 	@echo "  complexity       - Check cyclomatic complexity across the whole tree"
 	@echo "  complexity-all   - Print whole-tree complexity violations over COMPLEXITY_MAX"
 	@echo "  complexity-prod  - Print production-only complexity violations over PROD_COMPLEXITY_MAX"
 	@echo "  vet              - Run go vet"
 	@echo "  fmt              - Format code"
+	@echo "  check-generated  - Verify go generate output is committed"
+	@echo "  quality          - Full repo quality gate (generated files, complexity, vet, build, test, coverage)"
+	@echo "  quality-smoke    - Quality gate plus benchmark smoke checks"
 	@echo "  tidy             - Tidy go.mod"
 	@echo "  clean            - Remove generated files"
 	@echo "  clean-all        - Remove all caches and generated files"
 	@echo "  lint             - Static analysis (fmt, spdx, complexity, vet)"
 	@echo "  check            - Lint + build (no tests)"
 	@echo "  commit           - Full pre-commit validation (check + test)"
-	@echo "  quality-gates    - Full release-quality gate run (fmt, spdx, complexity, vet, build, test)"
+	@echo "  quality-gates    - Full release-quality gate run (generated files, complexity, vet, build, test, coverage)"
 	@echo "  check-fmt        - Check code is formatted"
 	@echo "  check-spdx       - Check SPDX headers"
 	@echo "  check-complexity - Enforce whole-tree cyclomatic complexity ≤ COMPLEXITY_MAX"

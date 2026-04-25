@@ -183,6 +183,15 @@ make check-complexity  # Check function complexity
 make vet               # Run go vet
 ```
 
+Generated helper maintenance:
+```bash
+go generate ./internal/driver
+```
+
+Use this after editing the driver test helper generator. The generated helper
+files are committed so the repo stays reproducible without requiring generation
+during normal test runs.
+
 ## Testing
 
 ```bash
@@ -222,6 +231,7 @@ make test-cover   # With coverage
 - Test suite: `make test` (CGO disabled); faster iterations `make test-fast TEST_PKG_PARALLEL=16 TEST_PARALLEL=8`; skip slow cases with `make test-short`.
 - Coverage and race: `make test-cover`, `make test-race`, or `make test-cover-report` to emit `coverage.html`.
 - Full pre-commit gate: `make commit` (runs fmt, SPDX check, complexity, vet, build, test). Run this before opening review.
+- Full release-quality gate: `make quality-gates` when you want the stricter all-in-one validation target.
 
 ### Coding Style & Naming Conventions
 - Go code must be formatted with `gofmt`; no diffs should appear from `gofmt -w .`.

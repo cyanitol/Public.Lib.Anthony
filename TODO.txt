@@ -3,6 +3,47 @@ DRY Code Reduction TODO
 Goal: Improve resilience, readability, and auditability while retaining all features and security guarantees.
 Constraints: cyclomatic complexity ≤ 8, all tests pass, no external deps, Go 1.26.1, WASM primary target.
 
+CONSOLIDATED NON-PRODUCT ENGINEERING BACKLOG (2026-04-25)
+----------------------------------------------------------
+Product work stays deferred to `doc/TODO.txt` and `doc/ROADMAP.md`.
+
+Current priorities:
+- Finish shared test-helper rollout in `internal/engine`, `internal/functions`, `internal/pager`,
+  `internal/testing/slt`, `cmd/anthony`, and `cmd/trinitygen`
+  - Keep DB open/cleanup helpers package-local
+  - Keep query/assertion helpers package-local
+  - Keep MCDC helpers small and per-package
+- Keep generated helper artifacts reproducible
+  - `go generate` must regenerate checked-in helper files without manual edits
+  - Generated files must stay paired with their generator entry points
+  - Helper ownership should be explicit in each package
+- Maintain release gates and repo hygiene
+  - `go test ./...`
+  - `gocyclo -over 8 .`
+  - `gofmt`, SPDX headers, `go vet`
+  - no stale generated files or cyclic test imports
+
+Planned quality work:
+- Add repo-wide test-remediation helpers for repeated table-driven assertions
+  - `runQueryTests`-style helpers for coverage-gap suites
+  - row comparison helpers for repetitive scan/compare loops
+  - shared fuzz-input setup helpers where the setup is stable
+- Add operational-quality automation
+  - CI smoke targets for `go generate` and `go test ./...`
+  - benchmark smoke runs for hot paths
+  - fuzz smoke runs for driver, parser, and VDBE
+  - sqllogictest subset runs against the reference corpus
+- Add durability/regression harnesses
+  - crash-replay tests for WAL/journal paths
+  - fault-injection tests for I/O, OOM, and corruption
+  - recovery tests for WAL/checkpoint and vacuum edge cases
+
+Future engineering work:
+- Standardize package-local test-helper naming and layout
+- Expand shared helper generation to any repeated, stable boilerplate
+- Keep documentation in sync with current test and release gates
+- Maintain a single source of truth for non-product engineering backlog items
+
 RELEASE-HARDENING AUDIT (2026-04-24)
 ------------------------------------
 Target raised: cyclomatic complexity <= 8 across the entire codebase, including tests.
