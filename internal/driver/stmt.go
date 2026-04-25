@@ -255,11 +255,13 @@ func (s *Stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driv
 		return nil, err
 	}
 
-	// Acquire the shared write mutex to serialize with write operations across
-	// all connections sharing the same database, preventing data races on page
-	// buffers between concurrent VM execution and commit/writePage.
-	s.conn.writeMu.Lock()
-	defer s.conn.writeMu.Unlock()
+	// In hard-compat mode, queries serialize behind the shared write mutex to
+	// preserve conservative SQLite-style operational behavior. Extended mode
+	// deliberately relaxes this front-half query gating; row iteration already
+	// proceeds outside the mutex today, so this slice only removes the initial
+	// query entry serialization.
+	unlockQuery := s.conn.lockQueryCompatibility()
+	defer unlockQuery()
 
 	s.conn.mu.Lock()
 	defer s.conn.mu.Unlock()

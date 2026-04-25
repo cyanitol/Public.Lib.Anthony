@@ -331,6 +331,14 @@ func (c *Conn) lockWriteCompatibility(readOnly bool) func() {
 	return func() { c.writeMu.Unlock() }
 }
 
+func (c *Conn) lockQueryCompatibility() func() {
+	if c.writeMu == nil || c.compatMode == CompatibilityModeExtended {
+		return func() {}
+	}
+	c.writeMu.Lock()
+	return func() { c.writeMu.Unlock() }
+}
+
 // setFKTransactionState sets the transaction state in the foreign key manager.
 func (c *Conn) setFKTransactionState(inTx bool) {
 	if c.fkManager != nil {

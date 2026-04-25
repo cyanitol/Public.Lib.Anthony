@@ -23,6 +23,15 @@ func openRawConn(t *testing.T, dbPath string) *Conn {
 	return raw.(*Conn)
 }
 
+func openRawConnDSN(t *testing.T, dsn string) *Conn {
+	t.Helper()
+	raw, err := GetDriver().Open(dsn)
+	if err != nil {
+		t.Fatalf("openRawConnDSN %s: %v", dsn, err)
+	}
+	return raw.(*Conn)
+}
+
 // setupOCCDatabase creates a file-backed database with a single table and
 // returns its path. The database is closed before returning.
 func setupOCCDatabase(t *testing.T, filename string) string {
