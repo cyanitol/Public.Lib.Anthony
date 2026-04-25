@@ -135,7 +135,7 @@ func splitAtSemicolon(statements []string, input string, start, end int) ([]stri
 
 func appendStatement(statements []string, input string, start, end int) []string {
 	if start == -1 {
-			return statements
+		return statements
 	}
 	stmt := strings.TrimSpace(input[start:end])
 	if stmt == "" {

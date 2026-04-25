@@ -311,7 +311,9 @@ func TestMCDC_IsPragmaCountStar(t *testing.T) {
 }
 
 // countRowsDrain runs a query, scans and drains all columns per row, and returns the row count.
-func countRowsDrain(t *testing.T, db interface{ Query(string, ...interface{}) (*sql.Rows, error) }, query string) int {
+func countRowsDrain(t *testing.T, db interface {
+	Query(string, ...interface{}) (*sql.Rows, error)
+}, query string) int {
 	t.Helper()
 	rows, err := db.Query(query)
 	if err != nil {
@@ -1578,7 +1580,9 @@ func TestMCDC_ResolvePragmaColumns_StarGuard(t *testing.T) {
 }
 
 // queryColAndRowCount runs a query and returns the number of columns and rows.
-func queryColAndRowCount(t *testing.T, db interface{ Query(string, ...interface{}) (*sql.Rows, error) }, query string) (int, int) {
+func queryColAndRowCount(t *testing.T, db interface {
+	Query(string, ...interface{}) (*sql.Rows, error)
+}, query string) (int, int) {
 	t.Helper()
 	rows, err := db.Query(query)
 	if err != nil {
@@ -1741,7 +1745,9 @@ func TestMCDC_CompilePragmaTVFForeignKeyList_FkManagerGuard(t *testing.T) {
 
 // queryDrainRowCount runs a query, optionally expecting an error. If no error,
 // it drains all rows and returns the count. Returns 0 if wantErr and error occurred.
-func queryDrainRowCount(t *testing.T, db interface{ Query(string, ...interface{}) (*sql.Rows, error) }, query string, wantErr bool) int {
+func queryDrainRowCount(t *testing.T, db interface {
+	Query(string, ...interface{}) (*sql.Rows, error)
+}, query string, wantErr bool) int {
 	t.Helper()
 	rows, err := db.Query(query)
 	if wantErr && err == nil {

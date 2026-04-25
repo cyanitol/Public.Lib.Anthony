@@ -177,8 +177,8 @@ func TestSplitMergeCursorGettersOnValidCursor(t *testing.T) {
 	_, cursor := setupBtreeWithRows(t, 4096, 1, 1, 17)
 	payload := []byte("test-payload-data")
 	// Re-insert with known payload
-	cursor.SeekRowid(1) //nolint:errcheck
-	cursor.Delete()     //nolint:errcheck
+	cursor.SeekRowid(1)       //nolint:errcheck
+	cursor.Delete()           //nolint:errcheck
 	cursor.Insert(1, payload) //nolint:errcheck
 	found, err := cursor.SeekRowid(1)
 	if err != nil || !found {

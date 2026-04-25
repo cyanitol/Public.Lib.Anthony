@@ -615,10 +615,10 @@ func (s *Stmt) compileCorrelatedTVFJoin(vm *vdbe.VDBE, stmt *parser.SelectStmt, 
 
 type correlatedTVFJoinContext struct {
 	outerTable *schema.Table
-	outerAlias  string
-	tvfAlias    string
-	tvfCols     []string
-	tvfRef      *parser.TableOrSubquery
+	outerAlias string
+	tvfAlias   string
+	tvfCols    []string
+	tvfRef     *parser.TableOrSubquery
 }
 
 func (s *Stmt) prepareCorrelatedTVFJoin(stmt *parser.SelectStmt) (*correlatedTVFJoinContext, error) {

@@ -195,6 +195,7 @@ func TestMCDC_IsColumnUsed(t *testing.T) {
 //	A: index=-1  → index>=0 false (short-circuits; flips outcome)
 //	B: index=5   → index>=0 true, index<len false (len=3; flips outcome vs C)
 //	C: index=1   → both true (writes to slot)
+//
 // verifyConstraintWrite checks that the expected slot was written or that no slots were written.
 func verifyConstraintWrite(t *testing.T, info *IndexInfo, index, numSlots, argvIndex int, omit, wantWrite bool) {
 	t.Helper()

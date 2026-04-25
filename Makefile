@@ -100,7 +100,7 @@ vet:
 
 # Format code
 fmt:
-	go fmt ./...
+	@find . -name '*.go' -not -path './vendor/*' -print0 | xargs -0 gofmt -w
 
 # Tidy dependencies
 tidy:
@@ -152,18 +152,13 @@ quality-gates: quality
 # Check that go fmt produces no changes
 check-fmt:
 	@echo "Checking go fmt..."
-	@test -z "$$(gofmt -l .)" || (echo "Files need formatting:"; gofmt -l .; exit 1)
+	@/bin/bash scripts/check-gofmt.sh
 	@echo "✓ Code is properly formatted"
 
 # Check that all .go files have SPDX license headers
 check-spdx:
 	@echo "Checking SPDX headers..."
-	@missing=$$(find . -name '*.go' -not -path './vendor/*' -exec grep -L 'SPDX-License-Identifier' {} \;); \
-	if [ -n "$$missing" ]; then \
-		echo "Files missing SPDX-License-Identifier:"; \
-		echo "$$missing"; \
-		exit 1; \
-	fi
+	@/bin/bash scripts/check-spdx.sh
 	@echo "✓ All files have SPDX headers"
 
 # Check cyclomatic complexity (whole tree, including tests)

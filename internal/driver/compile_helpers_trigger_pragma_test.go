@@ -398,7 +398,11 @@ func testEmitNonIdentifierColumn(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // scanExplainRows scans all rows from an EXPLAIN query, returning the count.
-func scanExplainRows(t *testing.T, rows interface{ Next() bool; Scan(...interface{}) error; Err() error }) int {
+func scanExplainRows(t *testing.T, rows interface {
+	Next() bool
+	Scan(...interface{}) error
+	Err() error
+}) int {
 	t.Helper()
 	var count int
 	for rows.Next() {

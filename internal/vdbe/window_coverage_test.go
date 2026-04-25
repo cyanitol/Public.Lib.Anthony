@@ -809,8 +809,8 @@ func TestWindowCovLeadSQL(t *testing.T) {
 func windowCovCheckValueResults(t *testing.T, rows *sql.Rows, wantMap map[int]int, funcName string) {
 	t.Helper()
 	type resultRow struct {
-		val      int
-		funcVal  int
+		val     int
+		funcVal int
 	}
 	var results []resultRow
 	for rows.Next() {

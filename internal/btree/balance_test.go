@@ -460,7 +460,7 @@ func TestBalanceAfterDelete(t *testing.T) {
 		cursor.SeekRowid(int64(count + 1)) //nolint:errcheck
 		if cursor.State == CursorValid {
 			GetBalanceInfo(bt, rootPage) //nolint:errcheck
-			balance(cursor)             //nolint:errcheck
+			balance(cursor)              //nolint:errcheck
 		}
 	}
 }
