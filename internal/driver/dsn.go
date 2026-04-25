@@ -41,6 +41,7 @@ type DSN struct {
 //   - wal_autocheckpoint: number of pages
 //   - query_timeout: milliseconds
 //   - max_page_count: maximum number of pages
+//   - compat_mode: "hard-compat", "extended"
 //
 // Examples:
 //   - ParseDSN("file.db")
@@ -149,6 +150,8 @@ func parseStringParameter(config *DriverConfig, key, value string) bool {
 		config.Pager.TempStore = lowerValue
 	case "auto_vacuum", "autovacuum":
 		config.AutoVacuum = lowerValue
+	case "compat_mode", "compatibility_mode", "compatmode", "compatibilitymode":
+		config.CompatibilityMode = CompatibilityMode(lowerValue)
 	default:
 		return false
 	}
@@ -385,5 +388,8 @@ func addDriverParameters(params url.Values, config *DriverConfig) {
 	}
 	if !config.EnableTriggers {
 		params.Add("triggers", "off")
+	}
+	if !config.IsHardCompatibility() {
+		params.Add("compat_mode", string(config.CompatibilityMode))
 	}
 }

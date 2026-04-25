@@ -16,9 +16,10 @@ package anthony
 
 import (
 	"database/sql"
+	"fmt"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/collation"
-	_ "github.com/cyanitol/Public.Lib.Anthony/internal/driver" // Register driver
+	sqliteDriver "github.com/cyanitol/Public.Lib.Anthony/internal/driver"
 )
 
 // DriverName is the name registered with database/sql.
@@ -27,6 +28,20 @@ const DriverName = "sqlite_internal"
 // Open opens a SQLite database using the anthony driver.
 func Open(dataSourceName string) (*sql.DB, error) {
 	return sql.Open(DriverName, dataSourceName)
+}
+
+// OpenWithCompatibility opens a SQLite database using the requested
+// compatibility mode.
+func OpenWithCompatibility(dataSourceName, mode string) (*sql.DB, error) {
+	dsn, err := sqliteDriver.ParseDSN(dataSourceName)
+	if err != nil {
+		return nil, fmt.Errorf("parse DSN: %w", err)
+	}
+	dsn.Config.CompatibilityMode = sqliteDriver.CompatibilityMode(mode)
+	if err := dsn.Config.Validate(); err != nil {
+		return nil, fmt.Errorf("validate compatibility mode: %w", err)
+	}
+	return Open(sqliteDriver.FormatDSN(dsn))
 }
 
 // OpenReadOnly opens a SQLite database in read-only mode.

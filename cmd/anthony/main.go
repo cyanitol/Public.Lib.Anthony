@@ -15,6 +15,10 @@ import (
 
 type stringList []string
 
+func defaultCompatMode() string {
+	return "hard-compat"
+}
+
 func (s *stringList) String() string {
 	return strings.Join(*s, ",")
 }
@@ -26,12 +30,14 @@ func (s *stringList) Set(value string) error {
 
 func main() {
 	var (
-		dsn     string
-		queries stringList
-		files   stringList
+		dsn        string
+		compatMode string
+		queries    stringList
+		files      stringList
 	)
 
 	flag.StringVar(&dsn, "db", ":memory:", "database path or DSN")
+	flag.StringVar(&compatMode, "compat-mode", defaultCompatMode(), "compatibility mode: hard-compat or extended")
 	flag.Var(&queries, "query", "SQL query to run (repeatable)")
 	flag.Var(&files, "file", "SQL file to run, or '-' for stdin (repeatable)")
 	flag.Parse()
@@ -42,7 +48,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	db, err := anthony.Open(dsn)
+	db, err := anthony.OpenWithCompatibility(dsn, compatMode)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "open database: %v\n", err)
 		os.Exit(1)

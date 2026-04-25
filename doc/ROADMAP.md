@@ -1,12 +1,20 @@
 # Anthony Roadmap (Production Readiness)
 
-## Current State (v0.6.0)
+## Current State (v0.7.3)
 - **20,000+ tests passing**, 0 skipped, 0 failures
 - **94.8% statement coverage** (MC/DC coverage across all packages)
 - **1,257 Trinity (DO-178C trace) tests** at 100% parity
 - **Primary target: WASM (browser-embedded DBMS)**; also embedded, VPS, scalable
 
-## Next Milestone: Algorithm Improvements (v0.6.0)
+## Next Milestone: Compatibility Modes (`v0.8.x`)
+- Add `hard-compat` mode for conservative SQLite-style operational guarantees
+- Add `extended` mode for Anthony-specific concurrency improvements
+- Expose compatibility mode through DSN and `cmd/anthony`
+- Keep SQLite-compatible file format and SQL behavior in both modes
+- Add proposal and architecture docs for snapshot/validate/commit evolution
+- Add mode-specific test and durability gates before broadening `extended`
+
+## Follow-On Milestone: Algorithm Improvements
 - Replace O(n²) insertion sort with pdqsort (`vdbe/vdbe.go`)
 - Lazy streaming external sort merge (`vdbe/sorter_spill.go`)
 - Allocation-free NOCASE collation (`utf/collation.go`)

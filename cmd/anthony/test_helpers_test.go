@@ -20,6 +20,16 @@ func openTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+func openCompatTestDB(t *testing.T, compatMode string) *sql.DB {
+	t.Helper()
+
+	db, err := anthony.OpenWithCompatibility(":memory:", compatMode)
+	if err != nil {
+		t.Fatalf("open compatibility test db: %v", err)
+	}
+	return db
+}
+
 func mustRunStatement(t *testing.T, db *sql.DB, stmt string) {
 	t.Helper()
 

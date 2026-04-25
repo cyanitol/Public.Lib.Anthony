@@ -20,8 +20,8 @@ func (tx *Tx) Commit() error {
 		return driver.ErrBadConn
 	}
 
-	tx.conn.writeMu.Lock()
-	defer tx.conn.writeMu.Unlock()
+	unlockWrite := tx.conn.lockWriteCompatibility(tx.readOnly)
+	defer unlockWrite()
 
 	tx.conn.mu.Lock()
 	defer tx.conn.mu.Unlock()
@@ -47,8 +47,8 @@ func (tx *Tx) Rollback() error {
 		return nil // Already rolled back or committed
 	}
 
-	tx.conn.writeMu.Lock()
-	defer tx.conn.writeMu.Unlock()
+	unlockWrite := tx.conn.lockWriteCompatibility(tx.readOnly)
+	defer unlockWrite()
 
 	tx.conn.mu.Lock()
 	defer tx.conn.mu.Unlock()

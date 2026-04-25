@@ -8,6 +8,21 @@ CONSOLIDATED NON-PRODUCT ENGINEERING BACKLOG (2026-04-25)
 Product work stays deferred to `doc/TODO.txt` and `doc/ROADMAP.md`.
 
 Current priorities:
+- Deliver `v0.8.x` compatibility-mode foundation
+  - Add `hard-compat` and `extended` compatibility modes
+  - Keep `hard-compat` as the default for library and CLI entry points
+  - Expose `compat_mode` through DSN parsing/formatting
+  - Expose `-compat-mode` through `cmd/anthony`
+  - Document the mode guarantees and non-goals clearly
+- Build the `v0.8.x` concurrency roadmap
+  - Add proposal doc for compatibility/concurrency modes
+  - Separate file-format compatibility from live operational semantics
+  - Keep durable commit serialization explicit
+  - Plan snapshot-based reads and isolated writer work for `extended`
+- Add first safe mode-aware runtime hooks
+  - Route transaction lifecycle behavior through compatibility mode policy
+  - Keep `hard-compat` mapped to current conservative behavior
+  - Avoid unsafe read-path de-serialization until pager/btree visibility is proven
 - Finish shared test-helper rollout in `internal/engine`, `internal/functions`, `internal/pager`,
   `internal/testing/slt`, `cmd/anthony`, and `cmd/trinitygen`
   - Keep DB open/cleanup helpers package-local
@@ -39,6 +54,15 @@ Planned quality work:
   - recovery tests for WAL/checkpoint and vacuum edge cases
 
 Future engineering work:
+- Expand `extended` mode once correctness is proven
+  - remove unnecessary read serialization
+  - add snapshot/version tracking for schema and data
+  - stage concurrent writer preparation with serialized validate+commit
+  - add fault-injection and crash-replay coverage specific to compatibility modes
+- Add a hard-compat verification matrix
+  - mode-specific CI coverage
+  - documentation for recommended deployment choices
+  - CLI and DSN examples for both modes
 - Standardize package-local test-helper naming and layout
 - Expand shared helper generation to any repeated, stable boilerplate
 - Keep documentation in sync with current test and release gates

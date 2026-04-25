@@ -6,6 +6,12 @@ import (
 	"testing"
 )
 
+func TestCompatModeFlagDefault(t *testing.T) {
+	if got := defaultCompatMode(); got != "hard-compat" {
+		t.Fatalf("defaultCompatMode() = %q, want %q", got, "hard-compat")
+	}
+}
+
 func TestSplitStatements(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -90,4 +96,11 @@ func TestRunStatementBlank(t *testing.T) {
 	if output != "" {
 		t.Fatalf("blank statement produced output %q", output)
 	}
+}
+
+func TestOpenCLIWithCompatMode(t *testing.T) {
+	db := openCompatTestDB(t, "extended")
+	defer db.Close()
+
+	mustRunStatement(t, db, "CREATE TABLE items (id INTEGER)")
 }

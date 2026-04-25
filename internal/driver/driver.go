@@ -178,7 +178,7 @@ func (d *Driver) newMemoryDBState() (*dbState, error) {
 // createConnection creates a new connection with the given state.
 func (d *Driver) createConnection(filename string, state *dbState, existed bool, config *DriverConfig) (driver.Conn, error) {
 	secCfg := d.getSecurityConfig(filename, config)
-	conn := d.buildConnection(filename, state, secCfg)
+	conn := d.buildConnection(filename, state, secCfg, config)
 
 	if err := conn.openDatabase(existed); err != nil {
 		d.releaseState(filename, state)
@@ -212,7 +212,11 @@ func (d *Driver) getSecurityConfig(filename string, config *DriverConfig) *secur
 }
 
 // buildConnection constructs a new Conn object
-func (d *Driver) buildConnection(filename string, state *dbState, secCfg *security.SecurityConfig) *Conn {
+func (d *Driver) buildConnection(filename string, state *dbState, secCfg *security.SecurityConfig, config *DriverConfig) *Conn {
+	compatMode := CompatibilityModeHard
+	if config != nil && config.CompatibilityMode != "" {
+		compatMode = config.CompatibilityMode
+	}
 	return &Conn{
 		driver:         d,
 		filename:       filename,
@@ -225,6 +229,7 @@ func (d *Driver) buildConnection(filename string, state *dbState, secCfg *securi
 		writeMu:        &state.writeMu,
 		writeVersion:   &state.writeVersion,
 		securityConfig: secCfg,
+		compatMode:     compatMode,
 	}
 }
 
@@ -235,7 +240,7 @@ func (d *Driver) createMemoryConnection(memoryID string, state *dbState, config 
 		secCfg = security.DefaultSecurityConfig()
 	}
 
-	conn := d.buildConnection(memoryID, state, secCfg)
+	conn := d.buildConnection(memoryID, state, secCfg, config)
 
 	// Memory databases are always new, so schema never pre-loaded
 	if err := conn.openDatabase(false); err != nil {

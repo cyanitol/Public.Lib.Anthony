@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -63,6 +64,12 @@ func dsnCheckMultipleParams(t *testing.T, cfg *DriverConfig) {
 	}
 }
 
+func dsnCheckCompatMode(t *testing.T, cfg *DriverConfig) {
+	if cfg.CompatibilityMode != CompatibilityModeExtended {
+		t.Errorf("expected CompatibilityMode=%s, got %s", CompatibilityModeExtended, cfg.CompatibilityMode)
+	}
+}
+
 func dsnParseCases() []dsnTestCase {
 	return []dsnTestCase{
 		{"simple filename", "test.db", false, false, false, dsnCheckSimpleFilename},
@@ -93,6 +100,7 @@ func dsnParseCases() []dsnTestCase {
 				t.Errorf("expected BusyTimeout=%v, got %v", 5000*time.Millisecond, cfg.Pager.BusyTimeout)
 			}
 		}},
+		{"compat mode", "test.db?compat_mode=extended", false, false, false, dsnCheckCompatMode},
 		{"multiple parameters", "test.db?mode=rw&journal_mode=wal&cache_size=5000&foreign_keys=on", false, false, false, dsnCheckMultipleParams},
 		{"shared cache", "test.db?cache=shared", false, false, false, func(t *testing.T, cfg *DriverConfig) {
 			if !cfg.SharedCache {
@@ -330,6 +338,18 @@ func TestFormatDSN(t *testing.T) {
 			},
 			expected: ":memory:",
 		},
+		{
+			name: "extended compat mode",
+			dsn: &DSN{
+				Filename: "test.db",
+				Config: func() *DriverConfig {
+					cfg := DefaultDriverConfig()
+					cfg.CompatibilityMode = CompatibilityModeExtended
+					return cfg
+				}(),
+			},
+			expected: "compat_mode=extended",
+		},
 	}
 
 	for _, tt := range tests {
@@ -346,6 +366,8 @@ func TestFormatDSN(t *testing.T) {
 				if result != "test.db" && result[:7] != "test.db" {
 					t.Errorf("expected result to start with test.db, got %s", result)
 				}
+			} else if !strings.Contains(result, tt.expected) {
+				t.Errorf("expected result to contain %s, got %s", tt.expected, result)
 			}
 		})
 	}

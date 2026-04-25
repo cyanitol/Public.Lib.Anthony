@@ -2,11 +2,26 @@
 package driver
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/cyanitol/Public.Lib.Anthony/internal/pager"
 	"github.com/cyanitol/Public.Lib.Anthony/internal/security"
+)
+
+// CompatibilityMode controls how strictly the driver preserves SQLite's
+// operational concurrency guarantees.
+type CompatibilityMode string
+
+const (
+	// CompatibilityModeHard preserves conservative SQLite-style operational
+	// guarantees, including serialized write behavior.
+	CompatibilityModeHard CompatibilityMode = "hard-compat"
+
+	// CompatibilityModeExtended preserves SQLite file/SQL compatibility while
+	// enabling Anthony-specific concurrency improvements where safe.
+	CompatibilityModeExtended CompatibilityMode = "extended"
 )
 
 // DriverConfig represents configuration options for the SQLite driver.
@@ -73,6 +88,11 @@ type DriverConfig struct {
 	// Extensions is a list of SQLite extensions to load on connection.
 	// Default is empty.
 	Extensions []string
+
+	// CompatibilityMode controls the database concurrency/compatibility policy.
+	// Valid values: "hard-compat", "extended".
+	// Default is "hard-compat".
+	CompatibilityMode CompatibilityMode
 }
 
 // DefaultDriverConfig returns a DriverConfig with default values.
@@ -93,6 +113,7 @@ func DefaultDriverConfig() *DriverConfig {
 		AutoVacuum:            "none",
 		SharedCache:           false,
 		Extensions:            []string{},
+		CompatibilityMode:     CompatibilityModeHard,
 	}
 }
 
@@ -129,6 +150,10 @@ func (c *DriverConfig) Validate() error {
 		c.AutoVacuum = "none"
 	}
 
+	if err := c.validateCompatibilityMode(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -149,10 +174,29 @@ func (c *DriverConfig) Clone() *DriverConfig {
 		RecursiveTriggers:     c.RecursiveTriggers,
 		AutoVacuum:            c.AutoVacuum,
 		SharedCache:           c.SharedCache,
+		CompatibilityMode:     c.CompatibilityMode,
 		Extensions:            make([]string, len(c.Extensions)),
 	}
 	copy(clone.Extensions, c.Extensions)
 	return clone
+}
+
+// IsHardCompatibility reports whether the config is using strict SQLite-style
+// operational semantics.
+func (c *DriverConfig) IsHardCompatibility() bool {
+	return c == nil || c.CompatibilityMode == "" || c.CompatibilityMode == CompatibilityModeHard
+}
+
+func (c *DriverConfig) validateCompatibilityMode() error {
+	switch c.CompatibilityMode {
+	case "", CompatibilityModeHard:
+		c.CompatibilityMode = CompatibilityModeHard
+	case CompatibilityModeExtended:
+		// Valid
+	default:
+		return fmt.Errorf("invalid compatibility mode: %s", c.CompatibilityMode)
+	}
+	return nil
 }
 
 // pragmaHandler is a function that conditionally appends a pragma to the list.

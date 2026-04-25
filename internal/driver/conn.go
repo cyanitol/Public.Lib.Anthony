@@ -67,6 +67,8 @@ type Conn struct {
 	// Foreign key constraint manager
 	fkManager *constraint.ForeignKeyManager
 
+	compatMode CompatibilityMode
+
 	// Connection-level change tracking for built-in functions
 	lastInsertRowID int64 // Tracks last INSERT rowid across statements
 	lastChanges     int64 // Tracks changes from last DML statement
@@ -269,8 +271,8 @@ func (c *Conn) Begin() (driver.Tx, error) {
 
 // BeginTx starts a transaction with options.
 func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+	unlockWrite := c.lockWriteCompatibility(opts.ReadOnly)
+	defer unlockWrite()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -316,6 +318,17 @@ func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 		conn:     c,
 		readOnly: false,
 	}, nil
+}
+
+func (c *Conn) lockWriteCompatibility(readOnly bool) func() {
+	if c.writeMu == nil {
+		return func() {}
+	}
+	if readOnly && c.compatMode == CompatibilityModeExtended {
+		return func() {}
+	}
+	c.writeMu.Lock()
+	return func() { c.writeMu.Unlock() }
 }
 
 // setFKTransactionState sets the transaction state in the foreign key manager.
