@@ -254,6 +254,28 @@ func TestMCDC16b_CompoundExcept(t *testing.T) {
 	}
 }
 
+// drv16bQueryInts runs a query and returns all integer results as a slice.
+func drv16bQueryInts(t *testing.T, db *sql.DB, query string) []int64 {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query %q: %v", query, err)
+	}
+	defer rows.Close()
+	var vals []int64
+	for rows.Next() {
+		var v int64
+		if err := rows.Scan(&v); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		vals = append(vals, v)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return vals
+}
+
 // TestMCDC16b_CompoundOrderBy exercises ORDER BY applied to a compound SELECT.
 func TestMCDC16b_CompoundOrderBy(t *testing.T) {
 	t.Parallel()
@@ -268,24 +290,7 @@ func TestMCDC16b_CompoundOrderBy(t *testing.T) {
 		drv16bExec(t, db, "INSERT INTO t2(a) VALUES(?)", v)
 	}
 
-	rows, err := db.Query("SELECT a FROM t1 UNION SELECT a FROM t2 ORDER BY a")
-	if err != nil {
-		t.Skipf("UNION ORDER BY not implemented: %v", err)
-	}
-	defer rows.Close()
-
-	var vals []int64
-	for rows.Next() {
-		var v int64
-		if scanErr := rows.Scan(&v); scanErr != nil {
-			t.Fatalf("Scan: %v", scanErr)
-		}
-		vals = append(vals, v)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows.Err: %v", err)
-	}
-
+	vals := drv16bQueryInts(t, db, "SELECT a FROM t1 UNION SELECT a FROM t2 ORDER BY a")
 	if len(vals) != 4 {
 		t.Errorf("UNION ORDER BY: got %d rows, want 4", len(vals))
 	}

@@ -473,6 +473,28 @@ func TestDebugDeepApplyPatternToRegisters(t *testing.T) {
 	})
 }
 
+func applySimplePatternCases() []struct {
+	name    string
+	pattern registerPattern
+	instr   *Instruction
+	check   func([]int) bool
+} {
+	return []struct {
+		name    string
+		pattern registerPattern
+		instr   *Instruction
+		check   func([]int) bool
+	}{
+		{"regPatternP2", regPatternP2, &Instruction{P2: 4}, func(r []int) bool { return len(r) == 1 && r[0] == 4 }},
+		{"regPatternP1P2", regPatternP1P2, &Instruction{P1: 1, P2: 2}, func(r []int) bool { return len(r) == 2 && r[0] == 1 && r[1] == 2 }},
+		{"regPatternP3", regPatternP3, &Instruction{P3: 6}, func(r []int) bool { return len(r) == 1 && r[0] == 6 }},
+		{"regPatternP1Range", regPatternP1Range, &Instruction{P1: 2, P2: 3}, func(r []int) bool { return len(r) == 3 && r[0] == 2 && r[2] == 4 }},
+		{"regPatternP1P2P3", regPatternP1P2P3, &Instruction{P1: 1, P2: 2, P3: 3}, func(r []int) bool { return len(r) == 3 }},
+		{"regPatternDefault", regPatternDefault, &Instruction{P1: 0, P2: 1, P3: 2}, func(r []int) bool { return len(r) >= 1 }},
+		{"unknownPattern_returnsUnchanged", registerPattern(999), &Instruction{}, func(r []int) bool { return len(r) == 0 }},
+	}
+}
+
 // TestDebugDeepApplySimplePattern covers all switch branches in applySimplePattern.
 func TestDebugDeepApplySimplePattern(t *testing.T) {
 	t.Parallel()
@@ -480,57 +502,7 @@ func TestDebugDeepApplySimplePattern(t *testing.T) {
 	v := New()
 	v.AllocMemory(10)
 
-	cases := []struct {
-		name    string
-		pattern registerPattern
-		instr   *Instruction
-		check   func([]int) bool
-	}{
-		{
-			name:    "regPatternP2",
-			pattern: regPatternP2,
-			instr:   &Instruction{P2: 4},
-			check:   func(r []int) bool { return len(r) == 1 && r[0] == 4 },
-		},
-		{
-			name:    "regPatternP1P2",
-			pattern: regPatternP1P2,
-			instr:   &Instruction{P1: 1, P2: 2},
-			check:   func(r []int) bool { return len(r) == 2 && r[0] == 1 && r[1] == 2 },
-		},
-		{
-			name:    "regPatternP3",
-			pattern: regPatternP3,
-			instr:   &Instruction{P3: 6},
-			check:   func(r []int) bool { return len(r) == 1 && r[0] == 6 },
-		},
-		{
-			name:    "regPatternP1Range",
-			pattern: regPatternP1Range,
-			instr:   &Instruction{P1: 2, P2: 3},
-			check:   func(r []int) bool { return len(r) == 3 && r[0] == 2 && r[2] == 4 },
-		},
-		{
-			name:    "regPatternP1P2P3",
-			pattern: regPatternP1P2P3,
-			instr:   &Instruction{P1: 1, P2: 2, P3: 3},
-			check:   func(r []int) bool { return len(r) == 3 },
-		},
-		{
-			name:    "regPatternDefault",
-			pattern: regPatternDefault,
-			instr:   &Instruction{P1: 0, P2: 1, P3: 2},
-			check:   func(r []int) bool { return len(r) >= 1 },
-		},
-		{
-			name:    "unknownPattern_returnsUnchanged",
-			pattern: registerPattern(999),
-			instr:   &Instruction{},
-			check:   func(r []int) bool { return len(r) == 0 },
-		},
-	}
-
-	for _, tc := range cases {
+	for _, tc := range applySimplePatternCases() {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

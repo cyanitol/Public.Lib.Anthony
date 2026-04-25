@@ -10,34 +10,8 @@ import (
 // TestSorterSpill_WriteAndRecord_HappyPath exercises the successful path of
 // writeAndRecordSpill: rows are inserted, spillCurrentRun is triggered, and
 // the spilled run is recorded correctly.
-func TestSorterSpill_WriteAndRecord_HappyPath(t *testing.T) {
-	t.Parallel()
-
-	cfg := &vdbe.SorterConfig{
-		MaxMemoryBytes: 300,
-		TempDir:        t.TempDir(),
-		EnableSpill:    true,
-	}
-	s := vdbe.NewSorterWithSpill([]int{0}, []bool{false}, []string{""}, 1, cfg)
-	t.Cleanup(func() { s.Close() })
-
-	// Insert enough rows to trigger at least one spill.
-	for i := int64(1); i <= 20; i++ {
-		if err := s.Insert([]*vdbe.Mem{vdbe.NewMemInt(i)}); err != nil {
-			t.Fatalf("Insert(%d): %v", i, err)
-		}
-	}
-
-	if s.GetNumSpilledRuns() == 0 {
-		t.Skip("no spilled runs produced; increase row count or decrease MaxMemoryBytes")
-	}
-
-	// Sort merges all spilled runs with in-memory rows.
-	if err := s.Sort(); err != nil {
-		t.Fatalf("Sort: %v", err)
-	}
-
-	// Verify all 20 rows are present in ascending order.
+func spillTestVerifyAscending(t *testing.T, s *vdbe.SorterWithSpill, wantCount int) {
+	t.Helper()
 	count := 0
 	prev := int64(-1 << 62)
 	for s.Next() {
@@ -52,13 +26,59 @@ func TestSorterSpill_WriteAndRecord_HappyPath(t *testing.T) {
 		prev = cur
 		count++
 	}
-	if count != 20 {
-		t.Errorf("total rows after merge: want 20, got %d", count)
+	if count != wantCount {
+		t.Errorf("total rows after merge: want %d, got %d", wantCount, count)
 	}
+}
+
+func TestSorterSpill_WriteAndRecord_HappyPath(t *testing.T) {
+	t.Parallel()
+
+	cfg := &vdbe.SorterConfig{
+		MaxMemoryBytes: 300,
+		TempDir:        t.TempDir(),
+		EnableSpill:    true,
+	}
+	s := vdbe.NewSorterWithSpill([]int{0}, []bool{false}, []string{""}, 1, cfg)
+	t.Cleanup(func() { s.Close() })
+
+	for i := int64(1); i <= 20; i++ {
+		if err := s.Insert([]*vdbe.Mem{vdbe.NewMemInt(i)}); err != nil {
+			t.Fatalf("Insert(%d): %v", i, err)
+		}
+	}
+
+	if s.GetNumSpilledRuns() == 0 {
+		t.Skip("no spilled runs produced; increase row count or decrease MaxMemoryBytes")
+	}
+
+	if err := s.Sort(); err != nil {
+		t.Fatalf("Sort: %v", err)
+	}
+
+	spillTestVerifyAscending(t, s, 20)
 }
 
 // TestSorterSpill_WriteAndRecord_MultipleSpills exercises writeAndRecordSpill
 // being called multiple times (multiple spilled runs) and then merging them.
+func spillTestVerifySequential(t *testing.T, s *vdbe.SorterWithSpill, n int64) {
+	t.Helper()
+	want := int64(1)
+	for s.Next() {
+		row := s.CurrentRow()
+		if row == nil {
+			t.Fatal("CurrentRow() nil mid-iteration")
+		}
+		if got := row[0].IntValue(); got != want {
+			t.Errorf("row %d: want %d, got %d", want, want, got)
+		}
+		want++
+	}
+	if want-1 != n {
+		t.Errorf("total rows: want %d, got %d", n, want-1)
+	}
+}
+
 func TestSorterSpill_WriteAndRecord_MultipleSpills(t *testing.T) {
 	t.Parallel()
 
@@ -86,21 +106,7 @@ func TestSorterSpill_WriteAndRecord_MultipleSpills(t *testing.T) {
 		t.Fatalf("Sort with %d spilled runs: %v", numSpills, err)
 	}
 
-	// Verify sorted output.
-	want := int64(1)
-	for s.Next() {
-		row := s.CurrentRow()
-		if row == nil {
-			t.Fatal("CurrentRow() nil mid-iteration")
-		}
-		if got := row[0].IntValue(); got != want {
-			t.Errorf("row %d: want %d, got %d", want, want, got)
-		}
-		want++
-	}
-	if want-1 != n {
-		t.Errorf("total rows: want %d, got %d", n, want-1)
-	}
+	spillTestVerifySequential(t, s, n)
 }
 
 // TestSorterSpill_WriteAndRecord_DescendingOrder verifies that

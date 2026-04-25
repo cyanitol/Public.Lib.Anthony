@@ -415,13 +415,22 @@ func TestWindowRankRankAndDenseRankWithTies(t *testing.T) {
 	if len(rows) != 4 {
 		t.Fatalf("tied rank: expected 4 rows, got %d", len(rows))
 	}
-	// A: score 100 → rank 1, dense_rank 1
+	rankTiesCheckA(t, rows)
+	rankTiesCheckBC(t, rows)
+	rankTiesCheckD(t, rows)
+}
+
+func rankTiesCheckA(t *testing.T, rows [][]interface{}) {
+	t.Helper()
 	rA := rankToInt64(t, rows[0][2], "A rank")
 	drA := rankToInt64(t, rows[0][3], "A dense_rank")
 	if rA != 1 || drA != 1 {
 		t.Errorf("A: rank=%d dense_rank=%d, want rank=1 dense_rank=1", rA, drA)
 	}
-	// B, C: score 80 → rank 2, dense_rank 2 (tied)
+}
+
+func rankTiesCheckBC(t *testing.T, rows [][]interface{}) {
+	t.Helper()
 	rB := rankToInt64(t, rows[1][2], "B rank")
 	rC := rankToInt64(t, rows[2][2], "C rank")
 	drB := rankToInt64(t, rows[1][3], "B dense_rank")
@@ -432,7 +441,10 @@ func TestWindowRankRankAndDenseRankWithTies(t *testing.T) {
 	if drB != 2 || drC != 2 {
 		t.Errorf("B/C dense_rank = %d/%d, want 2/2", drB, drC)
 	}
-	// D: score 60 → rank 4 (skips 3), dense_rank 3
+}
+
+func rankTiesCheckD(t *testing.T, rows [][]interface{}) {
+	t.Helper()
 	rD := rankToInt64(t, rows[3][2], "D rank")
 	drD := rankToInt64(t, rows[3][3], "D dense_rank")
 	if rD != 4 {

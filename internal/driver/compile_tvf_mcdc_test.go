@@ -464,36 +464,37 @@ func TestMCDC_ResolveTVFOrderByCol_PositionalGuard(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			db := openMCDCDB(t)
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query %q: %v", tt.query, err)
+			vals := queryInt64Slice(t, db, tt.query)
+			if len(vals) != tt.wantRows {
+				t.Errorf("row count = %d, want %d", len(vals), tt.wantRows)
 			}
-			defer rows.Close()
-			count := 0
-			var first int64
-			gotFirst := false
-			for rows.Next() {
-				var v int64
-				if err := rows.Scan(&v); err != nil {
-					t.Fatalf("scan: %v", err)
-				}
-				if !gotFirst {
-					first = v
-					gotFirst = true
-				}
-				count++
-			}
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows.Err: %v", err)
-			}
-			if count != tt.wantRows {
-				t.Errorf("row count = %d, want %d", count, tt.wantRows)
-			}
-			if gotFirst && first != tt.wantFirst {
-				t.Errorf("first value = %d, want %d", first, tt.wantFirst)
+			if len(vals) > 0 && vals[0] != tt.wantFirst {
+				t.Errorf("first value = %d, want %d", vals[0], tt.wantFirst)
 			}
 		})
 	}
+}
+
+// queryInt64Slice runs a query and scans all rows as int64 values.
+func queryInt64Slice(t *testing.T, db *sql.DB, query string) []int64 {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query %q: %v", query, err)
+	}
+	defer rows.Close()
+	var vals []int64
+	for rows.Next() {
+		var v int64
+		if err := rows.Scan(&v); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		vals = append(vals, v)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return vals
 }
 
 // ============================================================================
@@ -783,34 +784,48 @@ func TestMCDC_HasCorrelatedTVF_FromGuard(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			db := openMCDCDB(t)
-			for _, s := range tt.setup {
-				if _, err := db.Exec(s); err != nil {
-					t.Fatalf("setup %q: %v", s, err)
-				}
-			}
-			rows, err := db.Query(tt.query)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got none")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("query %q: %v", tt.query, err)
-			}
-			defer rows.Close()
-			count := 0
-			for rows.Next() {
-				count++
-			}
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows.Err: %v", err)
-			}
-			if count != tt.wantRows {
+			execSetupStmts(t, db, tt.setup)
+			count := queryRowCountWithErr(t, db, tt.query, tt.wantErr)
+			if !tt.wantErr && count != tt.wantRows {
 				t.Errorf("row count = %d, want %d", count, tt.wantRows)
 			}
 		})
 	}
+}
+
+// execSetupStmts executes a slice of SQL statements for test setup.
+func execSetupStmts(t *testing.T, db *sql.DB, stmts []string) {
+	t.Helper()
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("setup %q: %v", s, err)
+		}
+	}
+}
+
+// queryRowCountWithErr runs a query, optionally expecting an error.
+// Returns the row count (0 if error was expected).
+func queryRowCountWithErr(t *testing.T, db *sql.DB, query string, wantErr bool) int {
+	t.Helper()
+	rows, err := db.Query(query)
+	if wantErr {
+		if err == nil {
+			t.Fatalf("expected error, got none")
+		}
+		return 0
+	}
+	if err != nil {
+		t.Fatalf("query %q: %v", query, err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return count
 }
 
 // ============================================================================
@@ -1091,33 +1106,35 @@ func TestMCDC_ResolveColumnToFuncValue_ColumnBoundsGuard(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			db := openMCDCDB(t)
-			for _, s := range tt.setup {
-				if _, err := db.Exec(s); err != nil {
-					t.Fatalf("setup %q: %v", s, err)
-				}
-			}
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				// Some invalid column references may cause compile errors; that's OK
-				// for the flip-A case since the column doesn't exist.
-				if tt.wantRows == 0 {
-					return
-				}
-				t.Fatalf("query %q: %v", tt.query, err)
-			}
-			defer rows.Close()
-			count := 0
-			for rows.Next() {
-				count++
-			}
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows.Err: %v", err)
-			}
+			execSetupStmts(t, db, tt.setup)
+			count := queryRowCountAllowErr(t, db, tt.query, tt.wantRows)
 			if count != tt.wantRows {
 				t.Errorf("row count = %d, want %d", count, tt.wantRows)
 			}
 		})
 	}
+}
+
+// queryRowCountAllowErr runs a query. If the query fails and wantRows is 0,
+// it treats the error as acceptable and returns 0.
+func queryRowCountAllowErr(t *testing.T, db *sql.DB, query string, wantRows int) int {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		if wantRows == 0 {
+			return 0
+		}
+		t.Fatalf("query %q: %v", query, err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return count
 }
 
 // ============================================================================
@@ -1264,22 +1281,7 @@ func TestMCDC_CompileSelectWithTVF_OrderBy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			db := openMCDCDB(t)
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query %q: %v", tt.query, err)
-			}
-			defer rows.Close()
-			var vals []int64
-			for rows.Next() {
-				var v int64
-				if err := rows.Scan(&v); err != nil {
-					t.Fatalf("scan: %v", err)
-				}
-				vals = append(vals, v)
-			}
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows.Err: %v", err)
-			}
+			vals := queryInt64Slice(t, db, tt.query)
 			if len(vals) != tt.wantRows {
 				t.Fatalf("row count = %d, want %d", len(vals), tt.wantRows)
 			}

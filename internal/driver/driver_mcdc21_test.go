@@ -230,6 +230,25 @@ func TestMCDC21_JSONGroupArray_WithNulls(t *testing.T) {
 // applySetOperation — EXCEPT and INTERSECT
 // ---------------------------------------------------------------------------
 
+// drv21QueryInts runs a query and collects int64 values.
+func drv21QueryInts(t *testing.T, db *sql.DB, q string) []int64 {
+	t.Helper()
+	rows, err := db.Query(q)
+	if err != nil {
+		t.Fatalf("query %q: %v", q, err)
+	}
+	defer rows.Close()
+	var results []int64
+	for rows.Next() {
+		var n int64
+		if err := rows.Scan(&n); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		results = append(results, n)
+	}
+	return results
+}
+
 // TestMCDC21_ApplySetOperation_Except exercises the CompoundExcept path.
 func TestMCDC21_ApplySetOperation_Except(t *testing.T) {
 	t.Parallel()
@@ -244,20 +263,7 @@ func TestMCDC21_ApplySetOperation_Except(t *testing.T) {
 		drv21Exec(t, db, `INSERT INTO set21b VALUES (?)`, v)
 	}
 
-	rows, err := db.Query(`SELECT n FROM set21a EXCEPT SELECT n FROM set21b ORDER BY n`)
-	if err != nil {
-		t.Skipf("EXCEPT not supported: %v", err)
-	}
-	defer rows.Close()
-
-	var results []int64
-	for rows.Next() {
-		var n int64
-		if err := rows.Scan(&n); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		results = append(results, n)
-	}
+	results := drv21QueryInts(t, db, `SELECT n FROM set21a EXCEPT SELECT n FROM set21b ORDER BY n`)
 	if len(results) != 2 || results[0] != 1 || results[1] != 2 {
 		t.Errorf("EXCEPT: expected [1 2], got %v", results)
 	}

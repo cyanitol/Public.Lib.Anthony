@@ -4,6 +4,7 @@ package driver
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 )
 
@@ -198,19 +199,14 @@ func compileValueCompare(t *testing.T, db *sql.DB, query string, expected interf
 // compileValueCheck does type-specific comparison of result vs expected.
 func compileValueCheck(t *testing.T, query string, result, expected interface{}) {
 	t.Helper()
-	switch exp := expected.(type) {
-	case int64:
-		if v, ok := result.(int64); !ok || v != exp {
-			t.Errorf("%s: got %v (%T), want %d", query, result, result, exp)
-		}
-	case string:
-		if v, ok := result.(string); !ok || v != exp {
-			t.Errorf("%s: got %v (%T), want %s", query, result, result, exp)
-		}
-	case nil:
+	if expected == nil {
 		if result != nil {
 			t.Errorf("%s: got %v, want nil", query, result)
 		}
+		return
+	}
+	if fmt.Sprintf("%v", result) != fmt.Sprintf("%v", expected) {
+		t.Errorf("%s: got %v (%T), want %v (%T)", query, result, result, expected, expected)
 	}
 }
 
@@ -369,43 +365,47 @@ func TestCreateConnectionSharedState(t *testing.T) {
 	}
 }
 
-// TestCreateMemoryConnectionMultiple tests createMemoryConnection with multiple instances
-func TestCreateMemoryConnectionMultiple(t *testing.T) {
-	// Create multiple memory connections
-	dbs := make([]*sql.DB, 5)
-	for i := 0; i < 5; i++ {
+// openMemoryDBs opens n independent in-memory databases.
+func openMemoryDBs(t *testing.T, n int) []*sql.DB {
+	t.Helper()
+	dbs := make([]*sql.DB, n)
+	for i := 0; i < n; i++ {
 		db, err := sql.Open(DriverName, ":memory:")
 		if err != nil {
 			t.Fatalf("failed to open memory db %d: %v", i, err)
 		}
 		dbs[i] = db
 	}
+	return dbs
+}
 
-	// Each should be independent
+// seedMemoryDBs creates a test table and inserts one row per db.
+func seedMemoryDBs(t *testing.T, dbs []*sql.DB) {
+	t.Helper()
 	for i, db := range dbs {
-		_, err := db.Exec("CREATE TABLE test (id INTEGER)")
-		if err != nil {
+		if _, err := db.Exec("CREATE TABLE test (id INTEGER)"); err != nil {
 			t.Fatalf("failed to create table in db %d: %v", i, err)
 		}
-
-		_, err = db.Exec("INSERT INTO test VALUES (?)", i)
-		if err != nil {
+		if _, err := db.Exec("INSERT INTO test VALUES (?)", i); err != nil {
 			t.Fatalf("failed to insert into db %d: %v", i, err)
 		}
 	}
+}
 
-	// Verify each has only its own data
+// TestCreateMemoryConnectionMultiple tests createMemoryConnection with multiple instances
+func TestCreateMemoryConnectionMultiple(t *testing.T) {
+	dbs := openMemoryDBs(t, 5)
+	seedMemoryDBs(t, dbs)
+
 	for i, db := range dbs {
 		var count int
 		err := db.QueryRow("SELECT COUNT(*) FROM test").Scan(&count)
 		if err != nil {
 			t.Fatalf("failed to count in db %d: %v", i, err)
 		}
-
 		if count != 1 {
 			t.Errorf("db %d: count = %d, want 1", i, count)
 		}
-
 		db.Close()
 	}
 }

@@ -85,65 +85,43 @@ func TestParsePragma(t *testing.T) {
 	}
 }
 
+// assertParsePragmaNames parses the SQL and checks that the resulting PragmaStmt names match.
+func assertParsePragmaNames(t *testing.T, sql string, wantNames []string) {
+	t.Helper()
+	p := NewParser(sql)
+	stmts, err := p.Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(stmts) != len(wantNames) {
+		t.Fatalf("expected %d statements, got %d", len(wantNames), len(stmts))
+	}
+	for i, stmt := range stmts {
+		pragmaStmt, ok := stmt.(*PragmaStmt)
+		if !ok {
+			t.Errorf("statement %d: expected PragmaStmt, got %T", i, stmt)
+			continue
+		}
+		if pragmaStmt.Name != wantNames[i] {
+			t.Errorf("statement %d: expected name %q, got %q", i, wantNames[i], pragmaStmt.Name)
+		}
+	}
+}
+
 func TestParsePragmaMultiple(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantErr   bool
-		wantCount int
-		wantNames []string
-	}{
-		{
-			name:      "multiple pragma statements",
-			sql:       "PRAGMA cache_size = 10000; PRAGMA journal_mode = 'WAL'; PRAGMA synchronous = FULL",
-			wantErr:   false,
-			wantCount: 3,
-			wantNames: []string{"cache_size", "journal_mode", "synchronous"},
-		},
-		{
-			name:      "pragma with semicolons",
-			sql:       "PRAGMA user_version; PRAGMA schema_version;",
-			wantErr:   false,
-			wantCount: 2,
-			wantNames: []string{"user_version", "schema_version"},
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			parser := NewParser(tt.sql)
-			stmts, err := parser.Parse()
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if tt.wantErr {
-				return
-			}
-
-			if len(stmts) != tt.wantCount {
-				t.Errorf("expected %d statements, got %d", tt.wantCount, len(stmts))
-				return
-			}
-
-			for i, stmt := range stmts {
-				pragmaStmt, ok := stmt.(*PragmaStmt)
-				if !ok {
-					t.Errorf("statement %d: expected PragmaStmt, got %T", i, stmt)
-					continue
-				}
-
-				if i < len(tt.wantNames) && pragmaStmt.Name != tt.wantNames[i] {
-					t.Errorf("statement %d: expected name %q, got %q", i, tt.wantNames[i], pragmaStmt.Name)
-				}
-			}
-		})
-	}
+	t.Run("multiple pragma statements", func(t *testing.T) {
+		t.Parallel()
+		assertParsePragmaNames(t,
+			"PRAGMA cache_size = 10000; PRAGMA journal_mode = 'WAL'; PRAGMA synchronous = FULL",
+			[]string{"cache_size", "journal_mode", "synchronous"})
+	})
+	t.Run("pragma with semicolons", func(t *testing.T) {
+		t.Parallel()
+		assertParsePragmaNames(t,
+			"PRAGMA user_version; PRAGMA schema_version;",
+			[]string{"user_version", "schema_version"})
+	})
 }
 
 func parsePragmaValue(t *testing.T, sql string) Expression {

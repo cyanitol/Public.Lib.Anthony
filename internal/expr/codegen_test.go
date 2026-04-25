@@ -316,6 +316,22 @@ func TestInExpression(t *testing.T) {
 }
 
 // TestBetweenExpression tests BETWEEN expression code generation.
+// requireOpcodes checks that every opcode in want appears at least once in program.
+func requireOpcodes(t *testing.T, program []*vdbe.Instruction, want map[vdbe.Opcode]string) {
+	t.Helper()
+	found := make(map[vdbe.Opcode]bool, len(want))
+	for _, instr := range program {
+		if _, ok := want[instr.Opcode]; ok {
+			found[instr.Opcode] = true
+		}
+	}
+	for op, desc := range want {
+		if !found[op] {
+			t.Errorf("Expected %s (%s)", op, desc)
+		}
+	}
+}
+
 func TestBetweenExpression(t *testing.T) {
 	t.Parallel()
 	expr := &parser.BetweenExpr{
@@ -333,32 +349,11 @@ func TestBetweenExpression(t *testing.T) {
 		t.Fatalf("GenerateExpr failed: %v", err)
 	}
 
-	// Should have >= and <= comparisons plus AND
-	hasGe := false
-	hasLe := false
-	hasAnd := false
-
-	for _, instr := range v.Program {
-		instr := instr
-		switch instr.Opcode {
-		case vdbe.OpGe:
-			hasGe = true
-		case vdbe.OpLe:
-			hasLe = true
-		case vdbe.OpAnd:
-			hasAnd = true
-		}
-	}
-
-	if !hasGe {
-		t.Error("Expected OpGe for lower bound check")
-	}
-	if !hasLe {
-		t.Error("Expected OpLe for upper bound check")
-	}
-	if !hasAnd {
-		t.Error("Expected OpAnd to combine bounds")
-	}
+	requireOpcodes(t, v.Program, map[vdbe.Opcode]string{
+		vdbe.OpGe:  "lower bound check",
+		vdbe.OpLe:  "upper bound check",
+		vdbe.OpAnd: "combine bounds",
+	})
 }
 
 // TestCaseExpression tests CASE expression code generation.
@@ -721,32 +716,11 @@ func TestComplexExpression(t *testing.T) {
 		t.Fatalf("GenerateExpr failed: %v", err)
 	}
 
-	// Should have add, subtract, and multiply operations
-	hasAdd := false
-	hasSub := false
-	hasMul := false
-
-	for _, instr := range v.Program {
-		instr := instr
-		switch instr.Opcode {
-		case vdbe.OpAdd:
-			hasAdd = true
-		case vdbe.OpSubtract:
-			hasSub = true
-		case vdbe.OpMultiply:
-			hasMul = true
-		}
-	}
-
-	if !hasAdd {
-		t.Error("Expected OpAdd")
-	}
-	if !hasSub {
-		t.Error("Expected OpSubtract")
-	}
-	if !hasMul {
-		t.Error("Expected OpMultiply")
-	}
+	requireOpcodes(t, v.Program, map[vdbe.Opcode]string{
+		vdbe.OpAdd:      "addition",
+		vdbe.OpSubtract: "subtraction",
+		vdbe.OpMultiply: "multiplication",
+	})
 }
 
 // TestGenerateBinaryOperandsErrors tests error handling in generateBinaryOperands.

@@ -192,10 +192,34 @@ func BenchmarkPreparedInsert(b *testing.B) {
 	}
 }
 
-// BenchmarkComplexQuery measures a JOIN across two tables with WHERE and ORDER BY.
-func BenchmarkComplexQuery(b *testing.B) {
-	db := openBenchDB(b)
-	defer db.Close()
+// insertUsersAndOrders populates bench_users and bench_orders within the
+// provided transaction.
+func insertUsersAndOrders(b *testing.B, tx *sql.Tx, n int) {
+	b.Helper()
+	uStmt, err := tx.Prepare("INSERT INTO bench_users (name) VALUES (?)")
+	if err != nil {
+		b.Fatalf("prepare users: %v", err)
+	}
+	oStmt, err := tx.Prepare("INSERT INTO bench_orders (user_id, amount) VALUES (?, ?)")
+	if err != nil {
+		b.Fatalf("prepare orders: %v", err)
+	}
+	for i := 0; i < n; i++ {
+		if _, err = uStmt.Exec(fmt.Sprintf("user-%d", i)); err != nil {
+			b.Fatalf("insert user: %v", err)
+		}
+		if _, err = oStmt.Exec(i+1, float64(i)*1.5); err != nil {
+			b.Fatalf("insert order: %v", err)
+		}
+	}
+	uStmt.Close()
+	oStmt.Close()
+}
+
+// seedComplexQueryTables creates and populates bench_users and bench_orders for
+// the complex-query benchmark.
+func seedComplexQueryTables(b *testing.B, db *sql.DB) {
+	b.Helper()
 
 	_, err := db.Exec("CREATE TABLE bench_users (id INTEGER PRIMARY KEY, name TEXT)")
 	if err != nil {
@@ -210,27 +234,18 @@ func BenchmarkComplexQuery(b *testing.B) {
 	if err != nil {
 		b.Fatalf("begin seed: %v", err)
 	}
-	uStmt, err := tx.Prepare("INSERT INTO bench_users (name) VALUES (?)")
-	if err != nil {
-		b.Fatalf("prepare users: %v", err)
-	}
-	oStmt, err := tx.Prepare("INSERT INTO bench_orders (user_id, amount) VALUES (?, ?)")
-	if err != nil {
-		b.Fatalf("prepare orders: %v", err)
-	}
-	for i := 0; i < 100; i++ {
-		if _, err = uStmt.Exec(fmt.Sprintf("user-%d", i)); err != nil {
-			b.Fatalf("insert user: %v", err)
-		}
-		if _, err = oStmt.Exec(i+1, float64(i)*1.5); err != nil {
-			b.Fatalf("insert order: %v", err)
-		}
-	}
-	uStmt.Close()
-	oStmt.Close()
+	insertUsersAndOrders(b, tx, 100)
 	if err = tx.Commit(); err != nil {
 		b.Fatalf("seed commit: %v", err)
 	}
+}
+
+// BenchmarkComplexQuery measures a JOIN across two tables with WHERE and ORDER BY.
+func BenchmarkComplexQuery(b *testing.B) {
+	db := openBenchDB(b)
+	defer db.Close()
+
+	seedComplexQueryTables(b, db)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

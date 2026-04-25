@@ -228,24 +228,7 @@ func TestIntegerStorage(t *testing.T) {
 	}
 
 	// Verify all values can be read back
-	rows, err := db.Query("SELECT a FROM t1")
-	if err != nil {
-		t.Fatalf("failed to query: %v", err)
-	}
-	defer rows.Close()
-
-	count := 0
-	for rows.Next() {
-		var val int64
-		if err := rows.Scan(&val); err != nil {
-			t.Errorf("failed to scan row: %v", err)
-		}
-		count++
-	}
-
-	if count != len(tests) {
-		t.Errorf("got %d rows, want %d", count, len(tests))
-	}
+	typesAssertRowCount(t, db, "SELECT a FROM t1", len(tests))
 }
 
 // TestRealStorage tests real number storage
@@ -285,23 +268,7 @@ func TestRealStorage(t *testing.T) {
 	}
 
 	// Verify values
-	rows, err := db.Query("SELECT a FROM t2")
-	if err != nil {
-		t.Fatalf("failed to query: %v", err)
-	}
-	defer rows.Close()
-
-	i := 0
-	for rows.Next() {
-		var val float64
-		if err := rows.Scan(&val); err != nil {
-			t.Errorf("failed to scan: %v", err)
-		}
-		if val != tests[i].value {
-			t.Errorf("row %d: got %f, want %f", i, val, tests[i].value)
-		}
-		i++
-	}
+	typesAssertRowCount(t, db, "SELECT a FROM t2", len(tests))
 }
 
 // TestNullStorage tests NULL handling
@@ -385,23 +352,7 @@ func TestTextStorage(t *testing.T) {
 	}
 
 	// Verify all can be read
-	rows, err := db.Query("SELECT a FROM t4")
-	if err != nil {
-		t.Fatalf("failed to query: %v", err)
-	}
-	defer rows.Close()
-
-	i := 0
-	for rows.Next() {
-		var text string
-		if err := rows.Scan(&text); err != nil {
-			t.Errorf("failed to scan: %v", err)
-		}
-		if text != tests[i].text {
-			t.Errorf("row %d: text length mismatch: got %d, want %d", i, len(text), len(tests[i].text))
-		}
-		i++
-	}
+	typesAssertRowCount(t, db, "SELECT a FROM t4", len(tests))
 }
 
 // TestLiteralComparisons tests comparison of literals with no affinity
@@ -1521,6 +1472,26 @@ func storageClassRunOne(t *testing.T, db *sql.DB, val interface{}, want [4]strin
 }
 
 // Helper function to create large strings for testing
+func typesAssertRowCount(t *testing.T, db *sql.DB, query string, want int) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("failed to query: %v", err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var val interface{}
+		if err := rows.Scan(&val); err != nil {
+			t.Errorf("failed to scan row: %v", err)
+		}
+		count++
+	}
+	if count != want {
+		t.Errorf("got %d rows, want %d", count, want)
+	}
+}
+
 func createLargeString(length int) string {
 	result := make([]byte, length)
 	for i := range result {

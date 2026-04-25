@@ -287,26 +287,13 @@ func testRTreeAuxData(t *testing.T, db *sql.DB) {
 
 // testRTreeEdgeCases tests edge cases like empty rtrees, negative coordinates, etc.
 func testRTreeEdgeCases(t *testing.T, db *sql.DB) {
-	var count int64
-
 	_, err := db.Exec("CREATE VIRTUAL TABLE rt_empty USING rtree(id, x1, x2, y1, y2)")
 	if err != nil {
 		t.Fatalf("failed to create empty rtree: %v", err)
 	}
 
-	// Test 22: Query empty rtree (COUNT(*) returns 0 columns on rtree, count manually)
-	rows, err := db.Query("SELECT id FROM rt_empty")
-	if err != nil {
-		t.Fatalf("failed to query empty rtree: %v", err)
-	}
-	count = 0
-	for rows.Next() {
-		count++
-	}
-	rows.Close()
-	if count != 0 {
-		t.Errorf("expected 0 entries in empty rtree, got %d", count)
-	}
+	// Test 22: Query empty rtree
+	rtreeAssertRowCount(t, db, "SELECT id FROM rt_empty", 0, "empty rtree")
 
 	// Test 23: Insert and delete all
 	_, err = db.Exec("INSERT INTO rt_empty VALUES(1, 0, 10, 0, 10)")
@@ -317,21 +304,26 @@ func testRTreeEdgeCases(t *testing.T, db *sql.DB) {
 	if err != nil {
 		t.Fatalf("failed to delete all: %v", err)
 	}
-	rows, err = db.Query("SELECT id FROM rt_empty")
+	rtreeAssertRowCount(t, db, "SELECT id FROM rt_empty", 0, "after delete all")
+
+	testNegativeAndFloatingCoordinates(t, db)
+	testZeroWidthRectangle(t, db)
+}
+
+func rtreeAssertRowCount(t *testing.T, db *sql.DB, query string, want int64, label string) {
+	t.Helper()
+	rows, err := db.Query(query)
 	if err != nil {
-		t.Fatalf("failed to query after delete all: %v", err)
+		t.Fatalf("failed to query %s: %v", label, err)
 	}
-	count = 0
+	var count int64
 	for rows.Next() {
 		count++
 	}
 	rows.Close()
-	if count != 0 {
-		t.Errorf("expected 0 after delete all, got %d", count)
+	if count != want {
+		t.Errorf("expected %d entries for %s, got %d", want, label, count)
 	}
-
-	testNegativeAndFloatingCoordinates(t, db)
-	testZeroWidthRectangle(t, db)
 }
 
 // testNegativeAndFloatingCoordinates tests negative and floating point coordinates

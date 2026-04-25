@@ -1041,26 +1041,28 @@ func TestPreparedStmtCloseIdempotent(t *testing.T) {
 	}
 }
 
-// TestScanIntoInterfacePointer tests scanning into *interface{}
-func TestScanIntoInterfacePointer(t *testing.T) {
+// setupScanTestDB creates a database with a test table and one row.
+func setupScanTestDB(t *testing.T) *Engine {
+	t.Helper()
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-
 	db, err := Open(dbPath)
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer db.Close()
-
-	_, err = db.Execute(`CREATE TABLE test (id INTEGER, name TEXT)`)
-	if err != nil {
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Execute(`CREATE TABLE test (id INTEGER, name TEXT)`); err != nil {
 		t.Fatalf("Failed to create table: %v", err)
 	}
-
-	_, err = db.Execute(`INSERT INTO test VALUES (42, 'test')`)
-	if err != nil {
+	if _, err := db.Execute(`INSERT INTO test VALUES (42, 'test')`); err != nil {
 		t.Fatalf("Failed to insert: %v", err)
 	}
+	return db
+}
+
+// TestScanIntoInterfacePointer tests scanning into *interface{}
+func TestScanIntoInterfacePointer(t *testing.T) {
+	db := setupScanTestDB(t)
 
 	rows, err := db.Query(`SELECT id, name FROM test`)
 	if err != nil {
@@ -1074,8 +1076,7 @@ func TestScanIntoInterfacePointer(t *testing.T) {
 
 	var id interface{}
 	var name interface{}
-	err = rows.Scan(&id, &name)
-	if err != nil {
+	if err = rows.Scan(&id, &name); err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
 

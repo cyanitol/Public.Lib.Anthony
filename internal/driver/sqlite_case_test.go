@@ -289,14 +289,26 @@ func caseExprRunOne(t *testing.T, db *sql.DB, setup, expr string, want interface
 
 func caseExprCheck(t *testing.T, db *sql.DB, query string, want interface{}, wantErr bool) {
 	t.Helper()
-	var result interface{}
-	err := db.QueryRow(query).Scan(&result)
 	if wantErr {
-		if err == nil {
-			t.Errorf("expected error, got none")
-		}
+		caseExpectError(t, db, query)
 		return
 	}
+	caseVerifyResult(t, db, query, want)
+}
+
+func caseExpectError(t *testing.T, db *sql.DB, query string) {
+	t.Helper()
+	var result interface{}
+	err := db.QueryRow(query).Scan(&result)
+	if err == nil {
+		t.Errorf("expected error, got none")
+	}
+}
+
+func caseVerifyResult(t *testing.T, db *sql.DB, query string, want interface{}) {
+	t.Helper()
+	var result interface{}
+	err := db.QueryRow(query).Scan(&result)
 	if err != nil {
 		if want == nil && err == sql.ErrNoRows {
 			return
@@ -661,26 +673,13 @@ func TestSQLiteCaseNullHandling(t *testing.T) {
 	defer db.Close()
 
 	// From expr-14 tests
-	_, err := db.Exec(`CREATE TABLE t5(x)`)
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO t5 VALUES(0)`)
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO t5 VALUES(1)`)
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO t5 VALUES(NULL)`)
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
-	_, err = db.Exec(`INSERT INTO t5 VALUES(0.5)`)
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
+	caseExecAll(t, db, []string{
+		`CREATE TABLE t5(x)`,
+		`INSERT INTO t5 VALUES(0)`,
+		`INSERT INTO t5 VALUES(1)`,
+		`INSERT INTO t5 VALUES(NULL)`,
+		`INSERT INTO t5 VALUES(0.5)`,
+	})
 
 	tests := []struct {
 		name  string

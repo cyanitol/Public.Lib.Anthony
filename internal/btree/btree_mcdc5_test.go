@@ -550,6 +550,36 @@ func TestMCDC5_ExtractCellData_ViaMerge(t *testing.T) {
 // getFirstChildPage when descending into child pages after climbing back
 // through the parent.  We insert as many entries as fit without triggering
 // the unimplemented split path, then do a full forward scan.
+// mcdc5_insertIndexEntries inserts up to maxEntries index entries, returning
+// the number actually inserted (stops when page is full).
+func mcdc5_insertIndexEntries(ic *btree.IndexCursor, maxEntries int) int {
+	var inserted int
+	for i := 1; i <= maxEntries; i++ {
+		key := []byte(fmt.Sprintf("idx-%05d", i))
+		if err := ic.InsertIndex(key, int64(i)); err != nil {
+			break
+		}
+		inserted = i
+	}
+	return inserted
+}
+
+// mcdc5_scanForwardCount scans from MoveToFirst and returns the count.
+func mcdc5_scanForwardCount(t *testing.T, ic *btree.IndexCursor) int {
+	t.Helper()
+	if err := ic.MoveToFirst(); err != nil {
+		t.Fatalf("MoveToFirst: %v", err)
+	}
+	scanned := 0
+	for ic.State == btree.CursorValid {
+		scanned++
+		if err := ic.NextIndex(); err != nil {
+			break
+		}
+	}
+	return scanned
+}
+
 func TestMCDC5_GetFirstChildPage_ViaIndexCursorScan(t *testing.T) {
 	t.Parallel()
 
@@ -560,32 +590,12 @@ func TestMCDC5_GetFirstChildPage_ViaIndexCursorScan(t *testing.T) {
 	}
 
 	ic := btree.NewIndexCursor(bt, root)
-
-	var inserted int
-	for i := 1; i <= 100; i++ {
-		key := []byte(fmt.Sprintf("idx-%05d", i))
-		if err := ic.InsertIndex(key, int64(i)); err != nil {
-			// Stop when the page is full (split not implemented for index pages).
-			break
-		}
-		inserted = i
-	}
+	inserted := mcdc5_insertIndexEntries(ic, 100)
 	if inserted == 0 {
 		t.Skip("no entries inserted")
 	}
 
-	// MoveToFirst + full forward scan exercises descendToFirst.
-	if err := ic.MoveToFirst(); err != nil {
-		t.Fatalf("MoveToFirst: %v", err)
-	}
-
-	scanned := 0
-	for ic.State == btree.CursorValid {
-		scanned++
-		if err := ic.NextIndex(); err != nil {
-			break
-		}
-	}
+	scanned := mcdc5_scanForwardCount(t, ic)
 	if scanned != inserted {
 		t.Errorf("scanned %d entries, want %d", scanned, inserted)
 	}
@@ -652,28 +662,34 @@ func TestMCDC5_FreeOverflowChain_MultiPageNormal(t *testing.T) {
 
 // TestMCDC5_AllocateSpace_DefragPath fills a page, deletes rows to fragment,
 // then inserts more to trigger the defragment branch in AllocateSpace.
+// mcdc5_fillAndFragment fills a cursor with rows, then deletes some to fragment.
+// Returns the number of rows inserted.
+func mcdc5_fillAndFragment(cursor *btree.BtCursor, payload []byte, maxRows int) int {
+	var count int
+	for i := 1; i <= maxRows; i++ {
+		if err := cursor.Insert(int64(i), payload); err != nil {
+			break
+		}
+		count = i
+	}
+	// Delete rows in the middle to fragment free space.
+	for i := 2; i <= count/2; i += 3 {
+		if found, _ := cursor.SeekRowid(int64(i)); found {
+			_ = cursor.Delete()
+		}
+	}
+	return count
+}
+
 func TestMCDC5_AllocateSpace_DefragPath(t *testing.T) {
 	t.Parallel()
 
 	_, cursor, _ := mcdc5_rowidTable(t, 512)
 	payload := make([]byte, 30)
 
-	var count int
-	for i := 1; i <= 500; i++ {
-		if err := cursor.Insert(int64(i), payload); err != nil {
-			break
-		}
-		count = i
-	}
+	count := mcdc5_fillAndFragment(cursor, payload, 500)
 	if count < 5 {
 		t.Skip("not enough rows for defrag test")
-	}
-
-	// Delete rows in the middle to fragment free space.
-	for i := 2; i <= count/2; i += 3 {
-		if found, _ := cursor.SeekRowid(int64(i)); found {
-			_ = cursor.Delete()
-		}
 	}
 
 	// Insert new rows; some will land on fragmented pages requiring defrag.
@@ -727,6 +743,18 @@ func TestMCDC5_AllocatePage_InMemorySequential(t *testing.T) {
 
 // TestMCDC5_MixedWorkload_RowidTable performs a comprehensive mixed
 // insert/delete/seek workload on a rowid table.
+// mcdc5_deleteEveryNth deletes every nth row from 1..maxKey.
+func mcdc5_deleteEveryNth(t *testing.T, cursor *btree.BtCursor, maxKey, step int) {
+	t.Helper()
+	for i := 1; i <= maxKey; i += step {
+		if found, _ := cursor.SeekRowid(int64(i)); found {
+			if err := cursor.Delete(); err != nil {
+				t.Fatalf("Delete(%d): %v", i, err)
+			}
+		}
+	}
+}
+
 func TestMCDC5_MixedWorkload_RowidTable(t *testing.T) {
 	t.Parallel()
 
@@ -736,13 +764,7 @@ func TestMCDC5_MixedWorkload_RowidTable(t *testing.T) {
 	mcdc5_insertN(t, cursor, 1000, 25)
 
 	// Phase 2: Delete every 5th row to create underfull conditions.
-	for i := 1; i <= 1000; i += 5 {
-		if found, _ := cursor.SeekRowid(int64(i)); found {
-			if err := cursor.Delete(); err != nil {
-				t.Fatalf("Delete(%d): %v", i, err)
-			}
-		}
-	}
+	mcdc5_deleteEveryNth(t, cursor, 1000, 5)
 
 	// Phase 3: Navigate forward and backward.
 	if err := cursor.MoveToFirst(); err != nil {

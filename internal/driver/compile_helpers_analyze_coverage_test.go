@@ -257,32 +257,10 @@ func TestMultiTableJoinOrderByDesc(t *testing.T) {
 // analyzeToInt64 by running ANALYZE on a table with many rows. The engine
 // calls estimateDistinct when distinct counts are zero (no index data).
 // analyzeToInt64 is exercised when the stat1 table is queried for statistics.
-func TestEstimateDistinctAndAnalyzeToInt64(t *testing.T) {
-	db := openHelpersDB(t)
-	defer db.Close()
-
-	mustExec(t, db, `CREATE TABLE ana_t(a INTEGER, b TEXT)`)
-	mustExec(t, db, `CREATE INDEX ana_t_a ON ana_t(a)`)
-
-	// Insert rows: many with duplicate 'a' values to exercise
-	// the distinct-count / estimateDistinct code paths.
-	for i := 0; i < 20; i++ {
-		mustExec(t, db, `INSERT INTO ana_t VALUES(?, ?)`, i%5, "val")
-	}
-
-	mustExec(t, db, `ANALYZE ana_t`)
-
-	// The stat entry for the index should exist.
-	var cnt int64
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_stat1 WHERE tbl='ana_t' AND idx='ana_t_a'`).Scan(&cnt); err != nil {
-		t.Fatalf("stat query: %v", err)
-	}
-	if cnt == 0 {
-		t.Error("expected sqlite_stat1 entry for ana_t_a index")
-	}
-
-	// Read the stat string to exercise analyzeToInt64 via the stat row scan path.
-	rows, err := db.Query(`SELECT stat FROM sqlite_stat1 WHERE tbl='ana_t' AND idx='ana_t_a'`)
+// verifyStat1NonEmpty reads stat strings for the given table/index and verifies they are non-empty.
+func verifyStat1NonEmpty(t *testing.T, db *sql.DB, tbl, idx string) {
+	t.Helper()
+	rows, err := db.Query(`SELECT stat FROM sqlite_stat1 WHERE tbl=? AND idx=?`, tbl, idx)
 	if err != nil {
 		t.Fatalf("SELECT stat: %v", err)
 	}
@@ -299,6 +277,30 @@ func TestEstimateDistinctAndAnalyzeToInt64(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows.Err: %v", err)
 	}
+}
+
+func TestEstimateDistinctAndAnalyzeToInt64(t *testing.T) {
+	db := openHelpersDB(t)
+	defer db.Close()
+
+	mustExec(t, db, `CREATE TABLE ana_t(a INTEGER, b TEXT)`)
+	mustExec(t, db, `CREATE INDEX ana_t_a ON ana_t(a)`)
+
+	for i := 0; i < 20; i++ {
+		mustExec(t, db, `INSERT INTO ana_t VALUES(?, ?)`, i%5, "val")
+	}
+
+	mustExec(t, db, `ANALYZE ana_t`)
+
+	var cnt int64
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_stat1 WHERE tbl='ana_t' AND idx='ana_t_a'`).Scan(&cnt); err != nil {
+		t.Fatalf("stat query: %v", err)
+	}
+	if cnt == 0 {
+		t.Error("expected sqlite_stat1 entry for ana_t_a index")
+	}
+
+	verifyStat1NonEmpty(t, db, "ana_t", "ana_t_a")
 }
 
 // TestAnalyzeWithZeroRowsEstimateDistinct exercises estimateDistinct on a

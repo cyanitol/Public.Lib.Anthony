@@ -646,13 +646,17 @@ func TestBindWithOrderBy(t *testing.T) {
 		t.Fatalf("failed to insert: %v", err)
 	}
 
-	rows, err := db.Query("SELECT id FROM t1 WHERE value > ? ORDER BY value", 5)
+	bindAssertOrderedInts(t, db, "SELECT id FROM t1 WHERE value > ? ORDER BY value", []int{2, 3, 1}, 5)
+}
+
+func bindAssertOrderedInts(t *testing.T, db *sql.DB, query string, expected []int, args ...interface{}) {
+	t.Helper()
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
 	defer rows.Close()
 
-	expected := []int{2, 3, 1} // sorted by value: 10, 20, 30
 	i := 0
 	for rows.Next() {
 		var id int
@@ -1064,22 +1068,7 @@ func TestBindTransaction(t *testing.T) {
 		t.Fatalf("failed to create table: %v", err)
 	}
 
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("failed to begin tx: %v", err)
-	}
-
-	for i := 1; i <= 5; i++ {
-		_, err = tx.Exec("INSERT INTO t1 VALUES(?)", i)
-		if err != nil {
-			tx.Rollback()
-			t.Fatalf("failed to insert in tx: %v", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
+	bindInsertInTx(t, db, 5)
 
 	var count int
 	err = db.QueryRow("SELECT COUNT(*) FROM t1").Scan(&count)
@@ -1088,6 +1077,24 @@ func TestBindTransaction(t *testing.T) {
 	}
 	if count != 5 {
 		t.Errorf("got count %d, want 5", count)
+	}
+}
+
+func bindInsertInTx(t *testing.T, db *sql.DB, n int) {
+	t.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("failed to begin tx: %v", err)
+	}
+	for i := 1; i <= n; i++ {
+		_, err = tx.Exec("INSERT INTO t1 VALUES(?)", i)
+		if err != nil {
+			tx.Rollback()
+			t.Fatalf("failed to insert in tx: %v", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("failed to commit: %v", err)
 	}
 }
 

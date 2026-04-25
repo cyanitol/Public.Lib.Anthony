@@ -377,6 +377,30 @@ func TestCompileDropTableSystemTable(t *testing.T) {
 	}
 }
 
+// verifyIndexInSchema checks that an index exists with the expected properties.
+func verifyIndexInSchema(t *testing.T, s *Schema, name, table string, columns []string) {
+	t.Helper()
+	index := s.Indexes[name]
+	if index == nil {
+		t.Fatalf("Index %q not added to schema", name)
+	}
+	if index.Name != name {
+		t.Errorf("Expected index name %q, got %q", name, index.Name)
+	}
+	if index.Table != table {
+		t.Errorf("Expected table %q, got %q", table, index.Table)
+	}
+	if len(index.Columns) != len(columns) {
+		t.Errorf("Expected %d column(s), got %d", len(columns), len(index.Columns))
+		return
+	}
+	for i, col := range columns {
+		if index.Columns[i] != col {
+			t.Errorf("Column %d: expected %q, got %q", i, col, index.Columns[i])
+		}
+	}
+}
+
 func TestCompileCreateIndexBasic(t *testing.T) {
 	schema := NewSchema()
 	bt := btree.NewBtree(4096)
@@ -414,23 +438,7 @@ func TestCompileCreateIndexBasic(t *testing.T) {
 		t.Fatal("VDBE is nil")
 	}
 
-	// Check that index was added to schema
-	index := schema.Indexes["idx_users_email"]
-	if index == nil {
-		t.Fatal("Index not added to schema")
-	}
-	if index.Name != "idx_users_email" {
-		t.Errorf("Expected index name 'idx_users_email', got '%s'", index.Name)
-	}
-	if index.Table != "users" {
-		t.Errorf("Expected table 'users', got '%s'", index.Table)
-	}
-	if len(index.Columns) != 1 {
-		t.Errorf("Expected 1 column, got %d", len(index.Columns))
-	}
-	if index.Columns[0] != "email" {
-		t.Errorf("Expected column 'email', got '%s'", index.Columns[0])
-	}
+	verifyIndexInSchema(t, schema, "idx_users_email", "users", []string{"email"})
 }
 
 func TestCompileCreateIndexUnique(t *testing.T) {

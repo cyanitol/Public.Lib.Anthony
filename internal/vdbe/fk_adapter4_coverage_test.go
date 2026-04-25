@@ -26,52 +26,56 @@ func fk4EncodeVarint(v uint64) []byte {
 	return []byte{byte(v>>14) | 0x80, byte((v>>7)&0x7f) | 0x80, byte(v & 0x7f)}
 }
 
+// fk4EncodeValue encodes a single value, returning (typeVarint, dataBytes).
+func fk4EncodeValue(v interface{}) ([]byte, []byte) {
+	switch vv := v.(type) {
+	case nil:
+		return fk4EncodeVarint(0), nil
+	case int64:
+		return fk4EncodeInt64(vv)
+	case float64:
+		return fk4EncodeFloat64(vv)
+	case string:
+		rawBytes := []byte(vv)
+		return fk4EncodeVarint(uint64(len(rawBytes))*2 + 13), rawBytes
+	}
+	return nil, nil
+}
+
+func fk4EncodeInt64(v int64) ([]byte, []byte) {
+	b := make([]byte, 8)
+	u := uint64(v)
+	b[0], b[1], b[2], b[3] = byte(u>>56), byte(u>>48), byte(u>>40), byte(u>>32)
+	b[4], b[5], b[6], b[7] = byte(u>>24), byte(u>>16), byte(u>>8), byte(u)
+	return fk4EncodeVarint(6), b
+}
+
+func fk4EncodeFloat64(v float64) ([]byte, []byte) {
+	b := make([]byte, 8)
+	bits := math.Float64bits(v)
+	b[0], b[1], b[2], b[3] = byte(bits>>56), byte(bits>>48), byte(bits>>40), byte(bits>>32)
+	b[4], b[5], b[6], b[7] = byte(bits>>24), byte(bits>>16), byte(bits>>8), byte(bits)
+	return fk4EncodeVarint(7), b
+}
+
 // fk4EncodeRecord encodes a slice of interface{} values into a SQLite record.
 // Supported types: nil (NULL), int64, float64, string.
 func fk4EncodeRecord(vals []interface{}) []byte {
 	types := make([][]byte, len(vals))
 	data := make([][]byte, len(vals))
-
 	for i, v := range vals {
-		switch vv := v.(type) {
-		case nil:
-			types[i] = fk4EncodeVarint(0)
-			data[i] = nil
-		case int64:
-			types[i] = fk4EncodeVarint(6)
-			b := make([]byte, 8)
-			u := uint64(vv)
-			b[0], b[1], b[2], b[3] = byte(u>>56), byte(u>>48), byte(u>>40), byte(u>>32)
-			b[4], b[5], b[6], b[7] = byte(u>>24), byte(u>>16), byte(u>>8), byte(u)
-			data[i] = b
-		case float64:
-			// SQLite type code 7 = 8-byte IEEE 754 float
-			types[i] = fk4EncodeVarint(7)
-			b := make([]byte, 8)
-			bits := math.Float64bits(vv)
-			b[0], b[1], b[2], b[3] = byte(bits>>56), byte(bits>>48), byte(bits>>40), byte(bits>>32)
-			b[4], b[5], b[6], b[7] = byte(bits>>24), byte(bits>>16), byte(bits>>8), byte(bits)
-			data[i] = b
-		case string:
-			rawBytes := []byte(vv)
-			typeCode := uint64(len(rawBytes))*2 + 13
-			types[i] = fk4EncodeVarint(typeCode)
-			data[i] = rawBytes
-		}
+		types[i], data[i] = fk4EncodeValue(v)
 	}
+	return fk4AssembleRecord(types, data)
+}
 
-	// Compute header length: 1 byte for the header-size varint + sum of type varint lengths.
+func fk4AssembleRecord(types, data [][]byte) []byte {
 	typeLen := 0
 	for _, t := range types {
 		typeLen += len(t)
 	}
-	// Header size varint (header-size includes itself).
-	headerSizeVal := uint64(1 + typeLen)
-	headerSizeBytes := fk4EncodeVarint(headerSizeVal)
-	// Recompute if header size varint is longer than 1 byte.
-	headerSizeVal = uint64(len(headerSizeBytes) + typeLen)
-	headerSizeBytes = fk4EncodeVarint(headerSizeVal)
-
+	headerSizeBytes := fk4EncodeVarint(uint64(1 + typeLen))
+	headerSizeBytes = fk4EncodeVarint(uint64(len(headerSizeBytes) + typeLen))
 	var out []byte
 	out = append(out, headerSizeBytes...)
 	for _, t := range types {

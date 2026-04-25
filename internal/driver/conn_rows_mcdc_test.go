@@ -97,61 +97,54 @@ func TestMCDC_Conn_UpdateChangeTracking_NumChangesOrLastInsertID(t *testing.T) {
 //                     enabled), so we exercise A=F B=F together with FK violations
 // ============================================================================
 
+// mcdcOpenWithSetup opens a DB with the given DSN and runs semicolon-separated setup statements.
+func mcdcOpenWithSetup(t *testing.T, dsn, setup string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open(DriverName, dsn)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	db.SetMaxOpenConns(1)
+	for _, s := range splitSemicolon(setup) {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("setup %q: %v", s, err)
+		}
+	}
+	return db
+}
+
+// mcdcCheckFKSetupAndExec opens a DB with the given DSN, runs setup statements,
+// then executes stmts and checks whether an error is expected.
+func mcdcCheckFKSetupAndExec(t *testing.T, dsn, setup string, stmts []string, wantErr bool) {
+	t.Helper()
+	db := mcdcOpenWithSetup(t, dsn, setup)
+	for _, s := range stmts {
+		_, err := db.Exec(s)
+		if wantErr && err == nil {
+			t.Errorf("expected error for %q but got none", s)
+		} else if !wantErr && err != nil {
+			t.Errorf("unexpected error for %q: %v", s, err)
+		}
+	}
+}
+
 func TestMCDC_Conn_CheckDeferredFKConstraints_FKsDisabledOrNilManager(t *testing.T) {
 	t.Parallel()
 
-	type tc struct {
-		name    string
-		dsn     string
-		setup   string
-		stmts   []string
-		wantErr bool
-	}
-	tests := []tc{
-		{
-			// A=T B=F: FKs disabled via DSN → COMMIT succeeds even with dangling ref
-			name:    "A=T B=F: FKs disabled, dangling FK allowed",
-			dsn:     ":memory:",
-			setup:   "CREATE TABLE parent(id INTEGER PRIMARY KEY); CREATE TABLE child(pid INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)",
-			stmts:   []string{"INSERT INTO child(pid) VALUES(99)"},
-			wantErr: false,
-		},
-		{
-			// A=F B=F: FKs enabled → dangling deferred FK raises error at commit
-			name:    "A=F B=F: FKs enabled, deferred FK violation caught",
-			dsn:     ":memory:?foreign_keys=on",
-			setup:   "CREATE TABLE parent2(id INTEGER PRIMARY KEY); CREATE TABLE child2(pid INTEGER REFERENCES parent2(id))",
-			stmts:   []string{"INSERT INTO child2(pid) VALUES(99)"},
-			wantErr: true,
-		},
-	}
+	t.Run("A=T B=F: FKs disabled, dangling FK allowed", func(t *testing.T) {
+		t.Parallel()
+		mcdcCheckFKSetupAndExec(t, ":memory:",
+			"CREATE TABLE parent(id INTEGER PRIMARY KEY); CREATE TABLE child(pid INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)",
+			[]string{"INSERT INTO child(pid) VALUES(99)"}, false)
+	})
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			db, err := sql.Open(DriverName, tt.dsn)
-			if err != nil {
-				t.Fatalf("open: %v", err)
-			}
-			defer db.Close()
-			db.SetMaxOpenConns(1)
-
-			for _, s := range splitSemicolon(tt.setup) {
-				if _, err := db.Exec(s); err != nil {
-					t.Fatalf("setup %q: %v", s, err)
-				}
-			}
-			for _, s := range tt.stmts {
-				_, err := db.Exec(s)
-				if tt.wantErr && err == nil {
-					t.Errorf("expected error for %q but got none", s)
-				} else if !tt.wantErr && err != nil {
-					t.Errorf("unexpected error for %q: %v", s, err)
-				}
-			}
-		})
-	}
+	t.Run("A=F B=F: FKs enabled, deferred FK violation caught", func(t *testing.T) {
+		t.Parallel()
+		mcdcCheckFKSetupAndExec(t, ":memory:?foreign_keys=on",
+			"CREATE TABLE parent2(id INTEGER PRIMARY KEY); CREATE TABLE child2(pid INTEGER REFERENCES parent2(id))",
+			[]string{"INSERT INTO child2(pid) VALUES(99)"}, true)
+	})
 }
 
 // ============================================================================
@@ -169,72 +162,35 @@ func TestMCDC_Conn_CheckDeferredFKConstraints_FKsDisabledOrNilManager(t *testing
 //   Flip B: A=T B=F → SQL-managed transaction (BEGIN SQL) → reset succeeds
 // ============================================================================
 
-func TestMCDC_Conn_ResetSession_InTxAndNotSqlTx(t *testing.T) {
+func TestMCDC_Conn_ResetSession_NoTransaction(t *testing.T) {
 	t.Parallel()
-
-	type tc struct {
-		name      string
-		setup     string
-		useSQLTx  bool // true = BEGIN via SQL; false = db.Begin()
-		openTx    bool // whether to leave a transaction open before re-use
-		wantNoErr bool
+	db := openMCDCDB(t)
+	db.SetMaxOpenConns(1)
+	mustExec(t, db, "CREATE TABLE rs1(x INTEGER)")
+	rows, err := db.Query("SELECT 1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	tests := []tc{
-		{
-			// A=F B=?: no transaction at all → second query succeeds
-			name:      "A=F: no transaction, reset succeeds",
-			setup:     "CREATE TABLE rs1(x INTEGER)",
-			openTx:    false,
-			wantNoErr: true,
-		},
-		{
-			// A=T B=F: SQL-managed transaction via BEGIN → pool reuse is allowed
-			name:      "A=T B=F: SQL BEGIN transaction, reset succeeds",
-			setup:     "CREATE TABLE rs2(x INTEGER)",
-			useSQLTx:  true,
-			openTx:    true,
-			wantNoErr: true,
-		},
+	if rows != nil {
+		rows.Close()
 	}
+}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			db := openMCDCDB(t)
-			db.SetMaxOpenConns(1)
-
-			for _, s := range splitSemicolon(tt.setup) {
-				mustExec(t, db, s)
-			}
-
-			if tt.openTx && tt.useSQLTx {
-				// Begin SQL transaction without committing
-				mustExec(t, db, "BEGIN")
-				mustExec(t, db, "INSERT INTO rs2 VALUES(1)")
-				// Don't commit – connection stays in sqlTx state
-				// Issuing another query on the same connection must succeed
-				rows, err := db.Query("SELECT x FROM rs2")
-				if err != nil && tt.wantNoErr {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if rows != nil {
-					rows.Close()
-				}
-				// Clean up
-				mustExec(t, db, "ROLLBACK")
-			} else {
-				// Normal path: no open transaction
-				rows, err := db.Query("SELECT 1")
-				if err != nil && tt.wantNoErr {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if rows != nil {
-					rows.Close()
-				}
-			}
-		})
+func TestMCDC_Conn_ResetSession_SQLTx(t *testing.T) {
+	t.Parallel()
+	db := openMCDCDB(t)
+	db.SetMaxOpenConns(1)
+	mustExec(t, db, "CREATE TABLE rs2(x INTEGER)")
+	mustExec(t, db, "BEGIN")
+	mustExec(t, db, "INSERT INTO rs2 VALUES(1)")
+	rows, err := db.Query("SELECT x FROM rs2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
+	if rows != nil {
+		rows.Close()
+	}
+	mustExec(t, db, "ROLLBACK")
 }
 
 // ============================================================================
@@ -1006,55 +962,25 @@ func TestMCDC_CompileAnalyze_IsSystemTable_PrefixCheck(t *testing.T) {
 //   Flip A: A=T → in transaction → error returned
 // ============================================================================
 
-func TestMCDC_StmtAttach_CompileAttach_InTransactionError(t *testing.T) {
+func TestMCDC_StmtAttach_CompileAttach_OutsideTransaction(t *testing.T) {
 	t.Parallel()
-
-	type tc struct {
-		name    string
-		inTx    bool
-		wantErr bool
+	db := openMCDCDB(t)
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("ATTACH DATABASE ':memory:' AS noattach"); err != nil {
+		t.Errorf("unexpected error: %v", err)
 	}
-	tests := []tc{
-		{
-			// A=F: not in transaction → succeeds
-			name:    "A=F: ATTACH outside transaction succeeds",
-			inTx:    false,
-			wantErr: false,
-		},
-		{
-			// Flip A=T: inside transaction → error
-			name:    "Flip A=T: ATTACH inside transaction fails",
-			inTx:    true,
-			wantErr: true,
-		},
-	}
+}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			db := openMCDCDB(t)
-			db.SetMaxOpenConns(1)
-
-			if tt.inTx {
-				mustExec(t, db, "BEGIN")
-				_, err := db.Exec("ATTACH DATABASE ':memory:' AS txattach")
-				if tt.wantErr && err == nil {
-					t.Error("expected error attaching inside TX, got none")
-				} else if !tt.wantErr && err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-				mustExec(t, db, "ROLLBACK")
-			} else {
-				_, err := db.Exec("ATTACH DATABASE ':memory:' AS noattach")
-				if tt.wantErr && err == nil {
-					t.Error("expected error, got none")
-				} else if !tt.wantErr && err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-			}
-		})
+func TestMCDC_StmtAttach_CompileAttach_InsideTransaction(t *testing.T) {
+	t.Parallel()
+	db := openMCDCDB(t)
+	db.SetMaxOpenConns(1)
+	mustExec(t, db, "BEGIN")
+	_, err := db.Exec("ATTACH DATABASE ':memory:' AS txattach")
+	if err == nil {
+		t.Error("expected error attaching inside TX, got none")
 	}
+	mustExec(t, db, "ROLLBACK")
 }
 
 func TestMCDC_StmtAttach_CompileDetach_InTransactionError(t *testing.T) {

@@ -67,6 +67,23 @@ func TestViewBasicOperations(t *testing.T) {
 	}
 }
 
+// viewTestSetupProducts creates a products table and inserts sample data.
+func viewTestSetupProducts(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec(`CREATE TABLE products (
+		id INTEGER PRIMARY KEY,
+		name TEXT,
+		price REAL
+	)`)
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO products VALUES (1, 'Widget', 9.99), (2, 'Gadget', 19.99)`)
+	if err != nil {
+		t.Fatalf("Failed to insert data: %v", err)
+	}
+}
+
 func TestViewWithColumnList(t *testing.T) {
 	tmpfile := tempFilename()
 	defer os.Remove(tmpfile)
@@ -77,37 +94,20 @@ func TestViewWithColumnList(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create table
-	_, err = db.Exec(`CREATE TABLE products (
-		id INTEGER PRIMARY KEY,
-		name TEXT,
-		price REAL
-	)`)
-	if err != nil {
-		t.Fatalf("Failed to create table: %v", err)
-	}
+	viewTestSetupProducts(t, db)
 
-	// Insert data
-	_, err = db.Exec(`INSERT INTO products VALUES (1, 'Widget', 9.99), (2, 'Gadget', 19.99)`)
-	if err != nil {
-		t.Fatalf("Failed to insert data: %v", err)
-	}
-
-	// Create view with explicit column names
 	_, err = db.Exec(`CREATE VIEW product_view(product_id, product_name, product_price) AS
 		SELECT id, name, price FROM products`)
 	if err != nil {
 		t.Fatalf("Failed to create view: %v", err)
 	}
 
-	// Query the view
 	rows, err := db.Query(`SELECT product_name, product_price FROM product_view ORDER BY product_id`)
 	if err != nil {
 		t.Fatalf("Failed to query view: %v", err)
 	}
 	defer rows.Close()
 
-	// Verify we can access columns by their view names
 	count := 0
 	for rows.Next() {
 		var name string

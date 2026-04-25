@@ -299,63 +299,45 @@ func TestMCDC_UpdateSequence(t *testing.T) {
 //       case 4:  A=F B=F → generates next sequence
 // ---------------------------------------------------------------------------
 
+// assertAutoincRowidMCDC is a helper for MC/DC autoincrement tests.
+func assertAutoincRowidMCDC(t *testing.T, explicit int64, hasExplicit bool, currentMax int64, want int64) {
+	t.Helper()
+	sm := NewSequenceManager()
+	sm.InitSequence("tbl")
+	got, err := GenerateAutoincrementRowid(sm, "tbl", explicit, hasExplicit, currentMax)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != want {
+		t.Errorf("expected rowid %d, got %d", want, got)
+	}
+}
+
 func TestMCDC_GenerateAutoincrementRowid(t *testing.T) {
 	t.Parallel()
 
 	// case 1: A=T, B=T → explicit rowid used
 	t.Run("MCDC_autoincrement_explicit_rowid_A_true_B_true", func(t *testing.T) {
 		t.Parallel()
-		sm := NewSequenceManager()
-		sm.InitSequence("tbl")
-		got, err := GenerateAutoincrementRowid(sm, "tbl", 99, true, 0)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got != 99 {
-			t.Errorf("expected rowid 99, got %d", got)
-		}
+		assertAutoincRowidMCDC(t, 99, true, 0, 99)
 	})
 
 	// case 2: A=T, B=F (explicitRowid == 0) → generate next sequence
 	t.Run("MCDC_autoincrement_explicit_zero_A_true_B_false", func(t *testing.T) {
 		t.Parallel()
-		sm := NewSequenceManager()
-		sm.InitSequence("tbl")
-		got, err := GenerateAutoincrementRowid(sm, "tbl", 0, true, 0)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got != 1 {
-			t.Errorf("expected generated rowid 1, got %d", got)
-		}
+		assertAutoincRowidMCDC(t, 0, true, 0, 1)
 	})
 
 	// case 3: A=F, B=T → generate next sequence (A flips outcome)
 	t.Run("MCDC_autoincrement_no_explicit_rowid_A_false_B_true", func(t *testing.T) {
 		t.Parallel()
-		sm := NewSequenceManager()
-		sm.InitSequence("tbl")
-		got, err := GenerateAutoincrementRowid(sm, "tbl", 50, false, 0)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got != 1 {
-			t.Errorf("expected generated rowid 1, got %d", got)
-		}
+		assertAutoincRowidMCDC(t, 50, false, 0, 1)
 	})
 
 	// case 4: A=F, B=F → generate next sequence
 	t.Run("MCDC_autoincrement_no_explicit_rowid_A_false_B_false", func(t *testing.T) {
 		t.Parallel()
-		sm := NewSequenceManager()
-		sm.InitSequence("tbl")
-		got, err := GenerateAutoincrementRowid(sm, "tbl", 0, false, 5)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got != 6 {
-			t.Errorf("expected generated rowid 6 (currentMaxRowid+1), got %d", got)
-		}
+		assertAutoincRowidMCDC(t, 0, false, 5, 6)
 	})
 }
 
@@ -467,6 +449,16 @@ func TestMCDC_CheckDuplicatePath(t *testing.T) {
 //       case 3:  A=F B=F → excluded
 // ---------------------------------------------------------------------------
 
+// masterRowsContains checks whether buildMasterRows includes an entry with the given name.
+func masterRowsContains(rows []MasterRow, name string) bool {
+	for _, r := range rows {
+		if r.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func TestMCDC_BuildMasterRows_IndexInclusion(t *testing.T) {
 	t.Parallel()
 
@@ -475,15 +467,7 @@ func TestMCDC_BuildMasterRows_IndexInclusion(t *testing.T) {
 		t.Parallel()
 		s := NewSchema()
 		s.Indexes["my_index"] = &Index{Name: "my_index", Table: "t", SQL: ""}
-		rows := s.buildMasterRows()
-		found := false
-		for _, r := range rows {
-			if r.Name == "my_index" {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !masterRowsContains(s.buildMasterRows(), "my_index") {
 			t.Error("expected normal index (non-auto) with empty SQL to be included in master rows")
 		}
 	})
@@ -494,15 +478,7 @@ func TestMCDC_BuildMasterRows_IndexInclusion(t *testing.T) {
 		s := NewSchema()
 		autoName := "sqlite_autoindex_users_1"
 		s.Indexes[autoName] = &Index{Name: autoName, Table: "users", SQL: "CREATE UNIQUE INDEX sqlite_autoindex_users_1 ON users(email)"}
-		rows := s.buildMasterRows()
-		found := false
-		for _, r := range rows {
-			if r.Name == autoName {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !masterRowsContains(s.buildMasterRows(), autoName) {
 			t.Error("expected auto-index with SQL to be included in master rows")
 		}
 	})
@@ -513,12 +489,8 @@ func TestMCDC_BuildMasterRows_IndexInclusion(t *testing.T) {
 		s := NewSchema()
 		autoName := "sqlite_autoindex_orders_1"
 		s.Indexes[autoName] = &Index{Name: autoName, Table: "orders", SQL: ""}
-		rows := s.buildMasterRows()
-		for _, r := range rows {
-			if r.Name == autoName {
-				t.Error("expected auto-index with no SQL to be excluded from master rows")
-				break
-			}
+		if masterRowsContains(s.buildMasterRows(), autoName) {
+			t.Error("expected auto-index with no SQL to be excluded from master rows")
 		}
 	})
 }

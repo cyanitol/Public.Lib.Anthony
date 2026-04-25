@@ -43,19 +43,13 @@ func mcdc2_mustQuery(t *testing.T, db *sql.DB, query string, args ...interface{}
 // Exercises setupVacuumIntoSchema, cloneTables, cloneViews, cloneTriggers
 // ============================================================================
 
-func TestMCDC_Driver2_VacuumInto_SchemaWithIndex(t *testing.T) {
-	// VACUUM INTO on a DB that has tables and an index → exercises schema copy
-	t.Parallel()
-	dir := t.TempDir()
-	srcPath := filepath.Join(dir, "src_idx.db")
-	dstPath := filepath.Join(dir, "dst_idx.db")
-
+// mcdc2_setupVacuumSrc opens a file DB, creates products table with data and index.
+func mcdc2_setupVacuumSrc(t *testing.T, srcPath string) *sql.DB {
+	t.Helper()
 	db, err := sql.Open("sqlite_internal", srcPath)
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
 	}
-	defer db.Close()
-
 	mcdc2_mustExec(t, db, "CREATE TABLE products(id INTEGER PRIMARY KEY, name TEXT, price REAL)")
 	if _, err := db.Exec("CREATE INDEX idx_products_name ON products(name)"); err != nil {
 		t.Logf("index creation skipped: %v", err)
@@ -64,11 +58,21 @@ func TestMCDC_Driver2_VacuumInto_SchemaWithIndex(t *testing.T) {
 		mcdc2_mustExec(t, db, fmt.Sprintf("INSERT INTO products VALUES(%d,'prod%d',%f)", i, i, float64(i)*1.5))
 	}
 	mcdc2_mustExec(t, db, "DELETE FROM products WHERE id > 10")
+	return db
+}
+
+func TestMCDC_Driver2_VacuumInto_SchemaWithIndex(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "src_idx.db")
+	dstPath := filepath.Join(dir, "dst_idx.db")
+
+	db := mcdc2_setupVacuumSrc(t, srcPath)
+	defer db.Close()
 
 	if _, err := db.Exec("VACUUM INTO '" + dstPath + "'"); err != nil {
 		t.Skipf("VACUUM INTO: %v", err)
 	}
-
 	if _, err := os.Stat(dstPath); err != nil {
 		t.Fatalf("target file not created: %v", err)
 	}

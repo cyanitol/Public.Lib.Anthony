@@ -293,6 +293,48 @@ func TestMCDC_GenerateBinary_LikeEscapeCondition(t *testing.T) {
 // using it, which is what generateColumn normally does.
 // ----------------------------------------------------------------------------
 
+// runCollationConditionCase is a helper for TestMCDC_EmitBinaryOpcode_CollationCondition subtests.
+func runCollationConditionCase(t *testing.T, left, right parser.Expression, op parser.BinaryOp, collation string, wantP4Type bool, wantOpcode vdbe.Opcode) {
+	t.Helper()
+	v := vdbe.New()
+	gen := NewCodeGenerator(v)
+
+	leftReg, err := gen.GenerateExpr(left)
+	if err != nil {
+		t.Fatalf("GenerateExpr(left) failed: %v", err)
+	}
+	if collation != "" {
+		gen.SetCollationForReg(leftReg, collation)
+	}
+
+	rightReg, err := gen.GenerateExpr(right)
+	if err != nil {
+		t.Fatalf("GenerateExpr(right) failed: %v", err)
+	}
+
+	_, err = gen.generateStandardBinaryOp(op, leftReg, rightReg)
+	if err != nil {
+		t.Fatalf("generateStandardBinaryOp failed: %v", err)
+	}
+
+	verifyOpcodeP4(t, v.Program, wantOpcode, wantP4Type)
+}
+
+// verifyOpcodeP4 checks that the expected opcode exists and has the expected P4Static state.
+func verifyOpcodeP4(t *testing.T, program []*vdbe.Instruction, wantOpcode vdbe.Opcode, wantP4Type bool) {
+	t.Helper()
+	for _, instr := range program {
+		if instr.Opcode == wantOpcode {
+			gotP4Static := instr.P4Type == vdbe.P4Static
+			if gotP4Static != wantP4Type {
+				t.Errorf("P4Static: got %v, want %v", gotP4Static, wantP4Type)
+			}
+			return
+		}
+	}
+	t.Errorf("expected opcode %s in program, not found", wantOpcode.String())
+}
+
 func TestMCDC_EmitBinaryOpcode_CollationCondition(t *testing.T) {
 	t.Parallel()
 
@@ -341,45 +383,7 @@ func TestMCDC_EmitBinaryOpcode_CollationCondition(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			v := vdbe.New()
-			gen := NewCodeGenerator(v)
-
-			// Generate left operand
-			leftReg, err := gen.GenerateExpr(tt.left)
-			if err != nil {
-				t.Fatalf("GenerateExpr(left) failed: %v", err)
-			}
-			// Inject collation on the left register to simulate a column with COLLATE
-			if tt.collation != "" {
-				gen.SetCollationForReg(leftReg, tt.collation)
-			}
-
-			rightReg, err := gen.GenerateExpr(tt.right)
-			if err != nil {
-				t.Fatalf("GenerateExpr(right) failed: %v", err)
-			}
-
-			// Call generateStandardBinaryOp directly (it's package-internal)
-			_, err = gen.generateStandardBinaryOp(tt.op, leftReg, rightReg)
-			if err != nil {
-				t.Fatalf("generateStandardBinaryOp failed: %v", err)
-			}
-
-			// Find the target opcode and check P4Type
-			found := false
-			for _, instr := range v.Program {
-				if instr.Opcode == tt.wantOpcode {
-					gotP4Static := instr.P4Type == vdbe.P4Static
-					if gotP4Static != tt.wantP4Type {
-						t.Errorf("P4Static: got %v, want %v", gotP4Static, tt.wantP4Type)
-					}
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Errorf("expected opcode %s in program, not found", tt.wantOpcode.String())
-			}
+			runCollationConditionCase(t, tt.left, tt.right, tt.op, tt.collation, tt.wantP4Type, tt.wantOpcode)
 		})
 	}
 }

@@ -108,32 +108,20 @@ func TestBetweenWithExpression(t *testing.T) {
 		t.Fatalf("failed to create table: %v", err)
 	}
 
-	// Test BETWEEN with expression on right side
+	betweenAssertCount(t, db, "SELECT COUNT(*) FROM t1 WHERE w BETWEEN 5 AND 65-y", 2)
+	betweenAssertCount(t, db, "SELECT COUNT(*) FROM t1 WHERE w BETWEEN 41-y AND 6", 2)
+	betweenAssertCount(t, db, "SELECT COUNT(*) FROM t1 WHERE w BETWEEN 41-y AND 65-y", 2)
+}
+
+func betweenAssertCount(t *testing.T, db *sql.DB, query string, want int) {
+	t.Helper()
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM t1 WHERE w BETWEEN 5 AND 65-y").Scan(&count)
+	err := db.QueryRow(query).Scan(&count)
 	if err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
-	if count != 2 {
-		t.Errorf("got count %d, want 2", count)
-	}
-
-	// Test BETWEEN with expression on left side
-	err = db.QueryRow("SELECT COUNT(*) FROM t1 WHERE w BETWEEN 41-y AND 6").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query: %v", err)
-	}
-	if count != 2 {
-		t.Errorf("got count %d, want 2", count)
-	}
-
-	// Test BETWEEN with expressions on both sides
-	err = db.QueryRow("SELECT COUNT(*) FROM t1 WHERE w BETWEEN 41-y AND 65-y").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query: %v", err)
-	}
-	if count != 2 {
-		t.Errorf("got count %d, want 2", count)
+	if count != want {
+		t.Errorf("got count %d, want %d", count, want)
 	}
 }
 
@@ -999,13 +987,17 @@ func TestBetweenWithOrderBy(t *testing.T) {
 		t.Fatalf("failed to setup: %v", err)
 	}
 
-	rows, err := db.Query("SELECT n FROM t WHERE n BETWEEN 2 AND 5 ORDER BY n")
+	betweenAssertOrderedInts(t, db, "SELECT n FROM t WHERE n BETWEEN 2 AND 5 ORDER BY n", []int{2, 3, 5})
+}
+
+func betweenAssertOrderedInts(t *testing.T, db *sql.DB, query string, expected []int) {
+	t.Helper()
+	rows, err := db.Query(query)
 	if err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
 	defer rows.Close()
 
-	expected := []int{2, 3, 5}
 	i := 0
 	for rows.Next() {
 		var n int

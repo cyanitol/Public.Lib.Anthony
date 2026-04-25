@@ -29,6 +29,20 @@ func whExec(t *testing.T, db *sql.DB, q string) {
 	}
 }
 
+// whConvertVal converts a single scanned value to a string.
+func whConvertVal(v interface{}) string {
+	if v == nil {
+		return "NULL"
+	}
+	if b, ok := v.([]byte); ok {
+		return string(b)
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return whFmtVal(v)
+}
+
 // whRows runs a query and returns results as rows of string slices.
 func whRows(t *testing.T, db *sql.DB, q string) [][]string {
 	t.Helper()
@@ -53,15 +67,7 @@ func whRows(t *testing.T, db *sql.DB, q string) [][]string {
 		}
 		row := make([]string, len(cols))
 		for i, v := range vals {
-			if v == nil {
-				row[i] = "NULL"
-			} else if b, ok := v.([]byte); ok {
-				row[i] = string(b)
-			} else if s, ok := v.(string); ok {
-				row[i] = s
-			} else {
-				row[i] = whFmtVal(v)
-			}
+			row[i] = whConvertVal(v)
 		}
 		result = append(result, row)
 	}
@@ -381,6 +387,12 @@ func testDenseRankAndRankSameQuery(t *testing.T) {
 	if len(rows) != 4 {
 		t.Fatalf("RANK+DENSE_RANK: expected 4 rows, got %d", len(rows))
 	}
+	drRankCheckTiedFives(t, rows)
+	drRankCheckTenAndFifteen(t, rows)
+}
+
+func drRankCheckTiedFives(t *testing.T, rows [][]string) {
+	t.Helper()
 	// v=5 (tied): rank 1, dense_rank 1
 	if rows[0][1] != "1" || rows[1][1] != "1" {
 		t.Errorf("v=5 RANK = %q/%q, want 1/1", rows[0][1], rows[1][1])
@@ -388,6 +400,10 @@ func testDenseRankAndRankSameQuery(t *testing.T) {
 	if rows[0][2] != "1" || rows[1][2] != "1" {
 		t.Errorf("v=5 DENSE_RANK = %q/%q, want 1/1", rows[0][2], rows[1][2])
 	}
+}
+
+func drRankCheckTenAndFifteen(t *testing.T, rows [][]string) {
+	t.Helper()
 	// v=10: rank 3 (skips), dense_rank 2
 	if rows[2][1] != "3" {
 		t.Errorf("v=10 RANK = %q, want 3", rows[2][1])
@@ -693,7 +709,6 @@ func TestWindowHelpersCoverageReport(t *testing.T) {
 func TestWindowHelpersOrderByComparisons(t *testing.T) {
 	db := openWHCovDB(t)
 	whExec(t, db, "CREATE TABLE ord_cmp(v INTEGER)")
-	// Insert in unsorted order to ensure sorter actually sorts.
 	for _, v := range []int{30, 10, 20, 10, 30} {
 		whExec(t, db, "INSERT INTO ord_cmp VALUES("+whFmtInt(int64(v))+")")
 	}
@@ -708,9 +723,12 @@ func TestWindowHelpersOrderByComparisons(t *testing.T) {
 		t.Fatalf("ord_cmp: expected 5 rows, got %d", len(rows))
 	}
 
-	// v=10 (tied, rows 0-1): rank 1, dense_rank 1
-	// v=20 (row 2): rank 3, dense_rank 2
-	// v=30 (tied, rows 3-4): rank 4, dense_rank 3
+	ordCmpCheckRankGroups(t, rows)
+	ordCmpCheckRowNumber(t, rows)
+}
+
+func ordCmpCheckRankGroups(t *testing.T, rows [][]string) {
+	t.Helper()
 	groups := []struct {
 		indices  []int
 		wantRank string
@@ -730,8 +748,10 @@ func TestWindowHelpersOrderByComparisons(t *testing.T) {
 			}
 		}
 	}
+}
 
-	// ROW_NUMBER must be strictly sequential.
+func ordCmpCheckRowNumber(t *testing.T, rows [][]string) {
+	t.Helper()
 	for i, row := range rows {
 		want := whFmtInt(int64(i + 1))
 		if row[3] != want {

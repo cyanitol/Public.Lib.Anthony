@@ -710,6 +710,16 @@ func windowCovSetupLagTest(t *testing.T) *sql.DB {
 	return db
 }
 
+func windowCovCheckLagRow(t *testing.T, grp string, val int, lag1, lag5 sql.NullInt64) {
+	t.Helper()
+	if grp == "A" && val == 10 && lag1.Valid {
+		t.Errorf("LAG(val,1) for first row in partition A: expected NULL")
+	}
+	if lag5.Valid {
+		t.Errorf("LAG(val,5) should always be NULL (offset>partition), got %d", lag5.Int64)
+	}
+}
+
 // windowCovCheckLagResults validates LAG query results.
 func windowCovCheckLagResults(t *testing.T, rows *sql.Rows) {
 	t.Helper()
@@ -721,12 +731,7 @@ func windowCovCheckLagResults(t *testing.T, rows *sql.Rows) {
 		if err := rows.Scan(&grp, &val, &lag1, &lag5); err != nil {
 			t.Fatalf("scan: %v", err)
 		}
-		if grp == "A" && val == 10 && lag1.Valid {
-			t.Errorf("LAG(val,1) for first row in partition A: expected NULL")
-		}
-		if lag5.Valid {
-			t.Errorf("LAG(val,5) should always be NULL (offset>partition), got %d", lag5.Int64)
-		}
+		windowCovCheckLagRow(t, grp, val, lag1, lag5)
 		count++
 	}
 	if err := rows.Err(); err != nil {

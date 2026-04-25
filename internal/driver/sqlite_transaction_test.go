@@ -35,6 +35,13 @@ func setupTransactionTestDBWithPath(t *testing.T, path string) *sql.DB {
 	return db
 }
 
+func transExecInTx(t *testing.T, tx *sql.Tx, stmt string) {
+	t.Helper()
+	if _, err := tx.Exec(stmt); err != nil {
+		t.Fatalf("%s failed: %v", stmt, err)
+	}
+}
+
 // execSQLStmts executes SQL statements and returns error if any
 func execSQLStmts(db *sql.DB, stmts ...string) error {
 	for _, stmt := range stmts {
@@ -395,54 +402,42 @@ func TestTransIsolationBasic(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	// Open two connections
 	db1 := setupTransactionTestDBWithPath(t, dbPath)
 	defer db1.Close()
 
 	db2 := setupTransactionTestDBWithPath(t, dbPath)
 	defer db2.Close()
 
-	// Setup table in db1
 	execSQL(t, db1,
 		"CREATE TABLE t1(a int, b int)",
 		"INSERT INTO t1 VALUES(1, 2)",
 	)
 
-	// Begin transaction in db1
 	tx1, err := db1.Begin()
 	if err != nil {
 		t.Fatalf("BEGIN on db1 failed: %v", err)
 	}
 
-	// Insert in tx1
 	if _, err := tx1.Exec("INSERT INTO t1 VALUES(3, 4)"); err != nil {
 		t.Fatalf("INSERT in tx1 failed: %v", err)
 	}
 
-	// Engine limitation: in-process connections share state, so db2 may see
-	// uncommitted changes. Accept 1 or 2 rows visible before commit.
-	rows := queryRows(t, db2, "SELECT COUNT(*) FROM t1")
+	transAssertCountInRange(t, db2, "SELECT COUNT(*) FROM t1", 1, 2)
 
-	if len(rows) > 0 {
-		count := rows[0][0]
-		if count != int64(1) && count != int64(2) {
-			t.Errorf("Expected 1 or 2 rows visible to db2, got %v", count)
-		}
-	}
-
-	// Commit tx1
 	if err := tx1.Commit(); err != nil {
-		// Engine may auto-commit due to shared connection state
 		t.Logf("COMMIT note: %v", err)
 	}
 
-	// Now db2 should see both rows
-	rows = queryRows(t, db2, "SELECT COUNT(*) FROM t1")
+	transAssertCountInRange(t, db2, "SELECT COUNT(*) FROM t1", 2, 2)
+}
 
+func transAssertCountInRange(t *testing.T, db *sql.DB, query string, lo, hi int64) {
+	t.Helper()
+	rows := queryRows(t, db, query)
 	if len(rows) > 0 {
 		count := rows[0][0]
-		if count != int64(2) {
-			t.Errorf("Expected 2 rows visible to db2 after commit, got %v", count)
+		if count != lo && (lo == hi || count != hi) {
+			t.Errorf("Expected count in [%d, %d], got %v", lo, hi, count)
 		}
 	}
 }
@@ -501,7 +496,6 @@ func TestTransRollbackWithPendingStatement(t *testing.T) {
 	db := setupTransactionTestDB(t)
 	defer db.Close()
 
-	// Setup
 	if err := execSQLStmts(db,
 		"CREATE TABLE t1(x)",
 		"INSERT INTO t1 VALUES(1)",
@@ -512,30 +506,21 @@ func TestTransRollbackWithPendingStatement(t *testing.T) {
 		t.Fatalf("Setup failed: %v", err)
 	}
 
-	// Begin transaction and create table
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatalf("BEGIN failed: %v", err)
 	}
 
-	if _, err := tx.Exec("CREATE TABLE xyzzy(abc)"); err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
+	transExecInTx(t, tx, "CREATE TABLE xyzzy(abc)")
+	transExecInTx(t, tx, "INSERT INTO t1 VALUES(5)")
 
-	if _, err := tx.Exec("INSERT INTO t1 VALUES(5)"); err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-
-	// Query with pending cursor
 	rows, err := tx.Query("SELECT * FROM t1")
 	if err != nil {
 		t.Fatalf("Query failed: %v", err)
 	}
 
-	// Try to rollback while cursor is open
 	rollbackErr := tx.Rollback()
 
-	// Cursor should fail after rollback
 	if rows.Next() {
 		t.Error("Expected cursor to fail after ROLLBACK")
 	}
@@ -638,7 +623,6 @@ func TestSavepointRollbackData(t *testing.T) {
 	db := setupTransactionTestDB(t)
 	defer db.Close()
 
-	// Setup
 	if err := execSQLStmts(db,
 		"CREATE TABLE t1(a, b, c)",
 		"BEGIN",
@@ -649,33 +633,26 @@ func TestSavepointRollbackData(t *testing.T) {
 		t.Fatalf("Setup failed: %v", err)
 	}
 
-	// Verify updated values
-	rows, err := queryRowsWithError(db, "SELECT * FROM t1")
-	if err != nil {
-		t.Fatalf("Query failed: %v", err)
-	}
+	transAssertFirstColEquals(t, db, "SELECT * FROM t1", int64(2), "updated values")
 
-	if len(rows) != 1 || rows[0][0] != int64(2) {
-		t.Error("Expected updated values")
-	}
-
-	// Rollback to savepoint
 	if _, err := db.Exec("ROLLBACK TO one"); err != nil {
 		t.Fatalf("ROLLBACK TO one failed: %v", err)
 	}
 
-	// Verify original values restored
-	rows, err = queryRowsWithError(db, "SELECT * FROM t1")
-	if err != nil {
-		t.Fatalf("Query failed: %v", err)
-	}
+	transAssertFirstColEquals(t, db, "SELECT * FROM t1", int64(1), "original values after rollback")
 
-	if len(rows) != 1 || rows[0][0] != int64(1) {
-		t.Error("Expected original values after rollback")
-	}
-
-	// Clean up
 	db.Exec("ROLLBACK")
+}
+
+func transAssertFirstColEquals(t *testing.T, db *sql.DB, query string, want int64, label string) {
+	t.Helper()
+	rows, err := queryRowsWithError(db, query)
+	if err != nil {
+		t.Fatalf("Query failed (%s): %v", label, err)
+	}
+	if len(rows) != 1 || rows[0][0] != want {
+		t.Errorf("Expected %s (first col = %d)", label, want)
+	}
 }
 
 // TestSavepointMultipleLevels tests multiple nested savepoint levels
@@ -778,44 +755,43 @@ func TestSavepointErrors(t *testing.T) {
 	db := setupTransactionTestDB(t)
 	defer db.Close()
 
-	// Create a savepoint
-	if _, err := db.Exec("SAVEPOINT abc"); err != nil {
-		t.Fatalf("SAVEPOINT abc failed: %v", err)
-	}
+	t.Run("release_nonexistent", func(t *testing.T) {
+		if _, err := db.Exec("SAVEPOINT abc"); err != nil {
+			t.Fatalf("SAVEPOINT abc failed: %v", err)
+		}
+		if _, err := db.Exec("RELEASE abc"); err != nil {
+			t.Fatalf("RELEASE abc failed: %v", err)
+		}
+		_, err := db.Exec("RELEASE abc")
+		transExpectErrorContaining(t, err, "no such savepoint", "release requires active write transaction")
+	})
 
-	// Release it
-	if _, err := db.Exec("RELEASE abc"); err != nil {
-		t.Fatalf("RELEASE abc failed: %v", err)
-	}
+	t.Run("rollback_nonexistent", func(t *testing.T) {
+		if _, err := db.Exec("BEGIN"); err != nil {
+			t.Fatalf("BEGIN failed: %v", err)
+		}
+		if _, err := db.Exec("SAVEPOINT abc"); err != nil {
+			t.Fatalf("SAVEPOINT abc failed: %v", err)
+		}
+		_, err := db.Exec("ROLLBACK TO def")
+		transExpectErrorContaining(t, err, "no such savepoint")
+		db.Exec("RELEASE abc")
+		db.Exec("COMMIT")
+	})
+}
 
-	// Try to release it again - should fail
-	_, err := db.Exec("RELEASE abc")
+func transExpectErrorContaining(t *testing.T, err error, patterns ...string) {
+	t.Helper()
 	if err == nil {
-		t.Error("Expected error when releasing non-existent savepoint")
-	} else if !strings.Contains(err.Error(), "no such savepoint") &&
-		!strings.Contains(err.Error(), "release requires active write transaction") {
-		t.Errorf("Wrong error message: %v", err)
+		t.Error("Expected error, got nil")
+		return
 	}
-
-	// Create savepoint abc within a transaction
-	if _, err := db.Exec("BEGIN"); err != nil {
-		t.Fatalf("BEGIN failed: %v", err)
+	for _, p := range patterns {
+		if strings.Contains(err.Error(), p) {
+			return
+		}
 	}
-	if _, err := db.Exec("SAVEPOINT abc"); err != nil {
-		t.Fatalf("SAVEPOINT abc failed: %v", err)
-	}
-
-	// Try to rollback to non-existent savepoint
-	_, err = db.Exec("ROLLBACK TO def")
-	if err == nil {
-		t.Error("Expected error: no such savepoint: def")
-	} else if !strings.Contains(err.Error(), "no such savepoint") {
-		t.Errorf("Wrong error message: %v", err)
-	}
-
-	// Clean up
-	db.Exec("RELEASE abc")
-	db.Exec("COMMIT")
+	t.Errorf("Wrong error message: %v (expected one of %v)", err, patterns)
 }
 
 // TestSavepointCaseSensitivity tests case-insensitive savepoint names
@@ -1009,43 +985,37 @@ func TestTransErrorRecoveryCommit(t *testing.T) {
 	db := setupTransactionTestDB(t)
 	defer db.Close()
 
-	// Setup
-	if err := execSQLStmts(db,
-		"CREATE TABLE t1(a PRIMARY KEY, b)",
-	); err != nil {
+	if err := execSQLStmts(db, "CREATE TABLE t1(a PRIMARY KEY, b)"); err != nil {
 		t.Fatalf("Setup failed: %v", err)
 	}
 
-	// Begin transaction
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatalf("BEGIN failed: %v", err)
 	}
 
-	// Insert valid data
-	if _, err := tx.Exec("INSERT INTO t1 VALUES(1, 'one')"); err != nil {
-		t.Fatalf("First INSERT failed: %v", err)
-	}
+	transExecInTx(t, tx, "INSERT INTO t1 VALUES(1, 'one')")
 
-	// Try to insert duplicate - should fail
-	_, err = tx.Exec("INSERT INTO t1 VALUES(1, 'duplicate')")
-	if err == nil {
+	_, dupErr := tx.Exec("INSERT INTO t1 VALUES(1, 'duplicate')")
+	if dupErr == nil {
 		t.Error("Expected constraint error")
 	}
 
-	// Transaction should still be active and can commit
 	if err := tx.Commit(); err != nil {
 		t.Errorf("COMMIT after error failed: %v", err)
 	}
 
-	// Verify first insert persisted
-	rows, err := queryRowsWithError(db, "SELECT COUNT(*) FROM t1")
-	if err != nil {
-		t.Fatalf("Query failed: %v", err)
-	}
+	transAssertRowCount(t, db, "SELECT COUNT(*) FROM t1", int64(1), "after commit")
+}
 
-	if len(rows) > 0 && rows[0][0] != int64(1) {
-		t.Error("Expected 1 row after commit")
+func transAssertRowCount(t *testing.T, db *sql.DB, query string, want int64, label string) {
+	t.Helper()
+	rows, err := queryRowsWithError(db, query)
+	if err != nil {
+		t.Fatalf("Query failed (%s): %v", label, err)
+	}
+	if len(rows) > 0 && rows[0][0] != want {
+		t.Errorf("Expected %d row(s) %s", want, label)
 	}
 }
 
@@ -1054,7 +1024,6 @@ func TestTransErrorRecoveryRollback(t *testing.T) {
 	db := setupTransactionTestDB(t)
 	defer db.Close()
 
-	// Setup
 	if err := execSQLStmts(db,
 		"CREATE TABLE t1(a PRIMARY KEY, b)",
 		"INSERT INTO t1 VALUES(1, 'one')",
@@ -1062,37 +1031,23 @@ func TestTransErrorRecoveryRollback(t *testing.T) {
 		t.Fatalf("Setup failed: %v", err)
 	}
 
-	// Begin transaction
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatalf("BEGIN failed: %v", err)
 	}
 
-	// Insert valid data
-	if _, err := tx.Exec("INSERT INTO t1 VALUES(2, 'two')"); err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
+	transExecInTx(t, tx, "INSERT INTO t1 VALUES(2, 'two')")
 
-	// Try to insert duplicate - should fail
-	_, err = tx.Exec("INSERT INTO t1 VALUES(1, 'duplicate')")
-	if err == nil {
+	_, dupErr := tx.Exec("INSERT INTO t1 VALUES(1, 'duplicate')")
+	if dupErr == nil {
 		t.Error("Expected constraint error")
 	}
 
-	// Rollback
 	if err := tx.Rollback(); err != nil {
 		t.Errorf("ROLLBACK after error failed: %v", err)
 	}
 
-	// Verify only original data exists
-	rows, err := queryRowsWithError(db, "SELECT COUNT(*) FROM t1")
-	if err != nil {
-		t.Fatalf("Query failed: %v", err)
-	}
-
-	if len(rows) > 0 && rows[0][0] != int64(1) {
-		t.Error("Expected 1 row after rollback")
-	}
+	transAssertRowCount(t, db, "SELECT COUNT(*) FROM t1", int64(1), "after rollback")
 }
 
 // =============================================================================
@@ -1481,31 +1436,36 @@ func TestSavepointOnReadOnlyTransaction(t *testing.T) {
 
 	ourTx := tx.(*Tx)
 
-	// Try savepoint operations on read-only transaction
-	err = ourTx.Savepoint("sp1")
-	if err == nil {
-		t.Error("Expected error creating savepoint in read-only transaction")
-	} else if !strings.Contains(err.Error(), "read-only") {
-		t.Errorf("Wrong error for Savepoint: %v", err)
-	}
+	transAssertReadOnlyError(t, ourTx.Savepoint("sp1"), "Savepoint")
+	transAssertReadOnlyError(t, ourTx.ReleaseSavepoint("sp1"), "ReleaseSavepoint")
+	transAssertReadOnlyError(t, ourTx.RollbackToSavepoint("sp1"), "RollbackToSavepoint")
+}
 
-	err = ourTx.ReleaseSavepoint("sp1")
+func transAssertReadOnlyError(t *testing.T, err error, op string) {
+	t.Helper()
 	if err == nil {
-		t.Error("Expected error releasing savepoint in read-only transaction")
+		t.Errorf("Expected error for %s in read-only transaction", op)
 	} else if !strings.Contains(err.Error(), "read-only") {
-		t.Errorf("Wrong error for ReleaseSavepoint: %v", err)
-	}
-
-	err = ourTx.RollbackToSavepoint("sp1")
-	if err == nil {
-		t.Error("Expected error rolling back savepoint in read-only transaction")
-	} else if !strings.Contains(err.Error(), "read-only") {
-		t.Errorf("Wrong error for RollbackToSavepoint: %v", err)
+		t.Errorf("Wrong error for %s: %v", op, err)
 	}
 }
 
 // TestSavepointSequence tests a sequence of savepoint operations
 func TestSavepointSequence(t *testing.T) {
+	ourTx := transSetupWriteTx(t)
+	defer ourTx.Rollback()
+
+	transSavepointOp(t, ourTx.Savepoint, "sp1")
+	transSavepointOp(t, ourTx.Savepoint, "sp2")
+	transSavepointOp(t, ourTx.RollbackToSavepoint, "sp2")
+	transSavepointOp(t, ourTx.ReleaseSavepoint, "sp2")
+	transSavepointOp(t, ourTx.Savepoint, "sp2")
+	transSavepointOp(t, ourTx.ReleaseSavepoint, "sp2")
+	transSavepointOp(t, ourTx.ReleaseSavepoint, "sp1")
+}
+
+func transSetupWriteTx(t *testing.T) *Tx {
+	t.Helper()
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -1514,50 +1474,19 @@ func TestSavepointSequence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open connection: %v", err)
 	}
-	defer conn.Close()
+	t.Cleanup(func() { conn.Close() })
 
 	c := conn.(*Conn)
-
 	tx, err := c.BeginTx(context.Background(), driver.TxOptions{ReadOnly: false})
 	if err != nil {
 		t.Fatalf("BeginTx failed: %v", err)
 	}
-	defer tx.Rollback()
+	return tx.(*Tx)
+}
 
-	ourTx := tx.(*Tx)
-
-	// Create savepoint
-	if err := ourTx.Savepoint("sp1"); err != nil {
-		t.Fatalf("Savepoint sp1 failed: %v", err)
-	}
-
-	// Create nested savepoint
-	if err := ourTx.Savepoint("sp2"); err != nil {
-		t.Fatalf("Savepoint sp2 failed: %v", err)
-	}
-
-	// Rollback to sp2
-	if err := ourTx.RollbackToSavepoint("sp2"); err != nil {
-		t.Fatalf("Rollback to sp2 failed: %v", err)
-	}
-
-	// Release sp2 before re-creating (engine keeps savepoint after ROLLBACK TO)
-	if err := ourTx.ReleaseSavepoint("sp2"); err != nil {
-		t.Fatalf("Release sp2 after rollback failed: %v", err)
-	}
-
-	// Create sp2 again
-	if err := ourTx.Savepoint("sp2"); err != nil {
-		t.Fatalf("Savepoint sp2 (second) failed: %v", err)
-	}
-
-	// Release sp2
-	if err := ourTx.ReleaseSavepoint("sp2"); err != nil {
-		t.Fatalf("Release sp2 failed: %v", err)
-	}
-
-	// Release sp1
-	if err := ourTx.ReleaseSavepoint("sp1"); err != nil {
-		t.Fatalf("Release sp1 failed: %v", err)
+func transSavepointOp(t *testing.T, fn func(string) error, name string) {
+	t.Helper()
+	if err := fn(name); err != nil {
+		t.Fatalf("savepoint operation on %q failed: %v", name, err)
 	}
 }

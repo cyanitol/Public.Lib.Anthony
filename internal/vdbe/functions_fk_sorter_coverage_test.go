@@ -456,15 +456,27 @@ func TestSorterSpillWriteRunToFile(t *testing.T) {
 	}
 }
 
+func verifySortedSequence(t *testing.T, s *SorterWithSpill, n int64) {
+	t.Helper()
+	for i := int64(1); i <= n; i++ {
+		if !s.Next() {
+			t.Fatalf("missing row %d", i)
+		}
+		if got := s.CurrentRow()[0].IntValue(); got != i {
+			t.Errorf("row %d: got %d, want %d", i, got, i)
+		}
+	}
+	if s.Next() {
+		t.Error("unexpected extra row after sorted output")
+	}
+}
+
 // TestSorterSpillMergeAndPeek triggers mergeSpilledRuns and peek via a full spill cycle.
 func TestSorterSpillMergeAndPeek(t *testing.T) {
 	t.Parallel()
-	tempDir := t.TempDir()
-
-	// Very small memory limit forces multiple spills, exercising mergeSpilledRuns + peek.
 	cfg := &SorterConfig{
 		MaxMemoryBytes: 300,
-		TempDir:        tempDir,
+		TempDir:        t.TempDir(),
 		EnableSpill:    true,
 	}
 	s := NewSorterWithSpill([]int{0}, []bool{false}, []string{""}, 1, cfg)
@@ -478,25 +490,14 @@ func TestSorterSpillMergeAndPeek(t *testing.T) {
 	}
 
 	if s.GetNumSpilledRuns() < 2 {
-		t.Errorf("expected ≥2 spilled runs for merge coverage, got %d", s.GetNumSpilledRuns())
+		t.Errorf("expected >=2 spilled runs for merge coverage, got %d", s.GetNumSpilledRuns())
 	}
 
 	if err := s.Sort(); err != nil {
 		t.Fatalf("Sort error: %v", err)
 	}
 
-	// Verify sorted order (exercises peek path in mergeRuns)
-	for i := int64(1); i <= numRows; i++ {
-		if !s.Next() {
-			t.Fatalf("missing row %d", i)
-		}
-		if got := s.CurrentRow()[0].IntValue(); got != i {
-			t.Errorf("row %d: got %d, want %d", i, got, i)
-		}
-	}
-	if s.Next() {
-		t.Error("unexpected extra row after sorted output")
-	}
+	verifySortedSequence(t, s, numRows)
 }
 
 // TestRunReaderPeek exercises the peek() method on runReader directly.

@@ -157,25 +157,53 @@ func TestMCDC4_PreparedStmt_MultiExec(t *testing.T) {
 
 // TestMCDC4_Query_WithParam covers PreparedStmt.Query exercising the open
 // (ps.closed=false) path and verifying that rows are returned.
+// mcdc4SetupQueryParamDB creates a database with a t4q table containing one row (42).
+func mcdc4SetupQueryParamDB(t *testing.T) *Engine {
+	t.Helper()
+	tmpDir := t.TempDir()
+	db, err := Open(tmpDir + "/queryparam.db")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	mustExecMCDC4(t, db, "CREATE TABLE t4q (x INTEGER)")
+	mustExecMCDC4(t, db, "INSERT INTO t4q VALUES(42)")
+	return db
+}
+
+// mustExecMCDC4 is a helper that fatals on error.
+func mustExecMCDC4(t *testing.T, db *Engine, sql string) {
+	t.Helper()
+	if _, err := db.Execute(sql); err != nil {
+		t.Fatalf("%s: %v", sql, err)
+	}
+}
+
+// scanRowsFound scans rows and returns true if at least one row was found.
+func scanRowsFound(t *testing.T, rows *Rows) bool {
+	t.Helper()
+	found := false
+	for rows.Next() {
+		found = true
+		var v interface{}
+		if err := rows.Scan(&v); err != nil {
+			t.Errorf("Scan: %v", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Errorf("rows.Err: %v", err)
+	}
+	rows.Close()
+	return found
+}
+
 // Note: bindParams in the engine layer is currently a stub; we use a literal
 // value query so the result set is non-empty without parameter binding.
 func TestMCDC4_Query_WithParam(t *testing.T) {
 	t.Parallel()
 	// MC/DC for PreparedStmt.Query:
 	//   C2: ps.closed=false → query executes and returns Rows
-	tmpDir := t.TempDir()
-	db, err := Open(tmpDir + "/queryparam.db")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	if _, err := db.Execute("CREATE TABLE t4q (x INTEGER)"); err != nil {
-		t.Fatalf("CREATE TABLE: %v", err)
-	}
-	if _, err := db.Execute("INSERT INTO t4q VALUES(42)"); err != nil {
-		t.Fatalf("INSERT: %v", err)
-	}
+	db := mcdc4SetupQueryParamDB(t)
 
 	ps, err := db.Prepare("SELECT x FROM t4q WHERE x = 42")
 	if err != nil {
@@ -189,22 +217,30 @@ func TestMCDC4_Query_WithParam(t *testing.T) {
 		t.Fatalf("Query: %v", err)
 	}
 
-	found := false
-	for rows.Next() {
-		found = true
-		var v interface{}
-		if err := rows.Scan(&v); err != nil {
-			t.Errorf("Scan: %v", err)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Errorf("rows.Err: %v", err)
-	}
-	rows.Close()
-
-	if !found {
+	if !scanRowsFound(t, rows) {
 		t.Error("expected at least one row for x=42")
 	}
+}
+
+// mcdc4CreateReadOnlyDB creates a database file with a t4r table, then closes it.
+func mcdc4CreateReadOnlyDB(t *testing.T, dbPath string) {
+	t.Helper()
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("create db: %v", err)
+	}
+	mustExecMCDC4(t, db, "CREATE TABLE t4r (id INTEGER)")
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
+
+// isReadOnlyError returns true if the error message suggests a read-only violation.
+func isReadOnlyError(err error) bool {
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "read") ||
+		strings.Contains(lower, "readonly") ||
+		strings.Contains(lower, "read only")
 }
 
 // TestMCDC4_OpenWithOptions_ReadOnly covers the readOnly=true path in
@@ -216,19 +252,7 @@ func TestMCDC4_OpenWithOptions_ReadOnly(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := tmpDir + "/ro.db"
 
-	// Create the database first so it exists on disk.
-	func() {
-		db, err := Open(dbPath)
-		if err != nil {
-			t.Fatalf("create db: %v", err)
-		}
-		if _, err := db.Execute("CREATE TABLE t4r (id INTEGER)"); err != nil {
-			t.Fatalf("CREATE TABLE: %v", err)
-		}
-		if err := db.Close(); err != nil {
-			t.Fatalf("close: %v", err)
-		}
-	}()
+	mcdc4CreateReadOnlyDB(t, dbPath)
 
 	// Re-open read-only.
 	roDB, err := OpenWithOptions(dbPath, true)
@@ -241,9 +265,7 @@ func TestMCDC4_OpenWithOptions_ReadOnly(t *testing.T) {
 	_, err = roDB.Execute("INSERT INTO t4r VALUES(1)")
 	if err == nil {
 		t.Error("INSERT on read-only database should return an error")
-	} else if !strings.Contains(strings.ToLower(err.Error()), "read") &&
-		!strings.Contains(strings.ToLower(err.Error()), "readonly") &&
-		!strings.Contains(strings.ToLower(err.Error()), "read only") {
+	} else if !isReadOnlyError(err) {
 		t.Logf("INSERT on read-only db returned (may be any error): %v", err)
 	}
 }

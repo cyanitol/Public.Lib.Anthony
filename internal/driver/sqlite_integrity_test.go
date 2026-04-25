@@ -500,30 +500,33 @@ func integrityCollectStringResults(t *testing.T, db *sql.DB, query string) ([]st
 	}
 	var results []string
 	for rows.Next() {
-		if len(cols) == 1 {
-			var result string
-			if err := rows.Scan(&result); err != nil {
-				t.Fatalf("scan failed: %v", err)
-			}
-			results = append(results, result)
-		} else {
-			// Multi-column result (e.g., foreign_key_check returns 4 columns)
-			vals := make([]interface{}, len(cols))
-			ptrs := make([]interface{}, len(cols))
-			for i := range vals {
-				ptrs[i] = &vals[i]
-			}
-			if err := rows.Scan(ptrs...); err != nil {
-				t.Fatalf("scan failed: %v", err)
-			}
-			// Presence of rows means violations found
-			results = append(results, "violation")
-		}
+		results = append(results, integrityScanRow(t, rows, len(cols)))
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows iteration failed: %v", err)
 	}
 	return results, nil
+}
+
+func integrityScanRow(t *testing.T, rows *sql.Rows, numCols int) string {
+	t.Helper()
+	if numCols == 1 {
+		var result string
+		if err := rows.Scan(&result); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+		return result
+	}
+	// Multi-column result (e.g., foreign_key_check returns 4 columns)
+	vals := make([]interface{}, numCols)
+	ptrs := make([]interface{}, numCols)
+	for i := range vals {
+		ptrs[i] = &vals[i]
+	}
+	if err := rows.Scan(ptrs...); err != nil {
+		t.Fatalf("scan failed: %v", err)
+	}
+	return "violation"
 }
 
 func integrityVerifyResults(t *testing.T, results []string, wantOK bool, contains []string) {
@@ -660,28 +663,7 @@ func TestPragmaIntegrityCheckOptions(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			rows, err := db.Query(tt.pragma)
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-
-			var results []string
-			for rows.Next() {
-				var result string
-				if err := rows.Scan(&result); err != nil {
-					t.Fatalf("scan failed: %v", err)
-				}
-				results = append(results, result)
-			}
-
-			// Accept either "ok" result or empty result set (pragma returns no rows)
-			if len(results) == 0 {
-				return // no rows is acceptable
-			}
-			if results[0] != "ok" {
-				t.Errorf("expected 'ok' or empty result, got: %v", results)
-			}
+			integrityAssertOK(t, db, tt.pragma)
 		})
 	}
 }

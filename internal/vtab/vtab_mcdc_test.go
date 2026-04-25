@@ -195,6 +195,27 @@ func TestMCDC_IsColumnUsed(t *testing.T) {
 //	A: index=-1  → index>=0 false (short-circuits; flips outcome)
 //	B: index=5   → index>=0 true, index<len false (len=3; flips outcome vs C)
 //	C: index=1   → both true (writes to slot)
+// verifyConstraintWrite checks that the expected slot was written or that no slots were written.
+func verifyConstraintWrite(t *testing.T, info *IndexInfo, index, numSlots, argvIndex int, omit, wantWrite bool) {
+	t.Helper()
+	if wantWrite {
+		usage := info.ConstraintUsage[index]
+		if usage.ArgvIndex != argvIndex {
+			t.Errorf("ArgvIndex = %d, want %d", usage.ArgvIndex, argvIndex)
+		}
+		if usage.Omit != omit {
+			t.Errorf("Omit = %v, want %v", usage.Omit, omit)
+		}
+	} else {
+		for i := 0; i < numSlots; i++ {
+			if info.ConstraintUsage[i].ArgvIndex != 0 {
+				t.Errorf("slot %d was unexpectedly written (ArgvIndex=%d)",
+					i, info.ConstraintUsage[i].ArgvIndex)
+			}
+		}
+	}
+}
+
 func TestMCDC_SetConstraintUsage(t *testing.T) {
 	t.Parallel()
 
@@ -204,38 +225,13 @@ func TestMCDC_SetConstraintUsage(t *testing.T) {
 		index     int
 		argvIndex int
 		omit      bool
-		wantWrite bool // whether we expect the slot to be written
+		wantWrite bool
 	}{
-		{
-			// A: index<0 flips outcome
-			name:     "MCDC_negative_index_no_write",
-			numSlots: 3, index: -1, argvIndex: 7, omit: true,
-			wantWrite: false,
-		},
-		{
-			// B: index>=len flips outcome
-			name:     "MCDC_index_beyond_len_no_write",
-			numSlots: 3, index: 5, argvIndex: 7, omit: true,
-			wantWrite: false,
-		},
-		{
-			// C: both conditions true → writes
-			name:     "MCDC_valid_index_writes",
-			numSlots: 3, index: 1, argvIndex: 7, omit: true,
-			wantWrite: true,
-		},
-		{
-			// Edge: index==len (equal to length, not less than)
-			name:     "MCDC_index_equals_len_no_write",
-			numSlots: 3, index: 3, argvIndex: 7, omit: true,
-			wantWrite: false,
-		},
-		{
-			// Edge: index==0 (minimum valid)
-			name:     "MCDC_index_zero_writes",
-			numSlots: 3, index: 0, argvIndex: 2, omit: false,
-			wantWrite: true,
-		},
+		{"MCDC_negative_index_no_write", 3, -1, 7, true, false},
+		{"MCDC_index_beyond_len_no_write", 3, 5, 7, true, false},
+		{"MCDC_valid_index_writes", 3, 1, 7, true, true},
+		{"MCDC_index_equals_len_no_write", 3, 3, 7, true, false},
+		{"MCDC_index_zero_writes", 3, 0, 2, false, true},
 	}
 
 	for _, tt := range tests {
@@ -244,27 +240,7 @@ func TestMCDC_SetConstraintUsage(t *testing.T) {
 			t.Parallel()
 			info := NewIndexInfo(tt.numSlots)
 			info.SetConstraintUsage(tt.index, tt.argvIndex, tt.omit)
-
-			if tt.wantWrite {
-				if tt.index < 0 || tt.index >= tt.numSlots {
-					t.Fatalf("test setup error: wantWrite=true but index %d out of range", tt.index)
-				}
-				usage := info.ConstraintUsage[tt.index]
-				if usage.ArgvIndex != tt.argvIndex {
-					t.Errorf("ArgvIndex = %d, want %d", usage.ArgvIndex, tt.argvIndex)
-				}
-				if usage.Omit != tt.omit {
-					t.Errorf("Omit = %v, want %v", usage.Omit, tt.omit)
-				}
-			} else {
-				// Verify none of the slots were written unexpectedly
-				for i := 0; i < tt.numSlots; i++ {
-					if info.ConstraintUsage[i].ArgvIndex != 0 {
-						t.Errorf("slot %d was unexpectedly written (ArgvIndex=%d)",
-							i, info.ConstraintUsage[i].ArgvIndex)
-					}
-				}
-			}
+			verifyConstraintWrite(t, info, tt.index, tt.numSlots, tt.argvIndex, tt.omit, tt.wantWrite)
 		})
 	}
 }

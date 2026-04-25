@@ -5,159 +5,71 @@ import (
 	"testing"
 )
 
+// assertExplainParse parses sql as an EXPLAIN statement, checking error expectation and fields.
+func assertExplainParse(t *testing.T, sql string, wantErr bool, wantQP bool, wantStmtTyp string) {
+	t.Helper()
+	p := NewParser(sql)
+	stmts, err := p.Parse()
+
+	if (err != nil) != wantErr {
+		t.Errorf("Parse() error = %v, wantErr %v", err, wantErr)
+		return
+	}
+	if wantErr {
+		return
+	}
+	if len(stmts) != 1 {
+		t.Errorf("expected 1 statement, got %d", len(stmts))
+		return
+	}
+	explainStmt, ok := stmts[0].(*ExplainStmt)
+	if !ok {
+		t.Errorf("expected ExplainStmt, got %T", stmts[0])
+		return
+	}
+	if explainStmt.QueryPlan != wantQP {
+		t.Errorf("QueryPlan = %v, want %v", explainStmt.QueryPlan, wantQP)
+	}
+	if explainStmt.Statement == nil {
+		t.Errorf("Statement is nil")
+		return
+	}
+	if explainStmt.Statement.String() != wantStmtTyp {
+		t.Errorf("Statement type = %v, want %v", explainStmt.Statement.String(), wantStmtTyp)
+	}
+}
+
 func TestParseExplain(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name        string
 		sql         string
 		wantErr     bool
-		wantQP      bool // want QueryPlan flag
+		wantQP      bool
 		wantStmtTyp string
 	}{
-		{
-			name:        "explain select",
-			sql:         "EXPLAIN SELECT * FROM users",
-			wantErr:     false,
-			wantQP:      false,
-			wantStmtTyp: "SELECT",
-		},
-		{
-			name:        "explain query plan select",
-			sql:         "EXPLAIN QUERY PLAN SELECT * FROM users",
-			wantErr:     false,
-			wantQP:      true,
-			wantStmtTyp: "SELECT",
-		},
-		{
-			name:        "explain insert",
-			sql:         "EXPLAIN INSERT INTO users (name) VALUES ('Alice')",
-			wantErr:     false,
-			wantQP:      false,
-			wantStmtTyp: "INSERT",
-		},
-		{
-			name:        "explain query plan insert",
-			sql:         "EXPLAIN QUERY PLAN INSERT INTO users VALUES (1, 'Bob')",
-			wantErr:     false,
-			wantQP:      true,
-			wantStmtTyp: "INSERT",
-		},
-		{
-			name:        "explain update",
-			sql:         "EXPLAIN UPDATE users SET name = 'Charlie' WHERE id = 1",
-			wantErr:     false,
-			wantQP:      false,
-			wantStmtTyp: "UPDATE",
-		},
-		{
-			name:        "explain query plan update",
-			sql:         "EXPLAIN QUERY PLAN UPDATE users SET age = 30",
-			wantErr:     false,
-			wantQP:      true,
-			wantStmtTyp: "UPDATE",
-		},
-		{
-			name:        "explain delete",
-			sql:         "EXPLAIN DELETE FROM users WHERE age < 18",
-			wantErr:     false,
-			wantQP:      false,
-			wantStmtTyp: "DELETE",
-		},
-		{
-			name:        "explain query plan delete",
-			sql:         "EXPLAIN QUERY PLAN DELETE FROM users",
-			wantErr:     false,
-			wantQP:      true,
-			wantStmtTyp: "DELETE",
-		},
-		{
-			name:        "explain create table",
-			sql:         "EXPLAIN CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)",
-			wantErr:     false,
-			wantQP:      false,
-			wantStmtTyp: "CREATE TABLE",
-		},
-		{
-			name:        "explain query plan create index",
-			sql:         "EXPLAIN QUERY PLAN CREATE INDEX idx_name ON users(name)",
-			wantErr:     false,
-			wantQP:      true,
-			wantStmtTyp: "CREATE INDEX",
-		},
-		{
-			name:        "explain select with join",
-			sql:         "EXPLAIN SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id",
-			wantErr:     false,
-			wantQP:      false,
-			wantStmtTyp: "SELECT",
-		},
-		{
-			name:        "explain query plan select with complex query",
-			sql:         "EXPLAIN QUERY PLAN SELECT * FROM users WHERE age > 18 ORDER BY name LIMIT 10",
-			wantErr:     false,
-			wantQP:      true,
-			wantStmtTyp: "SELECT",
-		},
-		{
-			name:        "explain drop table",
-			sql:         "EXPLAIN DROP TABLE users",
-			wantErr:     false,
-			wantQP:      false,
-			wantStmtTyp: "DROP TABLE",
-		},
-		{
-			name:        "explain begin transaction",
-			sql:         "EXPLAIN BEGIN TRANSACTION",
-			wantErr:     false,
-			wantQP:      false,
-			wantStmtTyp: "BEGIN",
-		},
-		{
-			name:    "explain query without plan - error",
-			sql:     "EXPLAIN QUERY SELECT * FROM users",
-			wantErr: true,
-		},
+		{"explain select", "EXPLAIN SELECT * FROM users", false, false, "SELECT"},
+		{"explain query plan select", "EXPLAIN QUERY PLAN SELECT * FROM users", false, true, "SELECT"},
+		{"explain insert", "EXPLAIN INSERT INTO users (name) VALUES ('Alice')", false, false, "INSERT"},
+		{"explain query plan insert", "EXPLAIN QUERY PLAN INSERT INTO users VALUES (1, 'Bob')", false, true, "INSERT"},
+		{"explain update", "EXPLAIN UPDATE users SET name = 'Charlie' WHERE id = 1", false, false, "UPDATE"},
+		{"explain query plan update", "EXPLAIN QUERY PLAN UPDATE users SET age = 30", false, true, "UPDATE"},
+		{"explain delete", "EXPLAIN DELETE FROM users WHERE age < 18", false, false, "DELETE"},
+		{"explain query plan delete", "EXPLAIN QUERY PLAN DELETE FROM users", false, true, "DELETE"},
+		{"explain create table", "EXPLAIN CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)", false, false, "CREATE TABLE"},
+		{"explain query plan create index", "EXPLAIN QUERY PLAN CREATE INDEX idx_name ON users(name)", false, true, "CREATE INDEX"},
+		{"explain select with join", "EXPLAIN SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id", false, false, "SELECT"},
+		{"explain query plan select with complex query", "EXPLAIN QUERY PLAN SELECT * FROM users WHERE age > 18 ORDER BY name LIMIT 10", false, true, "SELECT"},
+		{"explain drop table", "EXPLAIN DROP TABLE users", false, false, "DROP TABLE"},
+		{"explain begin transaction", "EXPLAIN BEGIN TRANSACTION", false, false, "BEGIN"},
+		{"explain query without plan - error", "EXPLAIN QUERY SELECT * FROM users", true, false, ""},
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			parser := NewParser(tt.sql)
-			stmts, err := parser.Parse()
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if tt.wantErr {
-				return
-			}
-
-			if len(stmts) != 1 {
-				t.Errorf("expected 1 statement, got %d", len(stmts))
-				return
-			}
-
-			explainStmt, ok := stmts[0].(*ExplainStmt)
-			if !ok {
-				t.Errorf("expected ExplainStmt, got %T", stmts[0])
-				return
-			}
-
-			if explainStmt.QueryPlan != tt.wantQP {
-				t.Errorf("QueryPlan = %v, want %v", explainStmt.QueryPlan, tt.wantQP)
-			}
-
-			if explainStmt.Statement == nil {
-				t.Errorf("Statement is nil")
-				return
-			}
-
-			if explainStmt.Statement.String() != tt.wantStmtTyp {
-				t.Errorf("Statement type = %v, want %v", explainStmt.Statement.String(), tt.wantStmtTyp)
-			}
+			assertExplainParse(t, tt.sql, tt.wantErr, tt.wantQP, tt.wantStmtTyp)
 		})
 	}
 }

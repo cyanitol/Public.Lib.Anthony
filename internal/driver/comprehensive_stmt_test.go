@@ -8,66 +8,51 @@ import (
 
 // Comprehensive statement testing to improve coverage
 
-func TestComplexSelectQuery(t *testing.T) {
-	dbFile := t.TempDir() + "/test_complex_select.db"
-
+// compStmtOpenAndExec opens a database and executes setup statements.
+func compStmtOpenAndExec(t *testing.T, stmts ...string) *sql.DB {
+	t.Helper()
+	dbFile := t.TempDir() + "/test.db"
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
-
-	// Create and populate table
-	_, err = db.Exec("CREATE TABLE products (id INTEGER, name TEXT, price INTEGER, category TEXT)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	products := []struct {
-		id       int
-		name     string
-		price    int
-		category string
-	}{
-		{1, "Product A", 100, "Electronics"},
-		{2, "Product B", 200, "Electronics"},
-		{3, "Product C", 150, "Clothing"},
-		{4, "Product D", 300, "Electronics"},
-		{5, "Product E", 50, "Clothing"},
-	}
-
-	for _, p := range products {
-		_, err = db.Exec("INSERT INTO products VALUES (?, ?, ?, ?)", p.id, p.name, p.price, p.category)
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("exec %q: %v", s, err)
 		}
 	}
+	return db
+}
 
-	// Test SELECT with WHERE, ORDER BY, and LIMIT
+func TestComplexSelectQuery(t *testing.T) {
+	db := compStmtOpenAndExec(t,
+		"CREATE TABLE products (id INTEGER, name TEXT, price INTEGER, category TEXT)",
+		"INSERT INTO products VALUES (1, 'Product A', 100, 'Electronics')",
+		"INSERT INTO products VALUES (2, 'Product B', 200, 'Electronics')",
+		"INSERT INTO products VALUES (3, 'Product C', 150, 'Clothing')",
+		"INSERT INTO products VALUES (4, 'Product D', 300, 'Electronics')",
+		"INSERT INTO products VALUES (5, 'Product E', 50, 'Clothing')",
+	)
+	defer db.Close()
+
 	rows, err := db.Query("SELECT name, price FROM products WHERE category = ? ORDER BY price DESC LIMIT 2", "Electronics")
 	if err != nil {
-		t.Errorf("Complex SELECT failed: %v", err)
-		return
+		t.Fatalf("Complex SELECT failed: %v", err)
 	}
 	defer rows.Close()
 
-	var results []struct {
-		name  string
-		price int
-	}
+	var count int
 	for rows.Next() {
-		var r struct {
-			name  string
-			price int
-		}
-		if err := rows.Scan(&r.name, &r.price); err != nil {
+		var name string
+		var price int
+		if err := rows.Scan(&name, &price); err != nil {
 			t.Errorf("Scan failed: %v", err)
 		}
-		results = append(results, r)
+		count++
 	}
 
-	if len(results) != 2 {
-		t.Errorf("got %d results, want 2", len(results))
+	if count != 2 {
+		t.Errorf("got %d results, want 2", count)
 	}
 }
 
@@ -299,94 +284,62 @@ func TestInsertMultipleRows(t *testing.T) {
 }
 
 func TestSelectDistinct(t *testing.T) {
-	dbFile := t.TempDir() + "/test_distinct.db"
-
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := compStmtOpenAndExec(t,
+		"CREATE TABLE test (category TEXT)",
+		"INSERT INTO test VALUES ('A')",
+		"INSERT INTO test VALUES ('B')",
+		"INSERT INTO test VALUES ('A')",
+		"INSERT INTO test VALUES ('C')",
+		"INSERT INTO test VALUES ('B')",
+		"INSERT INTO test VALUES ('A')",
+	)
 	defer db.Close()
 
-	// Create and populate table
-	_, err = db.Exec("CREATE TABLE test (category TEXT)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	categories := []string{"A", "B", "A", "C", "B", "A"}
-	for _, cat := range categories {
-		_, err = db.Exec("INSERT INTO test VALUES (?)", cat)
-		if err != nil {
-			t.Fatalf("INSERT failed: %v", err)
-		}
-	}
-
-	// Test DISTINCT
 	rows, err := db.Query("SELECT DISTINCT category FROM test")
 	if err != nil {
-		t.Errorf("SELECT DISTINCT failed: %v", err)
-		return
+		t.Fatalf("SELECT DISTINCT failed: %v", err)
 	}
 	defer rows.Close()
 
-	var categories_found []string
+	var count int
 	for rows.Next() {
 		var cat string
 		if err := rows.Scan(&cat); err != nil {
 			t.Errorf("Scan failed: %v", err)
 		}
-		categories_found = append(categories_found, cat)
+		count++
 	}
 
-	if len(categories_found) != 3 {
-		t.Errorf("got %d distinct categories, want 3", len(categories_found))
+	if count != 3 {
+		t.Errorf("got %d distinct categories, want 3", count)
 	}
 }
 
 func TestTransactionCommitWithData(t *testing.T) {
-	dbFile := t.TempDir() + "/test_tx_commit_data.db"
-
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := compStmtOpenAndExec(t, "CREATE TABLE test (id INTEGER, value INTEGER)")
 	defer db.Close()
 
-	// Create table
-	_, err = db.Exec("CREATE TABLE test (id INTEGER, value INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	// Begin transaction
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatalf("BEGIN failed: %v", err)
 	}
 
-	// Insert data in transaction
-	_, err = tx.Exec("INSERT INTO test VALUES (1, 100)")
-	if err != nil {
-		tx.Rollback()
-		t.Fatalf("INSERT failed: %v", err)
+	for _, q := range []string{
+		"INSERT INTO test VALUES (1, 100)",
+		"INSERT INTO test VALUES (2, 200)",
+	} {
+		if _, err := tx.Exec(q); err != nil {
+			tx.Rollback()
+			t.Fatalf("exec %q: %v", q, err)
+		}
 	}
 
-	_, err = tx.Exec("INSERT INTO test VALUES (2, 200)")
-	if err != nil {
-		tx.Rollback()
-		t.Fatalf("INSERT failed: %v", err)
-	}
-
-	// Commit transaction
-	err = tx.Commit()
-	if err != nil {
+	if err := tx.Commit(); err != nil {
 		t.Fatalf("COMMIT failed: %v", err)
 	}
 
-	// Verify data was committed
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM test").Scan(&count)
-	if err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM test").Scan(&count); err != nil {
 		t.Errorf("SELECT COUNT failed: %v", err)
 	}
 	if count != 2 {

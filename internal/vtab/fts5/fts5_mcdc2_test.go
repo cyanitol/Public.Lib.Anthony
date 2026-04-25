@@ -344,6 +344,12 @@ func assertPrefixParseResult(t *testing.T, parser *QueryParser, query string, wa
 	if err != nil {
 		t.Fatalf("Parse(%q) unexpected error: %v", query, err)
 	}
+	assertPrefixQueryType(t, q, query, wantType, wantFound)
+}
+
+// assertPrefixQueryType validates the query type after a successful parse.
+func assertPrefixQueryType(t *testing.T, q *Query, query string, wantType QueryType, wantFound bool) {
+	t.Helper()
 	if wantFound {
 		if q == nil || q.Type != wantType {
 			t.Errorf("Parse(%q) type = %v, want %v", query, q, wantType)

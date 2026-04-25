@@ -21,42 +21,24 @@ func TestForeignKey_PragmaForeignKeys(t *testing.T) {
 	db := setupMemoryDB(t)
 	defer db.Close()
 
-	// Foreign keys should be off by default
+	fkeyAssertPragmaFK(t, db, 0, "default")
+
+	fkeyExecOrFatal(t, db, "PRAGMA foreign_keys = ON")
+	fkeyAssertPragmaFK(t, db, 1, "after ON")
+
+	fkeyExecOrFatal(t, db, "PRAGMA foreign_keys = OFF")
+	fkeyAssertPragmaFK(t, db, 0, "after OFF")
+}
+
+func fkeyAssertPragmaFK(t *testing.T, db *sql.DB, want int, label string) {
+	t.Helper()
 	var enabled int
 	err := db.QueryRow("PRAGMA foreign_keys").Scan(&enabled)
 	if err != nil {
-		t.Fatalf("Failed to query foreign_keys pragma: %v", err)
+		t.Fatalf("Failed to query foreign_keys pragma (%s): %v", label, err)
 	}
-	if enabled != 0 {
-		t.Errorf("Expected foreign_keys to be 0 (disabled) by default, got %d", enabled)
-	}
-
-	// Enable foreign keys
-	_, err = db.Exec("PRAGMA foreign_keys = ON")
-	if err != nil {
-		t.Fatalf("Failed to enable foreign_keys: %v", err)
-	}
-
-	err = db.QueryRow("PRAGMA foreign_keys").Scan(&enabled)
-	if err != nil {
-		t.Fatalf("Failed to query foreign_keys pragma: %v", err)
-	}
-	if enabled != 1 {
-		t.Errorf("Expected foreign_keys to be 1 (enabled), got %d", enabled)
-	}
-
-	// Disable foreign keys
-	_, err = db.Exec("PRAGMA foreign_keys = OFF")
-	if err != nil {
-		t.Fatalf("Failed to disable foreign_keys: %v", err)
-	}
-
-	err = db.QueryRow("PRAGMA foreign_keys").Scan(&enabled)
-	if err != nil {
-		t.Fatalf("Failed to query foreign_keys pragma: %v", err)
-	}
-	if enabled != 0 {
-		t.Errorf("Expected foreign_keys to be 0 (disabled), got %d", enabled)
+	if enabled != want {
+		t.Errorf("Expected foreign_keys to be %d (%s), got %d", want, label, enabled)
 	}
 }
 
@@ -455,54 +437,44 @@ func TestForeignKey_DeferredConstraintViolation(t *testing.T) {
 // TestForeignKey_OnDeleteCascade tests CASCADE delete action.
 // Based on fkey2-11.* tests.
 func TestForeignKey_OnDeleteCascade(t *testing.T) {
-	db := setupMemoryDB(t)
-	defer db.Close()
-
-	_, err := db.Exec("PRAGMA foreign_keys = ON")
-	if err != nil {
-		t.Fatalf("Failed to enable foreign keys: %v", err)
-	}
-
-	_, err = db.Exec(`
+	db := fkeySetupWithFK(t, `
 		CREATE TABLE parent(id INTEGER PRIMARY KEY, name TEXT);
 		CREATE TABLE child(
 			id INTEGER PRIMARY KEY,
 			parent_id INTEGER REFERENCES parent(id) ON DELETE CASCADE
 		)
 	`)
-	if err != nil {
-		t.Fatalf("Failed to create tables: %v", err)
-	}
+	defer db.Close()
 
-	_, err = db.Exec("INSERT INTO parent VALUES(1, 'parent1')")
-	if err != nil {
-		t.Fatalf("Failed to insert parent: %v", err)
-	}
+	fkeyExecOrFatal(t, db, "INSERT INTO parent VALUES(1, 'parent1')")
+	fkeyExecOrFatal(t, db, "INSERT INTO child VALUES(10, 1)")
+	fkeyExecOrFatal(t, db, "INSERT INTO child VALUES(20, 1)")
 
-	_, err = db.Exec("INSERT INTO child VALUES(10, 1)")
-	if err != nil {
-		t.Fatalf("Failed to insert child: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO child VALUES(20, 1)")
-	if err != nil {
-		t.Fatalf("Failed to insert child: %v", err)
-	}
-
-	// Delete parent - should cascade to children
-	_, err = db.Exec("DELETE FROM parent WHERE id=1")
+	_, err := db.Exec("DELETE FROM parent WHERE id=1")
 	if err != nil {
 		t.Errorf("Expected CASCADE delete to succeed, got: %v", err)
 	}
 
-	// Verify children were deleted
+	fkeyAssertCount(t, db, "SELECT COUNT(*) FROM child", 0)
+}
+
+func fkeySetupWithFK(t *testing.T, ddl string) *sql.DB {
+	t.Helper()
+	db := setupMemoryDB(t)
+	fkeyExecOrFatal(t, db, "PRAGMA foreign_keys = ON")
+	fkeyExecOrFatal(t, db, ddl)
+	return db
+}
+
+func fkeyAssertCount(t *testing.T, db *sql.DB, query string, want int) {
+	t.Helper()
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM child").Scan(&count)
+	err := db.QueryRow(query).Scan(&count)
 	if err != nil {
-		t.Fatalf("Failed to count children: %v", err)
+		t.Fatalf("Failed to count: %v", err)
 	}
-	if count != 0 {
-		t.Errorf("Expected 0 children after CASCADE delete, got %d", count)
+	if count != want {
+		t.Errorf("Expected count %d, got %d", want, count)
 	}
 }
 
@@ -656,57 +628,24 @@ func TestForeignKey_OnUpdateSetNull(t *testing.T) {
 // TestForeignKey_SelfReferencing tests self-referencing foreign keys.
 // Based on fkey1-5.* and fkey3-3.* tests.
 func TestForeignKey_SelfReferencing(t *testing.T) {
-	db := setupMemoryDB(t)
-	defer db.Close()
-
-	_, err := db.Exec("PRAGMA foreign_keys = ON")
-	if err != nil {
-		t.Fatalf("Failed to enable foreign keys: %v", err)
-	}
-
-	_, err = db.Exec(`
+	db := fkeySetupWithFK(t, `
 		CREATE TABLE t11(
 			x INTEGER PRIMARY KEY,
 			parent REFERENCES t11 ON DELETE CASCADE
 		)
 	`)
-	if err != nil {
-		t.Fatalf("Failed to create self-referencing table: %v", err)
-	}
+	defer db.Close()
 
-	// Insert root node (NULL parent)
-	_, err = db.Exec("INSERT INTO t11 VALUES(1, NULL)")
-	if err != nil {
-		t.Fatalf("Failed to insert root: %v", err)
-	}
+	fkeyExecOrFatal(t, db, "INSERT INTO t11 VALUES(1, NULL)")
+	fkeyExecOrFatal(t, db, "INSERT INTO t11 VALUES(2, 1)")
+	fkeyExecOrFatal(t, db, "INSERT INTO t11 VALUES(3, 2)")
 
-	// Insert child node
-	_, err = db.Exec("INSERT INTO t11 VALUES(2, 1)")
-	if err != nil {
-		t.Fatalf("Failed to insert child: %v", err)
-	}
-
-	// Insert grandchild node
-	_, err = db.Exec("INSERT INTO t11 VALUES(3, 2)")
-	if err != nil {
-		t.Fatalf("Failed to insert grandchild: %v", err)
-	}
-
-	// Delete root - should cascade
-	_, err = db.Exec("DELETE FROM t11 WHERE x=1")
+	_, err := db.Exec("DELETE FROM t11 WHERE x=1")
 	if err != nil {
 		t.Errorf("Expected CASCADE delete to succeed, got: %v", err)
 	}
 
-	// All nodes should be deleted
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM t11").Scan(&count)
-	if err != nil {
-		t.Fatalf("Failed to count rows: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("Expected 0 rows after CASCADE delete, got %d", count)
-	}
+	fkeyAssertCount(t, db, "SELECT COUNT(*) FROM t11", 0)
 }
 
 // TestForeignKey_SelfReferencingInsert tests inserting self-referencing rows.
@@ -1088,54 +1027,24 @@ func TestForeignKey_ReplaceViolation(t *testing.T) {
 // TestForeignKey_QuotedTableNames tests FK with quoted table names.
 // Based on fkey1-4.* tests.
 func TestForeignKey_QuotedTableNames(t *testing.T) {
-	db := setupMemoryDB(t)
-	defer db.Close()
-
-	_, err := db.Exec("PRAGMA foreign_keys = ON")
-	if err != nil {
-		t.Fatalf("Failed to enable foreign keys: %v", err)
-	}
-
-	_, err = db.Exec(`
+	db := fkeySetupWithFK(t, `
 		CREATE TABLE "xx1"("xx2" TEXT PRIMARY KEY, "xx3" TEXT);
 		INSERT INTO "xx1"("xx2", "xx3") VALUES('abc', 'def');
 		CREATE TABLE "xx4"("xx5" TEXT REFERENCES "xx1" ON DELETE CASCADE);
 		INSERT INTO "xx4"("xx5") VALUES('abc')
 	`)
-	if err != nil {
-		t.Fatalf("Failed to create tables with quoted names: %v", err)
-	}
+	defer db.Close()
 
-	// Insert another parent
-	_, err = db.Exec(`INSERT INTO "xx1"("xx2", "xx3") VALUES('uvw', 'xyz')`)
-	if err != nil {
-		t.Fatalf("Failed to insert parent: %v", err)
-	}
+	fkeyExecOrFatal(t, db, `INSERT INTO "xx1"("xx2", "xx3") VALUES('uvw', 'xyz')`)
 
-	// Verify child exists
-	var count int
-	err = db.QueryRow(`SELECT COUNT(*) FROM "xx4"`).Scan(&count)
-	if err != nil {
-		t.Fatalf("Failed to count children: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("Expected 1 child, got %d", count)
-	}
+	fkeyAssertCount(t, db, `SELECT COUNT(*) FROM "xx4"`, 1)
 
-	// Delete all parents - should cascade to child
-	_, err = db.Exec(`DELETE FROM "xx1"`)
+	_, err := db.Exec(`DELETE FROM "xx1"`)
 	if err != nil {
 		t.Errorf("Expected CASCADE delete to succeed, got: %v", err)
 	}
 
-	// Child should be deleted
-	err = db.QueryRow(`SELECT COUNT(*) FROM "xx4"`).Scan(&count)
-	if err != nil {
-		t.Fatalf("Failed to count children: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("Expected 0 children after CASCADE delete, got %d", count)
-	}
+	fkeyAssertCount(t, db, `SELECT COUNT(*) FROM "xx4"`, 0)
 }
 
 // fkeyCountViolations counts rows from a PRAGMA foreign_key_check query.
@@ -1241,34 +1150,19 @@ func TestForeignKey_Restrict(t *testing.T) {
 // TestForeignKey_AffinityHandling tests that affinity doesn't break FK checks.
 // Based on fkey2-1.5.* tests.
 func TestForeignKey_AffinityHandling(t *testing.T) {
-	db := setupMemoryDB(t)
-	defer db.Close()
-
-	_, err := db.Exec("PRAGMA foreign_keys = ON")
-	if err != nil {
-		t.Fatalf("Failed to enable foreign keys: %v", err)
-	}
-
-	_, err = db.Exec(`
+	db := fkeySetupWithFK(t, `
 		CREATE TABLE i(i INTEGER PRIMARY KEY);
 		CREATE TABLE j(j REFERENCES i)
 	`)
-	if err != nil {
-		t.Fatalf("Failed to create tables: %v", err)
-	}
+	defer db.Close()
 
-	_, err = db.Exec("INSERT INTO i VALUES(35)")
-	if err != nil {
-		t.Fatalf("Failed to insert parent: %v", err)
-	}
+	fkeyExecOrFatal(t, db, "INSERT INTO i VALUES(35)")
 
-	// Insert with text '35.0' (should match integer 35 with affinity)
-	_, err = db.Exec("INSERT INTO j VALUES('35.0')")
+	_, err := db.Exec("INSERT INTO j VALUES('35.0')")
 	if err != nil {
 		t.Errorf("Expected insert to succeed, got: %v", err)
 	}
 
-	// Verify the value is stored as text
 	var val string
 	var typ string
 	err = db.QueryRow("SELECT j, typeof(j) FROM j").Scan(&val, &typ)
@@ -1380,15 +1274,7 @@ func TestForeignKey_MatchingSelf(t *testing.T) {
 // TestForeignKey_DeleteSelfReferencing tests deleting and updating self-referencing rows.
 // Based on fkey3-3.4.7-8 tests.
 func TestForeignKey_DeleteSelfReferencing(t *testing.T) {
-	db := setupMemoryDB(t)
-	defer db.Close()
-
-	_, err := db.Exec("PRAGMA foreign_keys = ON")
-	if err != nil {
-		t.Fatalf("Failed to enable foreign keys: %v", err)
-	}
-
-	_, err = db.Exec(`
+	db := fkeySetupWithFK(t, `
 		CREATE TABLE t6(
 			a INTEGER PRIMARY KEY,
 			b, c, d,
@@ -1396,42 +1282,30 @@ func TestForeignKey_DeleteSelfReferencing(t *testing.T) {
 		);
 		CREATE UNIQUE INDEX t6i ON t6(a, b)
 	`)
-	if err != nil {
-		t.Fatalf("Failed to create table: %v", err)
-	}
+	defer db.Close()
 
-	// Insert and delete self-referencing row
-	_, err = db.Exec("INSERT INTO t6 VALUES(100, 'one', 100, 'one')")
-	if err != nil {
-		t.Fatalf("Failed to insert: %v", err)
-	}
+	t.Run("insert_and_delete", func(t *testing.T) {
+		fkeyExecOrFatal(t, db, "INSERT INTO t6 VALUES(100, 'one', 100, 'one')")
+		_, err := db.Exec("DELETE FROM t6 WHERE a = 100")
+		if err != nil {
+			t.Errorf("Expected delete to succeed, got: %v", err)
+		}
+	})
 
-	_, err = db.Exec("DELETE FROM t6 WHERE a = 100")
-	if err != nil {
-		t.Errorf("Expected delete to succeed, got: %v", err)
-	}
+	t.Run("insert_update_delete", func(t *testing.T) {
+		fkeyExecOrFatal(t, db, "INSERT INTO t6 VALUES(100, 'one', 100, 'one')")
+		fkeyExecOrFatal(t, db, "INSERT INTO t6 VALUES(1, 'a', 1, 'a')")
 
-	// Insert, update, and delete
-	_, err = db.Exec("INSERT INTO t6 VALUES(100, 'one', 100, 'one')")
-	if err != nil {
-		t.Fatalf("Failed to insert: %v", err)
-	}
+		_, err := db.Exec("UPDATE t6 SET c = 1, d = 'a' WHERE a = 100")
+		if err != nil {
+			t.Errorf("Expected update to succeed, got: %v", err)
+		}
 
-	// First insert a row to reference
-	_, err = db.Exec("INSERT INTO t6 VALUES(1, 'a', 1, 'a')")
-	if err != nil {
-		t.Fatalf("Failed to insert reference row: %v", err)
-	}
-
-	_, err = db.Exec("UPDATE t6 SET c = 1, d = 'a' WHERE a = 100")
-	if err != nil {
-		t.Errorf("Expected update to succeed, got: %v", err)
-	}
-
-	_, err = db.Exec("DELETE FROM t6 WHERE a = 100")
-	if err != nil {
-		t.Errorf("Expected delete to succeed, got: %v", err)
-	}
+		_, err = db.Exec("DELETE FROM t6 WHERE a = 100")
+		if err != nil {
+			t.Errorf("Expected delete to succeed, got: %v", err)
+		}
+	})
 }
 
 // TestForeignKey_ForeignKeyMismatch tests "foreign key mismatch" error.
@@ -1462,50 +1336,24 @@ func TestForeignKey_ForeignKeyMismatch(t *testing.T) {
 // TestForeignKey_SetDefault tests SET DEFAULT action.
 // Based on fkey2-9.* tests.
 func TestForeignKey_SetDefault(t *testing.T) {
-	db := setupMemoryDB(t)
-	defer db.Close()
-
-	_, err := db.Exec("PRAGMA foreign_keys = ON")
-	if err != nil {
-		t.Fatalf("Failed to enable foreign keys: %v", err)
-	}
-
-	_, err = db.Exec(`
+	db := fkeySetupWithFK(t, `
 		CREATE TABLE parent(id INTEGER PRIMARY KEY);
 		CREATE TABLE child(
 			id INTEGER PRIMARY KEY,
 			parent_id INTEGER DEFAULT 0 REFERENCES parent(id) ON DELETE SET DEFAULT
 		)
 	`)
-	if err != nil {
-		t.Fatalf("Failed to create tables: %v", err)
-	}
+	defer db.Close()
 
-	// Insert default parent
-	_, err = db.Exec("INSERT INTO parent VALUES(0)")
-	if err != nil {
-		t.Fatalf("Failed to insert default parent: %v", err)
-	}
+	fkeyExecOrFatal(t, db, "INSERT INTO parent VALUES(0)")
+	fkeyExecOrFatal(t, db, "INSERT INTO parent VALUES(1)")
+	fkeyExecOrFatal(t, db, "INSERT INTO child VALUES(10, 1)")
 
-	// Insert actual parent
-	_, err = db.Exec("INSERT INTO parent VALUES(1)")
-	if err != nil {
-		t.Fatalf("Failed to insert parent: %v", err)
-	}
-
-	// Insert child referencing parent 1
-	_, err = db.Exec("INSERT INTO child VALUES(10, 1)")
-	if err != nil {
-		t.Fatalf("Failed to insert child: %v", err)
-	}
-
-	// Delete parent 1 - should set child FK to default (0)
-	_, err = db.Exec("DELETE FROM parent WHERE id=1")
+	_, err := db.Exec("DELETE FROM parent WHERE id=1")
 	if err != nil {
 		t.Errorf("Expected SET DEFAULT delete to succeed, got: %v", err)
 	}
 
-	// Verify child FK was set to default
 	var parentID int
 	err = db.QueryRow("SELECT parent_id FROM child WHERE id=10").Scan(&parentID)
 	if err != nil {

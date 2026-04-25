@@ -824,26 +824,18 @@ func TestMCDC8_CheckColumnUnique_NoViolation(t *testing.T) {
 // TestMCDC8_WithoutRowID_BulkInsert_UniqueCheck covers
 // checkWithoutRowidPKUniqueness across many rows including a deliberate
 // duplicate that must be rejected.
-func TestMCDC8_WithoutRowID_BulkInsert_UniqueCheck(t *testing.T) {
-	t.Parallel()
-
-	db := m8OpenDB(t)
-	defer db.Close()
-
-	if err := m8ExecErr(t, db, "CREATE TABLE bulk_wr(a INT, b TEXT, PRIMARY KEY(a, b)) WITHOUT ROWID"); err != nil {
-		t.Skipf("WITHOUT ROWID not supported: %v", err)
-	}
-
+func m8BulkInsertInTx(t *testing.T, db *sql.DB, table string, count int) {
+	t.Helper()
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	stmt, err := tx.Prepare("INSERT INTO bulk_wr VALUES(?, ?)")
+	stmt, err := tx.Prepare("INSERT INTO " + table + " VALUES(?, ?)")
 	if err != nil {
 		tx.Rollback()
 		t.Fatalf("prepare: %v", err)
 	}
-	for i := 0; i < 40; i++ {
+	for i := 0; i < count; i++ {
 		if _, err := stmt.Exec(i, "v"); err != nil {
 			stmt.Close()
 			tx.Rollback()
@@ -854,9 +846,22 @@ func TestMCDC8_WithoutRowID_BulkInsert_UniqueCheck(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
+}
+
+func TestMCDC8_WithoutRowID_BulkInsert_UniqueCheck(t *testing.T) {
+	t.Parallel()
+
+	db := m8OpenDB(t)
+	defer db.Close()
+
+	if err := m8ExecErr(t, db, "CREATE TABLE bulk_wr(a INT, b TEXT, PRIMARY KEY(a, b)) WITHOUT ROWID"); err != nil {
+		t.Skipf("WITHOUT ROWID not supported: %v", err)
+	}
+
+	m8BulkInsertInTx(t, db, "bulk_wr", 40)
 
 	// Duplicate must be rejected.
-	err = m8ExecErr(t, db, "INSERT INTO bulk_wr VALUES(0, 'v')")
+	err := m8ExecErr(t, db, "INSERT INTO bulk_wr VALUES(0, 'v')")
 	if err == nil {
 		t.Error("expected constraint error on duplicate composite PK, got nil")
 	}

@@ -1281,6 +1281,27 @@ func TestMCDC4_OpAggFinal_MaxAgg(t *testing.T) {
 	}
 }
 
+type mcdc4GrpResult struct {
+	grp string
+	sum int
+}
+
+func mcdc4ScanGroupResults(t *testing.T, rows *sql.Rows) []mcdc4GrpResult {
+	t.Helper()
+	var got []mcdc4GrpResult
+	for rows.Next() {
+		var r mcdc4GrpResult
+		if err := rows.Scan(&r.grp, &r.sum); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got = append(got, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return got
+}
+
 // TestMCDC4_OpAggFinal_GroupByAgg covers grouped aggregate finalization.
 func TestMCDC4_OpAggFinal_GroupByAgg(t *testing.T) {
 	// MC/DC: GROUP BY forces opAggFinal per-group → multiple finalization calls.
@@ -1294,29 +1315,14 @@ func TestMCDC4_OpAggFinal_GroupByAgg(t *testing.T) {
 		mcdc4Exec(t, db, "INSERT INTO aggf4 VALUES('"+row[0].(string)+"', "+itoa4(row[1].(int))+")")
 	}
 
-	type result struct {
-		grp string
-		sum int
-	}
 	rows, err := db.Query("SELECT grp, SUM(val) FROM aggf4 GROUP BY grp ORDER BY grp")
 	if err != nil {
 		t.Fatalf("GROUP BY query: %v", err)
 	}
 	defer rows.Close()
 
-	var got []result
-	for rows.Next() {
-		var r result
-		if err := rows.Scan(&r.grp, &r.sum); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		got = append(got, r)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows.Err: %v", err)
-	}
-
-	want := []result{{"a", 3}, {"b", 60}}
+	got := mcdc4ScanGroupResults(t, rows)
+	want := []mcdc4GrpResult{{"a", 3}, {"b", 60}}
 	if len(got) != len(want) {
 		t.Fatalf("expected %d groups, got %d", len(want), len(got))
 	}
@@ -1389,6 +1395,17 @@ func TestMCDC4_WithoutRowID_ThreeColumnPK(t *testing.T) {
 	}
 }
 
+func mcdc4RunOps(t *testing.T, db *sql.DB, ops []string) error {
+	t.Helper()
+	var lastErr error
+	for _, op := range ops {
+		if err := mcdc4ExecErr(t, db, op); err != nil {
+			lastErr = err
+		}
+	}
+	return lastErr
+}
+
 func mcdc4RunWithoutRowIDCase(t *testing.T, setup, ops []string, wantCnt int, wantErr bool) {
 	t.Helper()
 	db := mcdc4OpenDB(t)
@@ -1396,12 +1413,7 @@ func mcdc4RunWithoutRowIDCase(t *testing.T, setup, ops []string, wantCnt int, wa
 	for _, s := range setup {
 		mcdc4Exec(t, db, s)
 	}
-	var lastErr error
-	for _, op := range ops {
-		if err := mcdc4ExecErr(t, db, op); err != nil {
-			lastErr = err
-		}
-	}
+	lastErr := mcdc4RunOps(t, db, ops)
 	if wantErr && lastErr == nil {
 		t.Error("expected error, got nil")
 	}

@@ -947,14 +947,8 @@ func TestMCDC7_RowMatchesIndexValues_AllSkipped(t *testing.T) {
 // TestMCDC7_PerformInsertCompositeKey_SchemaChange covers the root-page sync
 // branch in performInsertWithCompositeKey by inserting enough rows to trigger
 // a btree page split on a WITHOUT ROWID table.
-func TestMCDC7_PerformInsertCompositeKey_SchemaChange(t *testing.T) {
-	db := m7OpenDB(t)
-	defer db.Close()
-
-	if err := m7ExecErr(t, db, "CREATE TABLE pck1(k1 TEXT, k2 INT, data TEXT, PRIMARY KEY(k1,k2)) WITHOUT ROWID"); err != nil {
-		t.Skipf("WITHOUT ROWID not supported: %v", err)
-	}
-
+func m7BulkInsertComposite(t *testing.T, db *sql.DB) {
+	t.Helper()
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatalf("begin: %v", err)
@@ -964,7 +958,6 @@ func TestMCDC7_PerformInsertCompositeKey_SchemaChange(t *testing.T) {
 		tx.Rollback()
 		t.Fatalf("prepare: %v", err)
 	}
-	// Insert enough rows to force btree page splits.
 	for i := 0; i < 100; i++ {
 		key := "key"
 		for j := 0; j < (i % 5); j++ {
@@ -980,6 +973,17 @@ func TestMCDC7_PerformInsertCompositeKey_SchemaChange(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
+}
+
+func TestMCDC7_PerformInsertCompositeKey_SchemaChange(t *testing.T) {
+	db := m7OpenDB(t)
+	defer db.Close()
+
+	if err := m7ExecErr(t, db, "CREATE TABLE pck1(k1 TEXT, k2 INT, data TEXT, PRIMARY KEY(k1,k2)) WITHOUT ROWID"); err != nil {
+		t.Skipf("WITHOUT ROWID not supported: %v", err)
+	}
+
+	m7BulkInsertComposite(t, db)
 
 	n := m7QueryInt(t, db, "SELECT COUNT(*) FROM pck1")
 	if n != 100 {

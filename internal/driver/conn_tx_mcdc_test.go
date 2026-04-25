@@ -91,56 +91,44 @@ func TestMCDC_ParseDSN_EmptyString(t *testing.T) {
 	}
 }
 
-// TestMCDC_ParseDSN exercises remaining branches in a table-driven style.
-func TestMCDC_ParseDSN(t *testing.T) {
-	cases := []struct {
-		// MC/DC annotation: which independent condition is being toggled
-		name       string
-		dsn        string
-		wantErr    bool
-		wantMem    bool
-		wantRO     bool
-		wantShared bool
-	}{
-		// Branch B: ":memory:" literal
-		{"memory_literal", ":memory:", false, true, false, false},
-		// Branch C: plain file path, no query string
-		{"plain_file", "test.db", false, false, false, false},
-		// Branch D: mode=ro sets ReadOnly (mode param true, other params false)
-		{"mode_ro", "test.db?mode=ro", false, false, true, false},
-		// Branch E: cache=shared sets SharedCache (mode param false, cache param true)
-		{"cache_shared", "test.db?cache=shared", false, false, false, true},
-		// Branch F: invalid mode value → error (error condition true)
-		{"invalid_mode", "test.db?mode=badval", true, false, false, false},
+// mcdcAssertParseDSN parses a DSN and checks expected fields.
+func mcdcAssertParseDSN(t *testing.T, dsn string, wantMem, wantRO, wantShared bool) {
+	t.Helper()
+	parsed, err := drv.ParseDSN(dsn)
+	if err != nil {
+		t.Fatalf("ParseDSN(%q): unexpected error: %v", dsn, err)
 	}
+	if parsed.Config.Pager.MemoryDB != wantMem {
+		t.Errorf("MemoryDB=%v want %v", parsed.Config.Pager.MemoryDB, wantMem)
+	}
+	if parsed.Config.Pager.ReadOnly != wantRO {
+		t.Errorf("ReadOnly=%v want %v", parsed.Config.Pager.ReadOnly, wantRO)
+	}
+	if parsed.Config.SharedCache != wantShared {
+		t.Errorf("SharedCache=%v want %v", parsed.Config.SharedCache, wantShared)
+	}
+}
 
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			parsed, err := drv.ParseDSN(tc.dsn)
-			if tc.wantErr {
-				if err == nil {
-					t.Errorf("MC/DC %s: expected error, got nil", tc.name)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("MC/DC %s: unexpected error: %v", tc.name, err)
-			}
-			if parsed.Config.Pager.MemoryDB != tc.wantMem {
-				t.Errorf("MC/DC %s: MemoryDB=%v want %v", tc.name, parsed.Config.Pager.MemoryDB, tc.wantMem)
-			}
-			if parsed.Config.Pager.ReadOnly != tc.wantRO {
-				t.Errorf("MC/DC %s: ReadOnly=%v want %v", tc.name, parsed.Config.Pager.ReadOnly, tc.wantRO)
-			}
-			if parsed.Config.Pager.MemoryDB == tc.wantMem &&
-				parsed.Config.Pager.ReadOnly == tc.wantRO {
-				// Verify SharedCache only when primary conditions are correct
-				if parsed.Config.SharedCache != tc.wantShared {
-					t.Errorf("MC/DC %s: SharedCache=%v want %v", tc.name, parsed.Config.SharedCache, tc.wantShared)
-				}
-			}
-		})
+func TestMCDC_ParseDSN_MemoryLiteral(t *testing.T) {
+	mcdcAssertParseDSN(t, ":memory:", true, false, false)
+}
+
+func TestMCDC_ParseDSN_PlainFile(t *testing.T) {
+	mcdcAssertParseDSN(t, "test.db", false, false, false)
+}
+
+func TestMCDC_ParseDSN_ModeRO(t *testing.T) {
+	mcdcAssertParseDSN(t, "test.db?mode=ro", false, true, false)
+}
+
+func TestMCDC_ParseDSN_CacheShared(t *testing.T) {
+	mcdcAssertParseDSN(t, "test.db?cache=shared", false, false, true)
+}
+
+func TestMCDC_ParseDSN_InvalidMode(t *testing.T) {
+	_, err := drv.ParseDSN("test.db?mode=badval")
+	if err == nil {
+		t.Error("expected error for invalid mode, got nil")
 	}
 }
 
@@ -365,78 +353,67 @@ func TestMCDC_Conn_UnregisterVirtualTableModule(t *testing.T) {
 // RemoveCollation — MC/DC branches
 // ---------------------------------------------------------------------------
 
-// TestMCDC_Conn_RemoveCollation covers all externally reachable branches.
-func TestMCDC_Conn_RemoveCollation(t *testing.T) {
-	cases := []struct {
-		// MC/DC: each row toggles exactly one independent condition.
-		name    string
-		setup   func(*drv.Conn) error // optional pre-action
-		action  func(*drv.Conn) error
-		wantErr bool
-	}{
-		{
-			// Branch C: collRegistry non-nil, collation registered → success.
-			name: "registered_collation_removed",
-			setup: func(c *drv.Conn) error {
-				return c.CreateCollation("MCDC_COLL", func(a, b string) int {
-					if a < b {
-						return -1
-					}
-					if a > b {
-						return 1
-					}
-					return 0
-				})
-			},
-			action:  func(c *drv.Conn) error { return c.RemoveCollation("MCDC_COLL") },
-			wantErr: false,
-		},
-		{
-			// Branch D: collRegistry non-nil, unregistered name → nil (registry
-			// does a no-op delete; only built-ins return an error).
-			name:    "unregistered_collation_noop",
-			action:  func(c *drv.Conn) error { return c.RemoveCollation("NONEXISTENT_COLL") },
-			wantErr: false,
-		},
-		{
-			// Branch B: collRegistry non-nil, built-in collation → error.
-			// BINARY/NOCASE/RTRIM are protected; Unregister returns error.
-			name:    "builtin_collation_error",
-			action:  func(c *drv.Conn) error { return c.RemoveCollation("BINARY") },
-			wantErr: true,
-		},
+// mcdcRemoveCollationViaRaw executes a RemoveCollation action on a raw connection.
+func mcdcRemoveCollationViaRaw(t *testing.T, db *sql.DB, setup func(*drv.Conn) error, action func(*drv.Conn) error) error {
+	t.Helper()
+	conn, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatalf("Conn: %v", err)
 	}
+	defer conn.Close()
+	if setup != nil {
+		if err := conn.Raw(func(c interface{}) error {
+			return setup(c.(*drv.Conn))
+		}); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+	}
+	return conn.Raw(func(c interface{}) error {
+		return action(c.(*drv.Conn))
+	})
+}
 
+func TestMCDC_Conn_RemoveCollation_Registered(t *testing.T) {
 	db := mcdcOpenMem(t)
 	defer db.Close()
-
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			conn, err := db.Conn(context.Background())
-			if err != nil {
-				t.Fatalf("Conn: %v", err)
-			}
-			defer conn.Close()
-
-			if tc.setup != nil {
-				if err := conn.Raw(func(c interface{}) error {
-					return tc.setup(c.(*drv.Conn))
-				}); err != nil {
-					t.Fatalf("MC/DC %s setup: %v", tc.name, err)
+	err := mcdcRemoveCollationViaRaw(t, db,
+		func(c *drv.Conn) error {
+			return c.CreateCollation("MCDC_COLL", func(a, b string) int {
+				if a < b {
+					return -1
 				}
-			}
-
-			err = conn.Raw(func(c interface{}) error {
-				return tc.action(c.(*drv.Conn))
+				if a > b {
+					return 1
+				}
+				return 0
 			})
-			if tc.wantErr && err == nil {
-				t.Errorf("MC/DC %s: expected error, got nil", tc.name)
-			}
-			if !tc.wantErr && err != nil {
-				t.Errorf("MC/DC %s: unexpected error: %v", tc.name, err)
-			}
-		})
+		},
+		func(c *drv.Conn) error { return c.RemoveCollation("MCDC_COLL") },
+	)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestMCDC_Conn_RemoveCollation_Unregistered(t *testing.T) {
+	db := mcdcOpenMem(t)
+	defer db.Close()
+	err := mcdcRemoveCollationViaRaw(t, db, nil,
+		func(c *drv.Conn) error { return c.RemoveCollation("NONEXISTENT_COLL") },
+	)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestMCDC_Conn_RemoveCollation_Builtin(t *testing.T) {
+	db := mcdcOpenMem(t)
+	defer db.Close()
+	err := mcdcRemoveCollationViaRaw(t, db, nil,
+		func(c *drv.Conn) error { return c.RemoveCollation("BINARY") },
+	)
+	if err == nil {
+		t.Error("expected error, got nil")
 	}
 }
 
@@ -545,43 +522,33 @@ func TestMCDC_Conn_TxCommit_WriteRollback(t *testing.T) {
 // TestMCDC_Conn_CreateMemoryConnection exercises createMemoryConnection by
 // opening several :memory: connections in sequence.  Each call generates a
 // unique memoryID and hits the tracking/registration branches.
-func TestMCDC_Conn_CreateMemoryConnection(t *testing.T) {
-	// MC/DC Branch A+B: open multiple independent memory connections to verify
-	// that the memoryID counter increments and each connection is independently
-	// functional (covers the d.conns[memoryID] and d.dbs[memoryID] assignments).
-	const n = 4
-	dbs := make([]*sql.DB, n)
-	for i := 0; i < n; i++ {
-		db, err := sql.Open("sqlite_internal", ":memory:")
-		if err != nil {
-			t.Fatalf("Open[%d]: %v", i, err)
-		}
-		dbs[i] = db
+// mcdcVerifyMemDB opens a :memory: db, creates a table, inserts a value, and verifies it.
+func mcdcVerifyMemDB(t *testing.T, idx int) {
+	t.Helper()
+	db, err := sql.Open("sqlite_internal", ":memory:")
+	if err != nil {
+		t.Fatalf("Open[%d]: %v", idx, err)
 	}
-	defer func() {
-		for _, db := range dbs {
-			if db != nil {
-				db.Close()
-			}
-		}
-	}()
+	defer db.Close()
+	tblName := "mcdc_mem_tbl"
+	if _, err := db.Exec("CREATE TABLE " + tblName + "(v INTEGER)"); err != nil {
+		t.Fatalf("db[%d] CREATE TABLE: %v", idx, err)
+	}
+	if _, err := db.Exec("INSERT INTO "+tblName+" VALUES(?)", idx*10); err != nil {
+		t.Fatalf("db[%d] INSERT: %v", idx, err)
+	}
+	var v int
+	if err := db.QueryRow("SELECT v FROM " + tblName).Scan(&v); err != nil {
+		t.Fatalf("db[%d] SELECT: %v", idx, err)
+	}
+	if v != idx*10 {
+		t.Errorf("MC/DC createMemoryConnection[%d]: want %d, got %d", idx, idx*10, v)
+	}
+}
 
-	// Each connection is independent — DDL on one must not appear on others.
-	for i, db := range dbs {
-		tblName := "mcdc_mem_tbl"
-		if _, err := db.Exec("CREATE TABLE " + tblName + "(v INTEGER)"); err != nil {
-			t.Fatalf("db[%d] CREATE TABLE: %v", i, err)
-		}
-		if _, err := db.Exec("INSERT INTO "+tblName+" VALUES(?)", i*10); err != nil {
-			t.Fatalf("db[%d] INSERT: %v", i, err)
-		}
-		var v int
-		if err := db.QueryRow("SELECT v FROM " + tblName).Scan(&v); err != nil {
-			t.Fatalf("db[%d] SELECT: %v", i, err)
-		}
-		if v != i*10 {
-			t.Errorf("MC/DC createMemoryConnection[%d]: want %d, got %d", i, i*10, v)
-		}
+func TestMCDC_Conn_CreateMemoryConnection(t *testing.T) {
+	for i := 0; i < 4; i++ {
+		mcdcVerifyMemDB(t, i)
 	}
 }
 

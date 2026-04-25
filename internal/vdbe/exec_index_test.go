@@ -85,6 +85,34 @@ func verifySeek(t *testing.T, idxCursor *btree.IndexCursor, key string, expected
 	}
 }
 
+func testIndexCursorIteration(t *testing.T) {
+	t.Parallel()
+	_, idxCursor, _ := setupIndexCursor(t)
+	insertTestData(t, idxCursor)
+
+	if err := idxCursor.MoveToFirst(); err != nil {
+		t.Fatalf("failed to move to first: %v", err)
+	}
+
+	keys := []string{}
+	for idxCursor.IsValid() {
+		keys = append(keys, string(idxCursor.GetKey()))
+		if err := idxCursor.NextIndex(); err != nil {
+			break
+		}
+	}
+
+	expected := []string{"apple", "banana", "cherry"}
+	if len(keys) != len(expected) {
+		t.Errorf("expected %d keys, got %d: %v", len(expected), len(keys), keys)
+	}
+	for i, k := range keys {
+		if i < len(expected) && k != expected[i] {
+			t.Errorf("key[%d]: expected %q, got %q", i, expected[i], k)
+		}
+	}
+}
+
 // TestIndexCursorBasicOperations tests basic index cursor operations
 func TestIndexCursorBasicOperations(t *testing.T) {
 	t.Parallel()
@@ -98,98 +126,59 @@ func TestIndexCursorBasicOperations(t *testing.T) {
 		t.Parallel()
 		_, idxCursor, _ := setupIndexCursor(t)
 		insertTestData(t, idxCursor)
-
 		verifySeek(t, idxCursor, "apple", 100, true)
 		verifySeek(t, idxCursor, "banana", 200, true)
 		verifySeek(t, idxCursor, "aardvark", 0, false)
 	})
 
-	t.Run("Iteration", func(t *testing.T) {
-		t.Parallel()
-		_, idxCursor, _ := setupIndexCursor(t)
-		insertTestData(t, idxCursor)
-
-		err := idxCursor.MoveToFirst()
-		if err != nil {
-			t.Fatalf("failed to move to first: %v", err)
-		}
-
-		keys := []string{}
-		for idxCursor.IsValid() {
-			keys = append(keys, string(idxCursor.GetKey()))
-			if err := idxCursor.NextIndex(); err != nil {
-				break
-			}
-		}
-
-		expected := []string{"apple", "banana", "cherry"}
-		if len(keys) != len(expected) {
-			t.Errorf("expected %d keys, got %d: %v", len(expected), len(keys), keys)
-		}
-		for i, k := range keys {
-			if i < len(expected) && k != expected[i] {
-				t.Errorf("key[%d]: expected %q, got %q", i, expected[i], k)
-			}
-		}
-	})
+	t.Run("Iteration", testIndexCursorIteration)
 
 	t.Run("Delete", func(t *testing.T) {
 		t.Parallel()
 		_, idxCursor, _ := setupIndexCursor(t)
 		insertTestData(t, idxCursor)
-
 		if err := idxCursor.DeleteIndex([]byte("banana"), 200); err != nil {
 			t.Fatalf("failed to delete 'banana': %v", err)
 		}
-
 		verifySeek(t, idxCursor, "banana", 0, false)
 		verifySeek(t, idxCursor, "apple", 100, true)
 	})
 }
 
-// TestIdxRowidOpcode tests the OpIdxRowid opcode
-func TestIdxRowidOpcode(t *testing.T) {
-	t.Parallel()
+func setupIdxRowidCursor(t *testing.T) (*VDBE, *btree.Btree) {
+	t.Helper()
 	bt := btree.NewBtree(4096)
 	rootPage, err := createIndexPage(bt)
 	if err != nil {
 		t.Fatalf("failed to create index page: %v", err)
 	}
-
 	idxCursor := btree.NewIndexCursor(bt, rootPage)
-
-	// Insert test data
 	if err := idxCursor.InsertIndex([]byte("key1"), 42); err != nil {
 		t.Fatalf("failed to insert: %v", err)
 	}
-
-	// Seek to the key
 	found, err := idxCursor.SeekIndex([]byte("key1"))
 	if err != nil || !found {
 		t.Fatalf("failed to seek: %v", err)
 	}
-
-	// Create VDBE
 	v := New()
-	v.Ctx = &VDBEContext{
-		Btree: bt,
-	}
-
+	v.Ctx = &VDBEContext{Btree: bt}
 	v.AllocMemory(10)
 	v.AllocCursors(2)
-
-	// Set up cursor - use BtreeCursor field which stores the index cursor
 	v.Cursors[0] = &Cursor{
 		CurType:     CursorBTree,
 		IsTable:     false,
-		Writable:    false,
 		RootPage:    rootPage,
 		BtreeCursor: idxCursor,
 		CachedCols:  make([][]byte, 0),
-		CacheStatus: 0,
 	}
+	return v, bt
+}
 
-	// Test OpIdxRowid
+// TestIdxRowidOpcode tests the OpIdxRowid opcode
+func TestIdxRowidOpcode(t *testing.T) {
+	t.Parallel()
+	v, _ := setupIdxRowidCursor(t)
+
 	v.AddOp(OpIdxRowid, 0, 2, 0)
 	v.AddOp(OpHalt, 0, 0, 0)
 
@@ -197,7 +186,6 @@ func TestIdxRowidOpcode(t *testing.T) {
 		t.Fatalf("VDBE execution failed: %v", err)
 	}
 
-	// Check result
 	mem, err := v.GetMem(2)
 	if err != nil {
 		t.Fatalf("failed to get register: %v", err)

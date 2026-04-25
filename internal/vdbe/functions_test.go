@@ -496,18 +496,22 @@ func memEqual(a, b *Mem) bool {
 	return memEqualNonNull(a, b)
 }
 
+func memEqualInt(a, b *Mem) bool {
+	return a.IsInt() && b.IsInt() && a.IntValue() == b.IntValue()
+}
+
+func memEqualReal(a, b *Mem) bool {
+	return a.IsReal() && b.IsReal() && a.RealValue() == b.RealValue()
+}
+
+func memEqualStr(a, b *Mem) bool {
+	return a.IsStr() && b.IsStr() && a.StrValue() == b.StrValue()
+}
+
+func memEqualBlob(a, b *Mem) bool {
+	return a.IsBlob() && b.IsBlob() && bytes.Equal(a.BlobValue(), b.BlobValue())
+}
+
 func memEqualNonNull(a, b *Mem) bool {
-	if a.IsInt() && b.IsInt() {
-		return a.IntValue() == b.IntValue()
-	}
-	if a.IsReal() && b.IsReal() {
-		return a.RealValue() == b.RealValue()
-	}
-	if a.IsStr() && b.IsStr() {
-		return a.StrValue() == b.StrValue()
-	}
-	if a.IsBlob() && b.IsBlob() {
-		return bytes.Equal(a.BlobValue(), b.BlobValue())
-	}
-	return false
+	return memEqualInt(a, b) || memEqualReal(a, b) || memEqualStr(a, b) || memEqualBlob(a, b)
 }

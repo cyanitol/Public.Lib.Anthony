@@ -70,109 +70,90 @@ func execCC3(t *testing.T, db *sql.DB, stmts ...string) {
 // int64 vs float64: both return 1 (same-type path via cmpSameType)
 // float64 vs string: typeOrder(float64)=1 vs typeOrder(string)=2
 // string vs blob:  typeOrder(string)=2 vs typeOrder([]byte)=3
-func TestCompileCompound3TypeOrderAllFiveCases(t *testing.T) {
+func TestCompileCompound3TypeOrderAllFiveCases_Asc(t *testing.T) {
 	t.Parallel()
+	db := openCC3DB(t)
+	execCC3(t, db,
+		"CREATE TABLE cc3_blob(b BLOB)",
+		"INSERT INTO cc3_blob VALUES(X'ff00')",
+	)
+	rows := queryCC3(t, db,
+		"SELECT NULL UNION ALL SELECT 42 UNION ALL SELECT 3.14 UNION ALL SELECT 'hello' UNION ALL SELECT b FROM cc3_blob ORDER BY 1")
+	if len(rows) != 5 {
+		t.Fatalf("want 5 rows, got %d", len(rows))
+	}
+	if rows[0][0] != nil {
+		t.Errorf("want NULL first, got %v", rows[0][0])
+	}
+	if _, ok := rows[4][0].([]byte); !ok {
+		t.Errorf("want blob last, got %T %v", rows[4][0], rows[4][0])
+	}
+}
 
-	// All five SELECT arms in one query so that ORDER BY 1 must compare every
-	// pair of distinct types, driving typeOrder through all non-default branches.
-	t.Run("all_five_types_ordered_asc", func(t *testing.T) {
-		t.Parallel()
-		db := openCC3DB(t)
-		execCC3(t, db,
-			"CREATE TABLE cc3_blob(b BLOB)",
-			"INSERT INTO cc3_blob VALUES(X'ff00')",
-		)
-		// NULL < int < float < text < blob in SQLite type order.
-		// UNION ALL keeps all rows so ORDER BY must call typeOrder on each pair.
-		rows := queryCC3(t, db,
-			"SELECT NULL UNION ALL SELECT 42 UNION ALL SELECT 3.14 UNION ALL SELECT 'hello' UNION ALL SELECT b FROM cc3_blob ORDER BY 1")
-		if len(rows) != 5 {
-			t.Fatalf("want 5 rows, got %d", len(rows))
-		}
-		// NULL must be first (typeOrder=0)
-		if rows[0][0] != nil {
-			t.Errorf("want NULL first, got %v", rows[0][0])
-		}
-		// blob ([]byte) must be last (typeOrder=3)
-		if _, ok := rows[4][0].([]byte); !ok {
-			t.Errorf("want blob last, got %T %v", rows[4][0], rows[4][0])
-		}
-	})
+func TestCompileCompound3TypeOrderAllFiveCases_Desc(t *testing.T) {
+	t.Parallel()
+	db := openCC3DB(t)
+	execCC3(t, db,
+		"CREATE TABLE cc3_blob2(b BLOB)",
+		"INSERT INTO cc3_blob2 VALUES(X'ff00')",
+	)
+	rows := queryCC3(t, db,
+		"SELECT NULL UNION ALL SELECT 42 UNION ALL SELECT 3.14 UNION ALL SELECT 'hello' UNION ALL SELECT b FROM cc3_blob2 ORDER BY 1 DESC")
+	if len(rows) != 5 {
+		t.Fatalf("want 5 rows, got %d", len(rows))
+	}
+	if _, ok := rows[0][0].([]byte); !ok {
+		t.Errorf("want blob first in DESC, got %T %v", rows[0][0], rows[0][0])
+	}
+	if rows[4][0] != nil {
+		t.Errorf("want NULL last in DESC, got %v", rows[4][0])
+	}
+}
 
-	t.Run("all_five_types_ordered_desc", func(t *testing.T) {
-		t.Parallel()
-		db := openCC3DB(t)
-		execCC3(t, db,
-			"CREATE TABLE cc3_blob2(b BLOB)",
-			"INSERT INTO cc3_blob2 VALUES(X'ff00')",
-		)
-		// DESC reverses the type order: blob first, NULL last.
-		rows := queryCC3(t, db,
-			"SELECT NULL UNION ALL SELECT 42 UNION ALL SELECT 3.14 UNION ALL SELECT 'hello' UNION ALL SELECT b FROM cc3_blob2 ORDER BY 1 DESC")
-		if len(rows) != 5 {
-			t.Fatalf("want 5 rows, got %d", len(rows))
-		}
-		// blob must be first in DESC
-		if _, ok := rows[0][0].([]byte); !ok {
-			t.Errorf("want blob first in DESC, got %T %v", rows[0][0], rows[0][0])
-		}
-		// NULL must be last in DESC
-		if rows[4][0] != nil {
-			t.Errorf("want NULL last in DESC, got %v", rows[4][0])
-		}
-	})
+func TestCompileCompound3TypeOrderAllFiveCases_IntTextBlob(t *testing.T) {
+	t.Parallel()
+	db := openCC3DB(t)
+	execCC3(t, db,
+		"CREATE TABLE cc3_itb(b BLOB)",
+		"INSERT INTO cc3_itb VALUES(X'ab')",
+	)
+	rows := queryCC3(t, db,
+		"SELECT 42 UNION ALL SELECT 'text' UNION ALL SELECT b FROM cc3_itb ORDER BY 1")
+	if len(rows) != 3 {
+		t.Fatalf("want 3 rows, got %d: %v", len(rows), rows)
+	}
+	if rows[0][0] != int64(42) {
+		t.Errorf("want 42 first, got %T %v", rows[0][0], rows[0][0])
+	}
+	if _, ok := rows[2][0].([]byte); !ok {
+		t.Errorf("want blob last, got %T %v", rows[2][0], rows[2][0])
+	}
+}
 
-	// Three types mixed: int, text, blob — forces typeOrder int64 vs string,
-	// and string vs []byte pairings without NULL involvement.
-	t.Run("int_text_blob_ordering", func(t *testing.T) {
-		t.Parallel()
-		db := openCC3DB(t)
-		execCC3(t, db,
-			"CREATE TABLE cc3_itb(b BLOB)",
-			"INSERT INTO cc3_itb VALUES(X'ab')",
-		)
-		rows := queryCC3(t, db,
-			"SELECT 42 UNION ALL SELECT 'text' UNION ALL SELECT b FROM cc3_itb ORDER BY 1")
-		if len(rows) != 3 {
-			t.Fatalf("want 3 rows, got %d: %v", len(rows), rows)
-		}
-		// int64 (typeOrder=1) < string (typeOrder=2) < []byte (typeOrder=3)
-		if rows[0][0] != int64(42) {
-			t.Errorf("want 42 first, got %T %v", rows[0][0], rows[0][0])
-		}
-		if _, ok := rows[2][0].([]byte); !ok {
-			t.Errorf("want blob last, got %T %v", rows[2][0], rows[2][0])
-		}
-	})
+func TestCompileCompound3TypeOrderAllFiveCases_NullFloat(t *testing.T) {
+	t.Parallel()
+	db := openCC3DB(t)
+	rows := queryCC3(t, db,
+		"SELECT NULL UNION ALL SELECT 3.14 UNION ALL SELECT 2.71 ORDER BY 1 ASC")
+	if len(rows) != 3 {
+		t.Fatalf("want 3 rows, got %d", len(rows))
+	}
+	if rows[0][0] != nil {
+		t.Errorf("want NULL first, got %v", rows[0][0])
+	}
+}
 
-	// NULL and float only — covers typeOrder nil=0 and float64=1.
-	t.Run("null_and_float_ordering", func(t *testing.T) {
-		t.Parallel()
-		db := openCC3DB(t)
-		rows := queryCC3(t, db,
-			"SELECT NULL UNION ALL SELECT 3.14 UNION ALL SELECT 2.71 ORDER BY 1 ASC")
-		if len(rows) != 3 {
-			t.Fatalf("want 3 rows, got %d", len(rows))
-		}
-		if rows[0][0] != nil {
-			t.Errorf("want NULL first, got %v", rows[0][0])
-		}
-	})
-
-	// float vs text — covers typeOrder float64=1 vs string=2.
-	t.Run("float_and_text_ordering", func(t *testing.T) {
-		t.Parallel()
-		db := openCC3DB(t)
-		rows := queryCC3(t, db,
-			"SELECT 1.5 UNION ALL SELECT 'alpha' UNION ALL SELECT 0.5 ORDER BY 1 ASC")
-		if len(rows) != 3 {
-			t.Fatalf("want 3 rows, got %d", len(rows))
-		}
-		// Numeric types sort before text.
-		if _, ok := rows[2][0].(string); !ok {
-			t.Errorf("want string last, got %T %v", rows[2][0], rows[2][0])
-		}
-	})
+func TestCompileCompound3TypeOrderAllFiveCases_FloatText(t *testing.T) {
+	t.Parallel()
+	db := openCC3DB(t)
+	rows := queryCC3(t, db,
+		"SELECT 1.5 UNION ALL SELECT 'alpha' UNION ALL SELECT 0.5 ORDER BY 1 ASC")
+	if len(rows) != 3 {
+		t.Fatalf("want 3 rows, got %d", len(rows))
+	}
+	if _, ok := rows[2][0].(string); !ok {
+		t.Errorf("want string last, got %T %v", rows[2][0], rows[2][0])
+	}
 }
 
 // TestCompileCompound3ExtractBaseExpr targets the extractBaseExpr function at
@@ -263,109 +244,93 @@ func TestCompileCompound3ExtractBaseExpr(t *testing.T) {
 //
 // In practice, chaining many UNIONs causes deeper nesting. We exercise both
 // recursion directions via triple and quadruple UNION chains.
-func TestCompileCompound3FlattenCompound(t *testing.T) {
+func TestCompileCompound3FlattenCompound_TripleUnion(t *testing.T) {
 	t.Parallel()
+	db := openCC3DB(t)
+	execCC3(t, db,
+		"CREATE TABLE cc3_t1(a INTEGER)",
+		"CREATE TABLE cc3_t2(b INTEGER)",
+		"CREATE TABLE cc3_t3(c INTEGER)",
+		"INSERT INTO cc3_t1 VALUES(10),(20)",
+		"INSERT INTO cc3_t2 VALUES(20),(30)",
+		"INSERT INTO cc3_t3 VALUES(30),(40)",
+	)
+	rows := queryCC3(t, db,
+		"SELECT a FROM cc3_t1 UNION SELECT b FROM cc3_t2 UNION SELECT c FROM cc3_t3 ORDER BY 1")
+	if len(rows) != 4 {
+		t.Fatalf("triple union: want 4 rows, got %d", len(rows))
+	}
+	want := []int64{10, 20, 30, 40}
+	for i, r := range rows {
+		if r[0] != want[i] {
+			t.Errorf("row %d: want %d, got %v", i, want[i], r[0])
+		}
+	}
+}
 
-	// Triple UNION: parser builds A UNION (B UNION C) — right-nested.
-	// flattenCompound sees c.Left=A (leaf), c.Right={B UNION C} (compound).
-	// Exercises: left leaf branch, right recursion branch, then right leaf branch.
-	t.Run("triple_union_right_nested_with_tables", func(t *testing.T) {
-		t.Parallel()
-		db := openCC3DB(t)
-		execCC3(t, db,
-			"CREATE TABLE cc3_t1(a INTEGER)",
-			"CREATE TABLE cc3_t2(b INTEGER)",
-			"CREATE TABLE cc3_t3(c INTEGER)",
-			"INSERT INTO cc3_t1 VALUES(10),(20)",
-			"INSERT INTO cc3_t2 VALUES(20),(30)",
-			"INSERT INTO cc3_t3 VALUES(30),(40)",
-		)
-		rows := queryCC3(t, db,
-			"SELECT a FROM cc3_t1 UNION SELECT b FROM cc3_t2 UNION SELECT c FROM cc3_t3 ORDER BY 1")
-		if len(rows) != 4 {
-			t.Fatalf("triple union: want 4 rows, got %d", len(rows))
-		}
-		want := []int64{10, 20, 30, 40}
-		for i, r := range rows {
-			if r[0] != want[i] {
-				t.Errorf("row %d: want %d, got %v", i, want[i], r[0])
-			}
-		}
-	})
+func TestCompileCompound3FlattenCompound_FiveUnionAll(t *testing.T) {
+	t.Parallel()
+	db := openCC3DB(t)
+	rows := queryCC3(t, db,
+		"SELECT 5 UNION ALL SELECT 4 UNION ALL SELECT 3 UNION ALL SELECT 2 UNION ALL SELECT 1 ORDER BY 1")
+	if len(rows) != 5 {
+		t.Fatalf("want 5 rows, got %d", len(rows))
+	}
+	if rows[0][0] != int64(1) {
+		t.Errorf("want 1 first, got %v", rows[0][0])
+	}
+	if rows[4][0] != int64(5) {
+		t.Errorf("want 5 last, got %v", rows[4][0])
+	}
+}
 
-	// Five UNION ALL arms — deeply right-nested, exercising right recursion
-	// multiple times within flattenCompound.
-	t.Run("five_union_all_deep_flatten", func(t *testing.T) {
-		t.Parallel()
-		db := openCC3DB(t)
-		rows := queryCC3(t, db,
-			"SELECT 5 UNION ALL SELECT 4 UNION ALL SELECT 3 UNION ALL SELECT 2 UNION ALL SELECT 1 ORDER BY 1")
-		if len(rows) != 5 {
-			t.Fatalf("want 5 rows, got %d", len(rows))
-		}
-		if rows[0][0] != int64(1) {
-			t.Errorf("want 1 first, got %v", rows[0][0])
-		}
-		if rows[4][0] != int64(5) {
-			t.Errorf("want 5 last, got %v", rows[4][0])
-		}
-	})
+func TestCompileCompound3FlattenCompound_MixedOps(t *testing.T) {
+	t.Parallel()
+	db := openCC3DB(t)
+	execCC3(t, db,
+		"CREATE TABLE cc3_m1(v INTEGER)",
+		"CREATE TABLE cc3_m2(v INTEGER)",
+		"CREATE TABLE cc3_m3(v INTEGER)",
+		"INSERT INTO cc3_m1 VALUES(1),(2),(3)",
+		"INSERT INTO cc3_m2 VALUES(3),(4)",
+		"INSERT INTO cc3_m3 VALUES(4),(5)",
+	)
+	rows := queryCC3(t, db,
+		"SELECT v FROM cc3_m1 UNION ALL SELECT v FROM cc3_m2 UNION SELECT v FROM cc3_m3 ORDER BY v")
+	if len(rows) == 0 {
+		t.Fatal("expected non-empty result")
+	}
+}
 
-	// Mixed operators across three arms: UNION ALL then UNION.
-	// flattenCompound collects [UNION_ALL, UNION] ops and three selects.
-	t.Run("mixed_ops_triple_flatten", func(t *testing.T) {
-		t.Parallel()
-		db := openCC3DB(t)
-		execCC3(t, db,
-			"CREATE TABLE cc3_m1(v INTEGER)",
-			"CREATE TABLE cc3_m2(v INTEGER)",
-			"CREATE TABLE cc3_m3(v INTEGER)",
-			"INSERT INTO cc3_m1 VALUES(1),(2),(3)",
-			"INSERT INTO cc3_m2 VALUES(3),(4)",
-			"INSERT INTO cc3_m3 VALUES(4),(5)",
-		)
-		// UNION ALL preserves duplicates from m1 and m2; UNION deduplicates with m3.
-		rows := queryCC3(t, db,
-			"SELECT v FROM cc3_m1 UNION ALL SELECT v FROM cc3_m2 UNION SELECT v FROM cc3_m3 ORDER BY v")
-		if len(rows) == 0 {
-			t.Fatal("expected non-empty result")
-		}
-	})
+func TestCompileCompound3FlattenCompound_QuadUnion(t *testing.T) {
+	t.Parallel()
+	db := openCC3DB(t)
+	rows := queryCC3(t, db,
+		"SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 ORDER BY 1")
+	if len(rows) != 4 {
+		t.Fatalf("want 4 rows, got %d", len(rows))
+	}
+}
 
-	// Four arms ensure flattenCompound recurses into the right sub-tree at
-	// least twice (right recursion hits depth 2).
-	t.Run("quad_union_flatten_depth", func(t *testing.T) {
-		t.Parallel()
-		db := openCC3DB(t)
-		rows := queryCC3(t, db,
-			"SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 ORDER BY 1")
-		if len(rows) != 4 {
-			t.Fatalf("want 4 rows, got %d", len(rows))
-		}
-	})
-
-	// UNION with ORDER BY on a literal expression (column position 1):
-	// exercises resolveOrderByColumn -> resolveLiteralExpr for a multi-arm query.
-	t.Run("triple_union_order_by_literal_expr", func(t *testing.T) {
-		t.Parallel()
-		db := openCC3DB(t)
-		execCC3(t, db,
-			"CREATE TABLE cc3_lit1(n INTEGER)",
-			"CREATE TABLE cc3_lit2(n INTEGER)",
-			"CREATE TABLE cc3_lit3(n INTEGER)",
-			"INSERT INTO cc3_lit1 VALUES(30)",
-			"INSERT INTO cc3_lit2 VALUES(10)",
-			"INSERT INTO cc3_lit3 VALUES(20)",
-		)
-		rows := queryCC3(t, db,
-			"SELECT n FROM cc3_lit1 UNION SELECT n FROM cc3_lit2 UNION SELECT n FROM cc3_lit3 ORDER BY 1")
-		if len(rows) != 3 {
-			t.Fatalf("want 3 rows, got %d", len(rows))
-		}
-		if rows[0][0] != int64(10) {
-			t.Errorf("want 10 first, got %v", rows[0][0])
-		}
-	})
+func TestCompileCompound3FlattenCompound_TripleOrderByLiteral(t *testing.T) {
+	t.Parallel()
+	db := openCC3DB(t)
+	execCC3(t, db,
+		"CREATE TABLE cc3_lit1(n INTEGER)",
+		"CREATE TABLE cc3_lit2(n INTEGER)",
+		"CREATE TABLE cc3_lit3(n INTEGER)",
+		"INSERT INTO cc3_lit1 VALUES(30)",
+		"INSERT INTO cc3_lit2 VALUES(10)",
+		"INSERT INTO cc3_lit3 VALUES(20)",
+	)
+	rows := queryCC3(t, db,
+		"SELECT n FROM cc3_lit1 UNION SELECT n FROM cc3_lit2 UNION SELECT n FROM cc3_lit3 ORDER BY 1")
+	if len(rows) != 3 {
+		t.Fatalf("want 3 rows, got %d", len(rows))
+	}
+	if rows[0][0] != int64(10) {
+		t.Errorf("want 10 first, got %v", rows[0][0])
+	}
 }
 
 // TestCompileCompound3TypeOrderDefaultBranch attempts to drive typeOrder into

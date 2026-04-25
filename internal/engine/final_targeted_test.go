@@ -243,21 +243,25 @@ func TestQueryRowScanSequence(t *testing.T) {
 	}
 }
 
-// TestTransactionSequenceOperations tests operations within a transaction
-func TestTransactionSequenceOperations(t *testing.T) {
+// openDBWithTable opens a database and creates a test table.
+func openDBWithTable(t *testing.T) *Engine {
+	t.Helper()
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-
 	db, err := Open(dbPath)
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer db.Close()
-
-	_, err = db.Execute(`CREATE TABLE test (id INTEGER)`)
-	if err != nil {
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Execute(`CREATE TABLE test (id INTEGER)`); err != nil {
 		t.Fatalf("Failed to create table: %v", err)
 	}
+	return db
+}
+
+// TestTransactionSequenceOperations tests operations within a transaction
+func TestTransactionSequenceOperations(t *testing.T) {
+	db := openDBWithTable(t)
 
 	// Begin transaction
 	tx, err := db.Begin()
@@ -266,8 +270,7 @@ func TestTransactionSequenceOperations(t *testing.T) {
 	}
 
 	// Execute within transaction
-	_, err = tx.Execute("SELECT 1")
-	if err != nil {
+	if _, err = tx.Execute("SELECT 1"); err != nil {
 		t.Errorf("Execute in tx should not error: %v", err)
 	}
 
@@ -281,8 +284,7 @@ func TestTransactionSequenceOperations(t *testing.T) {
 	}
 
 	// Exec within transaction
-	_, err = tx.Exec("SELECT 1")
-	if err != nil {
+	if _, err = tx.Exec("SELECT 1"); err != nil {
 		t.Errorf("Exec in tx should not error: %v", err)
 	}
 

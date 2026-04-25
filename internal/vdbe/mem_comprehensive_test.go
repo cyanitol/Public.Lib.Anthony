@@ -127,13 +127,21 @@ func valuesMatchComprehensive(got, expected interface{}) bool {
 		gotFloat, ok := got.(float64)
 		return ok && gotFloat == v
 	case string:
-		gotStr, ok := got.(string)
-		return ok && gotStr == v
+		return valuesMatchComprehensiveStr(got, v)
 	case []byte:
-		gotBytes, ok := got.([]byte)
-		return ok && bytesMatchComprehensive(gotBytes, v)
+		return valuesMatchComprehensiveBytes(got, v)
 	}
 	return false
+}
+
+func valuesMatchComprehensiveStr(got interface{}, expected string) bool {
+	gotStr, ok := got.(string)
+	return ok && gotStr == expected
+}
+
+func valuesMatchComprehensiveBytes(got interface{}, expected []byte) bool {
+	gotBytes, ok := got.([]byte)
+	return ok && bytesMatchComprehensive(gotBytes, expected)
 }
 
 func bytesMatchComprehensive(got, expected []byte) bool {
@@ -238,23 +246,33 @@ func TestMemNumerify(t *testing.T) {
 	}
 }
 
-func checkNumerifyResult(t *testing.T, m *Mem, wantInt, wantReal bool, wantValue interface{}) {
+func checkNumerifyInt(t *testing.T, m *Mem, wantValue interface{}) {
 	t.Helper()
-	if wantInt && !m.IsInt() {
+	if !m.IsInt() {
 		t.Errorf("Expected int flag after Numerify()")
 	}
-	if wantReal && !m.IsReal() {
+	if got := m.IntValue(); got != wantValue.(int64) {
+		t.Errorf("IntValue() = %v, want %v", got, wantValue)
+	}
+}
+
+func checkNumerifyReal(t *testing.T, m *Mem, wantValue interface{}) {
+	t.Helper()
+	if !m.IsReal() {
 		t.Errorf("Expected real flag after Numerify()")
 	}
+	if got := m.RealValue(); got != wantValue.(float64) {
+		t.Errorf("RealValue() = %v, want %v", got, wantValue)
+	}
+}
+
+func checkNumerifyResult(t *testing.T, m *Mem, wantInt, wantReal bool, wantValue interface{}) {
+	t.Helper()
 	if wantInt {
-		if got := m.IntValue(); got != wantValue.(int64) {
-			t.Errorf("IntValue() = %v, want %v", got, wantValue)
-		}
+		checkNumerifyInt(t, m, wantValue)
 	}
 	if wantReal {
-		if got := m.RealValue(); got != wantValue.(float64) {
-			t.Errorf("RealValue() = %v, want %v", got, wantValue)
-		}
+		checkNumerifyReal(t, m, wantValue)
 	}
 }
 
@@ -618,7 +636,7 @@ type arithEdgeCaseTest struct {
 	checkFn func(*testing.T, *Mem)
 }
 
-func arithEdgeCases() []arithEdgeCaseTest {
+func arithEdgeCasesSubtract() []arithEdgeCaseTest {
 	return []arithEdgeCaseTest{
 		{"Subtract with null", func() *Mem { return NewMemInt(10) }, func(m *Mem) error { return m.Subtract(NewMemNull()) }, func(t *testing.T, m *Mem) {
 			if !m.IsNull() {
@@ -630,6 +648,11 @@ func arithEdgeCases() []arithEdgeCaseTest {
 				t.Errorf("Expected real after overflow")
 			}
 		}},
+	}
+}
+
+func arithEdgeCasesMultiply() []arithEdgeCaseTest {
+	return []arithEdgeCaseTest{
 		{"Multiply with null", func() *Mem { return NewMemInt(10) }, func(m *Mem) error { return m.Multiply(NewMemNull()) }, func(t *testing.T, m *Mem) {
 			if !m.IsNull() {
 				t.Errorf("Expected null result")
@@ -640,6 +663,11 @@ func arithEdgeCases() []arithEdgeCaseTest {
 				t.Errorf("Expected real after overflow")
 			}
 		}},
+	}
+}
+
+func arithEdgeCasesRemainder() []arithEdgeCaseTest {
+	return []arithEdgeCaseTest{
 		{"Remainder with null", func() *Mem { return NewMemInt(10) }, func(m *Mem) error { return m.Remainder(NewMemNull()) }, func(t *testing.T, m *Mem) {
 			if !m.IsNull() {
 				t.Errorf("Expected null result")
@@ -661,6 +689,14 @@ func arithEdgeCases() []arithEdgeCaseTest {
 			}
 		}},
 	}
+}
+
+func arithEdgeCases() []arithEdgeCaseTest {
+	var cases []arithEdgeCaseTest
+	cases = append(cases, arithEdgeCasesSubtract()...)
+	cases = append(cases, arithEdgeCasesMultiply()...)
+	cases = append(cases, arithEdgeCasesRemainder()...)
+	return cases
 }
 
 // TestMemArithmeticEdgeCases tests edge cases for arithmetic operations

@@ -29,6 +29,23 @@ import (
 //	A=T B=F → F (comment token is dropped)
 //
 // -----------------------------------------------------------------------------
+// collectNonTrivialTokens returns all tokens from sql that are not spaces, comments, or EOF.
+func collectNonTrivialTokens(sql string) []Token {
+	lexer := NewLexer(sql)
+	var tokens []Token
+	for {
+		tok := lexer.NextToken()
+		if tok.Type == TK_SPACE || tok.Type == TK_COMMENT {
+			continue
+		}
+		if tok.Type == TK_EOF {
+			break
+		}
+		tokens = append(tokens, tok)
+	}
+	return tokens
+}
+
 func TestMCDC_Tokenize_SpaceAndCommentFilter(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -37,51 +54,16 @@ func TestMCDC_Tokenize_SpaceAndCommentFilter(t *testing.T) {
 		wantTokenType TokenType // first non-EOF token type expected
 		wantCount     int       // total non-EOF tokens expected
 	}{
-		// A=T B=T: regular token (not space, not comment) is kept
-		{
-			name:          "A=T B=T: identifier kept",
-			sql:           "foo",
-			wantTokenType: TK_ID,
-			wantCount:     1,
-		},
-		// A=F B=T: space token is dropped; only the identifier survives
-		{
-			name:          "A=F B=T: space between tokens dropped",
-			sql:           "foo bar",
-			wantTokenType: TK_ID,
-			wantCount:     2,
-		},
-		// A=T B=F: line comment dropped; only SELECT survives
-		{
-			name:          "A=T B=F: line comment dropped",
-			sql:           "SELECT -- this is a comment\n1",
-			wantTokenType: TK_SELECT,
-			wantCount:     2,
-		},
-		// A=T B=F: block comment dropped
-		{
-			name:          "A=T B=F: block comment dropped",
-			sql:           "SELECT /* comment */ 1",
-			wantTokenType: TK_SELECT,
-			wantCount:     2,
-		},
+		{"A=T B=T: identifier kept", "foo", TK_ID, 1},
+		{"A=F B=T: space between tokens dropped", "foo bar", TK_ID, 2},
+		{"A=T B=F: line comment dropped", "SELECT -- this is a comment\n1", TK_SELECT, 2},
+		{"A=T B=F: block comment dropped", "SELECT /* comment */ 1", TK_SELECT, 2},
 	}
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			lexer := NewLexer(tt.sql)
-			var tokens []Token
-			for {
-				tok := lexer.NextToken()
-				if tok.Type == TK_SPACE || tok.Type == TK_COMMENT {
-					continue
-				}
-				if tok.Type == TK_EOF {
-					break
-				}
-				tokens = append(tokens, tok)
-			}
+			tokens := collectNonTrivialTokens(tt.sql)
 			if len(tokens) != tt.wantCount {
 				t.Errorf("token count: got %d, want %d (sql=%q)", len(tokens), tt.wantCount, tt.sql)
 			}
@@ -1512,81 +1494,68 @@ func TestMCDC_ParseFunctionOver_WindowNameVsSpec(t *testing.T) {
 //	A=T B=F → F (negation of float — no folding)
 //
 // -----------------------------------------------------------------------------
+// checkNegIntOrUnary checks if expr is either a negative integer literal or a unary neg expression.
+func checkNegIntOrUnary(expr Expression) bool {
+	switch e := expr.(type) {
+	case *LiteralExpr:
+		return strings.HasPrefix(e.Value, "-") && e.Type == LiteralInteger
+	case *UnaryExpr:
+		return e.Op == OpNeg
+	}
+	return false
+}
+
+// checkLiteralValue checks if expr is a LiteralExpr with the given value.
+func checkLiteralValue(expr Expression, value string) bool {
+	lit, ok := expr.(*LiteralExpr)
+	return ok && lit.Value == value
+}
+
+// checkIsIntegerLiteral checks if expr is an integer LiteralExpr.
+func checkIsIntegerLiteral(expr Expression) bool {
+	lit, ok := expr.(*LiteralExpr)
+	return ok && lit.Type == LiteralInteger
+}
+
+// checkIsUnaryExpr checks if expr is a UnaryExpr.
+func checkIsUnaryExpr(expr Expression) bool {
+	_, ok := expr.(*UnaryExpr)
+	return ok
+}
+
+// assertSelectExpr parses sql, extracts the first select column expr, and calls check on it.
+func assertSelectExpr(t *testing.T, sql string, check func(Expression) bool) {
+	t.Helper()
+	stmts, err := ParseString(sql)
+	if err != nil {
+		t.Fatalf("ParseString(%q) err=%v", sql, err)
+	}
+	sel := stmts[0].(*SelectStmt)
+	if !check(sel.Columns[0].Expr) {
+		t.Errorf("checkExpr failed for sql=%q (got %T)", sql, sel.Columns[0].Expr)
+	}
+}
+
 func TestMCDC_ParseUnaryExprWithOp_NegFold(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name      string
-		sql       string
-		wantErr   bool
-		checkExpr func(expr Expression) bool
-	}{
-		// A=T B=T: negation of integer literal
-		{
-			name:    "A=T B=T: negation of integer literal",
-			sql:     "SELECT -42 FROM t",
-			wantErr: false,
-			checkExpr: func(expr Expression) bool {
-				// Either a folded literal or a UnaryExpr wrapping an integer
-				switch e := expr.(type) {
-				case *LiteralExpr:
-					return strings.HasPrefix(e.Value, "-") && e.Type == LiteralInteger
-				case *UnaryExpr:
-					return e.Op == OpNeg
-				}
-				return false
-			},
-		},
-		// A=T B=T: special int64-min case
-		{
-			name:    "A=T B=T: -9223372036854775808 folds to literal",
-			sql:     "SELECT -9223372036854775808 FROM t",
-			wantErr: false,
-			checkExpr: func(expr Expression) bool {
-				lit, ok := expr.(*LiteralExpr)
-				return ok && lit.Value == "-9223372036854775808"
-			},
-		},
-		// A=F B=T: unary plus on integer — unary + is consumed transparently,
-		// leaving the raw integer literal (op != OpNeg, so no folding check)
-		{
-			name:    "A=F B=T: unary plus on integer",
-			sql:     "SELECT +42 FROM t",
-			wantErr: false,
-			checkExpr: func(expr Expression) bool {
-				// unary + is a no-op; result is the bare literal
-				lit, ok := expr.(*LiteralExpr)
-				return ok && lit.Type == LiteralInteger
-			},
-		},
-		// A=T B=F: negation of float
-		{
-			name:    "A=T B=F: negation of float literal",
-			sql:     "SELECT -3.14 FROM t",
-			wantErr: false,
-			checkExpr: func(expr Expression) bool {
-				_, ok := expr.(*UnaryExpr)
-				return ok
-			},
-		},
-	}
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			stmts, err := ParseString(tt.sql)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseString(%q) err=%v, wantErr=%v", tt.sql, err, tt.wantErr)
-				return
-			}
-			if tt.wantErr {
-				return
-			}
-			sel := stmts[0].(*SelectStmt)
-			if !tt.checkExpr(sel.Columns[0].Expr) {
-				t.Errorf("checkExpr failed for sql=%q (got %T)", tt.sql, sel.Columns[0].Expr)
-			}
+	t.Run("A=T B=T: negation of integer literal", func(t *testing.T) {
+		t.Parallel()
+		assertSelectExpr(t, "SELECT -42 FROM t", checkNegIntOrUnary)
+	})
+	t.Run("A=T B=T: -9223372036854775808 folds to literal", func(t *testing.T) {
+		t.Parallel()
+		assertSelectExpr(t, "SELECT -9223372036854775808 FROM t", func(e Expression) bool {
+			return checkLiteralValue(e, "-9223372036854775808")
 		})
-	}
+	})
+	t.Run("A=F B=T: unary plus on integer", func(t *testing.T) {
+		t.Parallel()
+		assertSelectExpr(t, "SELECT +42 FROM t", checkIsIntegerLiteral)
+	})
+	t.Run("A=T B=F: negation of float literal", func(t *testing.T) {
+		t.Parallel()
+		assertSelectExpr(t, "SELECT -3.14 FROM t", checkIsUnaryExpr)
+	})
 }
 
 // -----------------------------------------------------------------------------

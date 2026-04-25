@@ -33,6 +33,38 @@ func createIndexFromSQL(t *testing.T, s *Schema, sql string) *Index {
 	return index
 }
 
+// assertExprIndexBasic checks basic index fields (name, table, single column).
+func assertExprIndexBasic(t *testing.T, index *Index, wantName, wantTable, wantCol string) {
+	t.Helper()
+	if index.Name != wantName {
+		t.Errorf("Expected index name %q, got %q", wantName, index.Name)
+	}
+	if index.Table != wantTable {
+		t.Errorf("Expected table %q, got %q", wantTable, index.Table)
+	}
+	if len(index.Columns) != 1 {
+		t.Fatalf("Expected 1 column, got %d", len(index.Columns))
+	}
+	if index.Columns[0] != wantCol {
+		t.Errorf("Expected column %q, got %q", wantCol, index.Columns[0])
+	}
+}
+
+// assertExprIndexFunc checks that the first expression is a FunctionExpr with the given name.
+func assertExprIndexFunc(t *testing.T, index *Index, wantFunc string) {
+	t.Helper()
+	if len(index.Expressions) != 1 || index.Expressions[0] == nil {
+		t.Fatal("Expected 1 non-nil expression")
+	}
+	funcExpr, ok := index.Expressions[0].(*parser.FunctionExpr)
+	if !ok {
+		t.Fatalf("Expected FunctionExpr, got %T", index.Expressions[0])
+	}
+	if funcExpr.Name != wantFunc {
+		t.Errorf("Expected %s function, got %s", wantFunc, funcExpr.Name)
+	}
+}
+
 // TestExpressionIndexCreation tests that expression indexes are stored correctly in the schema
 func TestExpressionIndexCreation(t *testing.T) {
 	t.Parallel()
@@ -43,30 +75,8 @@ func TestExpressionIndexCreation(t *testing.T) {
 	})
 
 	index := createIndexFromSQL(t, s, "CREATE INDEX idx_lower_name ON users(LOWER(name))")
-
-	if index.Name != "idx_lower_name" {
-		t.Errorf("Expected index name 'idx_lower_name', got '%s'", index.Name)
-	}
-	if index.Table != "users" {
-		t.Errorf("Expected table 'users', got '%s'", index.Table)
-	}
-	if len(index.Columns) != 1 {
-		t.Fatalf("Expected 1 column, got %d", len(index.Columns))
-	}
-	if index.Columns[0] != "LOWER(name)" {
-		t.Errorf("Expected column 'LOWER(name)', got '%s'", index.Columns[0])
-	}
-	if len(index.Expressions) != 1 || index.Expressions[0] == nil {
-		t.Fatal("Expected 1 non-nil expression")
-	}
-
-	funcExpr, ok := index.Expressions[0].(*parser.FunctionExpr)
-	if !ok {
-		t.Fatalf("Expected FunctionExpr, got %T", index.Expressions[0])
-	}
-	if funcExpr.Name != "LOWER" {
-		t.Errorf("Expected LOWER function, got %s", funcExpr.Name)
-	}
+	assertExprIndexBasic(t, index, "idx_lower_name", "users", "LOWER(name)")
+	assertExprIndexFunc(t, index, "LOWER")
 }
 
 // TestMixedExpressionIndex tests an index with both expressions and regular columns

@@ -453,26 +453,37 @@ func TestPragmaTableBestIndex(t *testing.T) {
 	}
 }
 
-// TestPragmaCursorRowid tests the Rowid method.
-func TestPragmaCursorRowid(t *testing.T) {
-	t.Parallel()
+// openPragmaCursor creates and filters a PragmaCursor for testing.
+func openPragmaCursor(t *testing.T) *PragmaCursor {
+	t.Helper()
 	module := NewPragmaTableInfoModule()
 	vtable, _, err := module.Connect(nil, "pragma_table_info", "main", "pragma_table_info", nil)
 	if err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
-
 	cursor, err := vtable.Open()
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	defer cursor.Close()
-
-	pragmaCursor := cursor.(*PragmaCursor)
-	err = pragmaCursor.Filter(0, "", []interface{}{"example_table"})
-	if err != nil {
+	t.Cleanup(func() { cursor.Close() })
+	pc := cursor.(*PragmaCursor)
+	if err := pc.Filter(0, "", []interface{}{"example_table"}); err != nil {
 		t.Fatalf("Filter failed: %v", err)
 	}
+	return pc
+}
+
+// advanceToEOF moves the cursor to EOF.
+func advanceToEOF(pc *PragmaCursor) {
+	for !pc.EOF() {
+		pc.Next()
+	}
+}
+
+// TestPragmaCursorRowid tests the Rowid method.
+func TestPragmaCursorRowid(t *testing.T) {
+	t.Parallel()
+	pragmaCursor := openPragmaCursor(t)
 
 	if !pragmaCursor.EOF() {
 		rowid, err := pragmaCursor.Rowid()
@@ -484,12 +495,8 @@ func TestPragmaCursorRowid(t *testing.T) {
 		}
 	}
 
-	// Test Rowid at EOF
-	for !pragmaCursor.EOF() {
-		pragmaCursor.Next()
-	}
-	_, err = pragmaCursor.Rowid()
-	if err == nil {
+	advanceToEOF(pragmaCursor)
+	if _, err := pragmaCursor.Rowid(); err == nil {
 		t.Error("Expected error when calling Rowid at EOF")
 	}
 }
@@ -497,43 +504,21 @@ func TestPragmaCursorRowid(t *testing.T) {
 // TestPragmaCursorColumnErrors tests error cases for Column method.
 func TestPragmaCursorColumnErrors(t *testing.T) {
 	t.Parallel()
-	module := NewPragmaTableInfoModule()
-	vtable, _, err := module.Connect(nil, "pragma_table_info", "main", "pragma_table_info", nil)
-	if err != nil {
-		t.Fatalf("Connect failed: %v", err)
-	}
-
-	cursor, err := vtable.Open()
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	defer cursor.Close()
-
-	pragmaCursor := cursor.(*PragmaCursor)
-	err = pragmaCursor.Filter(0, "", []interface{}{"example_table"})
-	if err != nil {
-		t.Fatalf("Filter failed: %v", err)
-	}
+	pragmaCursor := openPragmaCursor(t)
 
 	// Test column out of range
 	if !pragmaCursor.EOF() {
-		_, err = pragmaCursor.Column(99)
-		if err == nil {
+		if _, err := pragmaCursor.Column(99); err == nil {
 			t.Error("Expected error for out of range column")
 		}
-
-		_, err = pragmaCursor.Column(-1)
-		if err == nil {
+		if _, err := pragmaCursor.Column(-1); err == nil {
 			t.Error("Expected error for negative column index")
 		}
 	}
 
 	// Test column at EOF
-	for !pragmaCursor.EOF() {
-		pragmaCursor.Next()
-	}
-	_, err = pragmaCursor.Column(0)
-	if err == nil {
+	advanceToEOF(pragmaCursor)
+	if _, err := pragmaCursor.Column(0); err == nil {
 		t.Error("Expected error when calling Column at EOF")
 	}
 }

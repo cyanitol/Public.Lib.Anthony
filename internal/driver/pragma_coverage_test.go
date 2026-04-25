@@ -75,6 +75,32 @@ func pragmaQueryRowCount(t *testing.T, db *sql.DB, query string) int {
 // emitNotNullValue, emitDefaultValue, calculatePrimaryKeyIndex.
 // ---------------------------------------------------------------------------
 
+type pragmaColInfo struct {
+	cid     int64
+	name    string
+	typ     string
+	notnull int64
+	dfltVal sql.NullString
+	pk      int64
+}
+
+// scanTableInfoCols scans all rows from a PRAGMA table_info result set.
+func scanTableInfoCols(t *testing.T, rows *sql.Rows) []pragmaColInfo {
+	t.Helper()
+	var cols []pragmaColInfo
+	for rows.Next() {
+		var c pragmaColInfo
+		if err := rows.Scan(&c.cid, &c.name, &c.typ, &c.notnull, &c.dfltVal, &c.pk); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		cols = append(cols, c)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	return cols
+}
+
 func TestPragma_TableInfo_Basic(t *testing.T) {
 	db := openPragmaDB(t)
 	pragmaExec(t, db, "CREATE TABLE ti1(a INTEGER, b TEXT, c REAL)")
@@ -85,27 +111,7 @@ func TestPragma_TableInfo_Basic(t *testing.T) {
 	}
 	defer rows.Close()
 
-	type colInfo struct {
-		cid     int64
-		name    string
-		typ     string
-		notnull int64
-		dfltVal sql.NullString
-		pk      int64
-	}
-
-	var cols []colInfo
-	for rows.Next() {
-		var c colInfo
-		if err := rows.Scan(&c.cid, &c.name, &c.typ, &c.notnull, &c.dfltVal, &c.pk); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		cols = append(cols, c)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows: %v", err)
-	}
-
+	cols := scanTableInfoCols(t, rows)
 	if len(cols) != 3 {
 		t.Fatalf("expected 3 columns, got %d", len(cols))
 	}
@@ -953,21 +959,16 @@ func TestAlterTable_AddColumn_IntegerNotNullDefault(t *testing.T) {
 	}
 	defer rows.Close()
 
+	cols := scanTableInfoCols(t, rows)
 	found := false
-	for rows.Next() {
-		var cid, notnull, pk int64
-		var name, typ string
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		if name == "new_col2" {
+	for _, c := range cols {
+		if c.name == "new_col2" {
 			found = true
-			if notnull != 1 {
-				t.Errorf("new_col2 should be NOT NULL, got notnull=%d", notnull)
+			if c.notnull != 1 {
+				t.Errorf("new_col2 should be NOT NULL, got notnull=%d", c.notnull)
 			}
-			if !dflt.Valid || dflt.String != "0" {
-				t.Errorf("new_col2 default: want '0', got %v", dflt)
+			if !c.dfltVal.Valid || c.dfltVal.String != "0" {
+				t.Errorf("new_col2 default: want '0', got %v", c.dfltVal)
 			}
 		}
 	}

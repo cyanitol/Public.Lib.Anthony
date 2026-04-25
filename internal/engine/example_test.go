@@ -10,42 +10,45 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/engine"
 )
 
-// Example_basic demonstrates basic database operations.
-func Example_basic() {
-	// Create a temporary database
+// exampleOpenDB opens a temporary database, registers cleanup, and returns it.
+func exampleOpenDB(name string) (*engine.Engine, func()) {
 	tmpDir := os.TempDir()
-	dbPath := filepath.Join(tmpDir, "example.db")
-	defer os.Remove(dbPath)
-
-	// Open the database
+	dbPath := filepath.Join(tmpDir, name)
 	db, err := engine.Open(dbPath)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
+	cleanup := func() {
+		db.Close()
+		os.Remove(dbPath)
+	}
+	return db, cleanup
+}
+
+// exampleMustExec executes a SQL statement, fataling on error.
+func exampleMustExec(db *engine.Engine, sql string) {
+	if _, err := db.Execute(sql); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// Example_basic demonstrates basic database operations.
+func Example_basic() {
+	db, cleanup := exampleOpenDB("example.db")
+	defer cleanup()
 
 	// Create a table
-	_, err = db.Execute(`
+	exampleMustExec(db, `
 		CREATE TABLE products (
 			id INTEGER PRIMARY KEY,
 			name TEXT NOT NULL,
 			price REAL
 		)
 	`)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	// Insert some data
-	_, err = db.Execute(`INSERT INTO products (name, price) VALUES ('Widget', 9.99)`)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	_, err = db.Execute(`INSERT INTO products (name, price) VALUES ('Gadget', 19.99)`)
-	if err != nil {
-		log.Fatal(err)
-	}
+	exampleMustExec(db, `INSERT INTO products (name, price) VALUES ('Widget', 9.99)`)
+	exampleMustExec(db, `INSERT INTO products (name, price) VALUES ('Gadget', 19.99)`)
 
 	// Query the data
 	rows, err := db.Query(`SELECT id, name, price FROM products`)
@@ -73,32 +76,13 @@ func Example_basic() {
 
 // Example_transaction demonstrates transaction usage.
 func Example_transaction() {
-	tmpDir := os.TempDir()
-	dbPath := filepath.Join(tmpDir, "example_tx.db")
-	defer os.Remove(dbPath)
+	db, cleanup := exampleOpenDB("example_tx.db")
+	defer cleanup()
 
-	db, err := engine.Open(dbPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer db.Close()
-
-	// Create table
-	_, err = db.Execute(`CREATE TABLE accounts (id INTEGER PRIMARY KEY, balance REAL)`)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Insert initial data
-	_, err = db.Execute(`INSERT INTO accounts (balance) VALUES (100.0)`)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	_, err = db.Execute(`INSERT INTO accounts (balance) VALUES (200.0)`)
-	if err != nil {
-		log.Fatal(err)
-	}
+	// Create table and insert initial data
+	exampleMustExec(db, `CREATE TABLE accounts (id INTEGER PRIMARY KEY, balance REAL)`)
+	exampleMustExec(db, `INSERT INTO accounts (balance) VALUES (100.0)`)
+	exampleMustExec(db, `INSERT INTO accounts (balance) VALUES (200.0)`)
 
 	// Start a transaction
 	tx, err := db.Begin()
@@ -107,14 +91,12 @@ func Example_transaction() {
 	}
 
 	// Update accounts within transaction
-	_, err = tx.Execute(`UPDATE accounts SET balance = balance - 50 WHERE id = 1`)
-	if err != nil {
+	if _, err = tx.Execute(`UPDATE accounts SET balance = balance - 50 WHERE id = 1`); err != nil {
 		tx.Rollback()
 		log.Fatal(err)
 	}
 
-	_, err = tx.Execute(`UPDATE accounts SET balance = balance + 50 WHERE id = 2`)
-	if err != nil {
+	if _, err = tx.Execute(`UPDATE accounts SET balance = balance + 50 WHERE id = 2`); err != nil {
 		tx.Rollback()
 		log.Fatal(err)
 	}
@@ -240,12 +222,6 @@ func Example_multipleSelects() {
 
 	examplePrintRows(db, `SELECT id, name FROM users`, "User")
 	examplePrintRows(db, `SELECT id, title FROM posts`, "Post")
-}
-
-func exampleMustExec(db *engine.Engine, sql string) {
-	if _, err := db.Execute(sql); err != nil {
-		log.Fatal(err)
-	}
 }
 
 func examplePrintRows(db *engine.Engine, query, label string) {

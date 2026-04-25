@@ -433,13 +433,27 @@ func pragmaRunSetup(t *testing.T, db *sql.DB, stmts []string) {
 // pragmaRunAndCheck executes a pragma query and validates row count.
 func pragmaRunAndCheck(t *testing.T, db *sql.DB, query string, wantErr bool, wantRows int, skipValidate bool) {
 	t.Helper()
-	rows, err := db.Query(query)
 	if wantErr {
-		if err == nil {
-			t.Errorf("expected error, got nil")
-		}
+		pragmaExpectError(t, db, query)
 		return
 	}
+	pragmaCheckRowCount(t, db, query, wantRows, skipValidate)
+}
+
+func pragmaExpectError(t *testing.T, db *sql.DB, query string) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if rows != nil {
+		rows.Close()
+	}
+	if err == nil {
+		t.Errorf("expected error, got nil")
+	}
+}
+
+func pragmaCheckRowCount(t *testing.T, db *sql.DB, query string, wantRows int, skipValidate bool) {
+	t.Helper()
+	rows, err := db.Query(query)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -540,40 +554,30 @@ func TestPragmaIntegrityCheck(t *testing.T) {
 	}
 
 	t.Run("integrity_check", func(t *testing.T) {
-		rows, err := db.Query("PRAGMA integrity_check")
-		if err != nil {
-			t.Fatalf("integrity check failed: %v", err)
-		}
-		defer rows.Close()
-		// Engine currently returns no rows for integrity_check
-		for rows.Next() {
-			var result string
-			if err := rows.Scan(&result); err != nil {
-				t.Fatalf("scan failed: %v", err)
-			}
-			if result != "ok" {
-				t.Errorf("expected 'ok', got %q", result)
-			}
-		}
+		pragmaAssertCheckOK(t, db, "PRAGMA integrity_check")
 	})
 
 	t.Run("quick_check", func(t *testing.T) {
-		rows, err := db.Query("PRAGMA quick_check")
-		if err != nil {
-			t.Fatalf("quick check failed: %v", err)
-		}
-		defer rows.Close()
-		// Engine currently returns no rows for quick_check
-		for rows.Next() {
-			var result string
-			if err := rows.Scan(&result); err != nil {
-				t.Fatalf("scan failed: %v", err)
-			}
-			if result != "ok" {
-				t.Errorf("expected 'ok', got %q", result)
-			}
-		}
+		pragmaAssertCheckOK(t, db, "PRAGMA quick_check")
 	})
+}
+
+func pragmaAssertCheckOK(t *testing.T, db *sql.DB, pragma string) {
+	t.Helper()
+	rows, err := db.Query(pragma)
+	if err != nil {
+		t.Fatalf("%s failed: %v", pragma, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var result string
+		if err := rows.Scan(&result); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+		if result != "ok" {
+			t.Errorf("expected 'ok', got %q", result)
+		}
+	}
 }
 
 // TestPragmaJournalModeSwitch tests journal mode switching

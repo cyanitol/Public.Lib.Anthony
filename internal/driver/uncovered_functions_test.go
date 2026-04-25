@@ -137,61 +137,34 @@ func TestCompileInSubquery(t *testing.T) {
 	dbFile := t.TempDir() + "/test_compile_in_subquery.db"
 
 	// Clean up any leftover state from the singleton driver
-	// This is necessary because the driver caches dbState across test runs
 	drv := GetDriver()
 	drv.mu.Lock()
 	delete(drv.dbs, dbFile)
 	drv.mu.Unlock()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := uncoveredSetupDB(t, dbFile, []string{
+		"CREATE TABLE employees (id INTEGER, dept_id INTEGER, name TEXT)",
+		"CREATE TABLE departments (id INTEGER, name TEXT)",
+		"INSERT INTO employees VALUES (1, 10, 'alice'), (2, 20, 'bob'), (3, 10, 'charlie')",
+		"INSERT INTO departments VALUES (10, 'sales'), (30, 'marketing')",
+	})
 	defer db.Close()
 
-	// Create tables
-	_, err = db.Exec("CREATE TABLE employees (id INTEGER, dept_id INTEGER, name TEXT)")
-	if err != nil {
-		t.Fatalf("failed to create employees table: %v", err)
-	}
-
-	_, err = db.Exec("CREATE TABLE departments (id INTEGER, name TEXT)")
-	if err != nil {
-		t.Fatalf("failed to create departments table: %v", err)
-	}
-
-	// Insert test data
-	_, err = db.Exec("INSERT INTO employees VALUES (1, 10, 'alice'), (2, 20, 'bob'), (3, 10, 'charlie')")
-	if err != nil {
-		t.Fatalf("failed to insert employees: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO departments VALUES (10, 'sales'), (30, 'marketing')")
-	if err != nil {
-		t.Fatalf("failed to insert departments: %v", err)
-	}
-
-	// Test IN with subquery - this will trigger compileInSubquery
 	rows, err := db.Query("SELECT name FROM employees WHERE dept_id IN (SELECT id FROM departments)")
 	if err != nil {
-		// IN subquery might not be fully implemented, but we want to test the code path
 		t.Logf("IN subquery query failed (expected if not implemented): %v", err)
 		return
 	}
 	defer rows.Close()
 
 	count := 0
-	names := make(map[string]bool)
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
 			t.Fatalf("failed to scan row: %v", err)
 		}
-		names[name] = true
 		count++
 	}
-
-	// IN subquery may not be fully implemented, so we just verify we got some results
 	t.Logf("IN subquery returned %d rows", count)
 }
 
@@ -231,50 +204,24 @@ func TestCompileInnerStatementWithExplain(t *testing.T) {
 
 // TestBuildMultiTableColumnNames tests the buildMultiTableColumnNames function with 58.3% coverage
 func TestBuildMultiTableColumnNames(t *testing.T) {
-	dbFile := t.TempDir() + "/test_multi_table_columns.db"
-
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := uncoveredSetupDB(t, t.TempDir()+"/test_multi_table_columns.db", []string{
+		"CREATE TABLE orders (id INTEGER, amount INTEGER)",
+		"CREATE TABLE customers (id INTEGER, name TEXT)",
+		"INSERT INTO orders VALUES (1, 100)",
+		"INSERT INTO customers VALUES (1, 'alice')",
+	})
 	defer db.Close()
 
-	// Create tables
-	_, err = db.Exec("CREATE TABLE orders (id INTEGER, amount INTEGER)")
-	if err != nil {
-		t.Fatalf("failed to create orders table: %v", err)
-	}
-
-	_, err = db.Exec("CREATE TABLE customers (id INTEGER, name TEXT)")
-	if err != nil {
-		t.Fatalf("failed to create customers table: %v", err)
-	}
-
-	// Insert data
-	_, err = db.Exec("INSERT INTO orders VALUES (1, 100)")
-	if err != nil {
-		t.Fatalf("failed to insert orders: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO customers VALUES (1, 'alice')")
-	if err != nil {
-		t.Fatalf("failed to insert customers: %v", err)
-	}
-
-	// Test SELECT * with multiple tables (should expand all columns)
 	rows, err := db.Query("SELECT * FROM orders, customers WHERE orders.id = customers.id")
 	if err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
 	defer rows.Close()
 
-	// Get column names
 	cols, err := rows.Columns()
 	if err != nil {
 		t.Fatalf("failed to get columns: %v", err)
 	}
-
-	// Should have columns from both tables
 	if len(cols) < 2 {
 		t.Errorf("got %d columns, want at least 2", len(cols))
 	}
@@ -282,27 +229,12 @@ func TestBuildMultiTableColumnNames(t *testing.T) {
 
 // TestEmitColumnFromTable tests the emitColumnFromTable function with 62.5% coverage
 func TestEmitColumnFromTableWithRowid(t *testing.T) {
-	dbFile := t.TempDir() + "/test_emit_column_rowid.db"
-
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := uncoveredSetupDB(t, t.TempDir()+"/test_emit_column_rowid.db", []string{
+		"CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)",
+		"INSERT INTO items (name) VALUES ('first')",
+	})
 	defer db.Close()
 
-	// Create table with explicit INTEGER PRIMARY KEY (which is an alias for rowid)
-	_, err = db.Exec("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
-	// Insert data
-	_, err = db.Exec("INSERT INTO items (name) VALUES ('first')")
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
-
-	// Query with the rowid alias
 	rows, err := db.Query("SELECT id, name FROM items")
 	if err != nil {
 		t.Fatalf("failed to query: %v", err)
@@ -315,7 +247,6 @@ func TestEmitColumnFromTableWithRowid(t *testing.T) {
 		if err := rows.Scan(&rowid, &name); err != nil {
 			t.Fatalf("failed to scan: %v", err)
 		}
-
 		if rowid != 1 {
 			t.Errorf("id = %d, want 1", rowid)
 		}
@@ -370,20 +301,11 @@ func TestEmitInsertRowidExplicit(t *testing.T) {
 
 // TestCompileArgValue tests the compileArgValue function with 62.5% coverage
 func TestCompileArgValueWithParameters(t *testing.T) {
-	// Use memory database to avoid file issues
-	db, err := sql.Open(DriverName, ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := uncoveredSetupDB(t, ":memory:", []string{
+		"CREATE TABLE params (id INTEGER, name TEXT)",
+	})
 	defer db.Close()
 
-	// Create table
-	_, err = db.Exec("CREATE TABLE params (id INTEGER, name TEXT)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
-	// Test parameterized insert
 	stmt, err := db.Prepare("INSERT INTO params VALUES (?, ?)")
 	if err != nil {
 		t.Fatalf("failed to prepare: %v", err)
@@ -399,18 +321,14 @@ func TestCompileArgValueWithParameters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get rows affected: %v", err)
 	}
-
 	if rows != 1 {
 		t.Errorf("rowsAffected = %d, want 1", rows)
 	}
 
-	// Verify the data
 	var name string
-	err = db.QueryRow("SELECT name FROM params WHERE id = 1").Scan(&name)
-	if err != nil {
+	if err := db.QueryRow("SELECT name FROM params WHERE id = 1").Scan(&name); err != nil {
 		t.Fatalf("failed to query: %v", err)
 	}
-
 	if name != "test" {
 		t.Errorf("name = %s, want 'test'", name)
 	}
@@ -562,26 +480,12 @@ func TestMarkDirtyMemoryPagerProviderSuccess(t *testing.T) {
 
 // TestEmitSelectColumnOpMultiTable tests emitSelectColumnOpMultiTable with 66.7% coverage
 func TestEmitSelectColumnOpMultiTableComplex(t *testing.T) {
-	// Use memory database
-	db, err := sql.Open(DriverName, ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open: %v", err)
-	}
+	db := uncoveredSetupDB(t, ":memory:", []string{
+		"CREATE TABLE nums (x INTEGER, y INTEGER)",
+		"INSERT INTO nums VALUES (10, 20)",
+	})
 	defer db.Close()
 
-	// Create a single table to test SELECT with expressions
-	_, err = db.Exec("CREATE TABLE nums (x INTEGER, y INTEGER)")
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
-
-	// Insert single row
-	_, err = db.Exec("INSERT INTO nums VALUES (10, 20)")
-	if err != nil {
-		t.Fatalf("failed to insert: %v", err)
-	}
-
-	// Test SELECT with simple column selection
 	rows, err := db.Query("SELECT x, y FROM nums")
 	if err != nil {
 		t.Fatalf("failed to query: %v", err)
@@ -593,7 +497,6 @@ func TestEmitSelectColumnOpMultiTableComplex(t *testing.T) {
 		if err := rows.Scan(&x, &y); err != nil {
 			t.Fatalf("failed to scan: %v", err)
 		}
-
 		if x != 10 || y != 20 {
 			t.Errorf("got (%d, %d), want (10, 20)", x, y)
 		}
@@ -642,6 +545,17 @@ func uncoveredCheckScalar(t *testing.T, db *sql.DB, query string, expected inter
 
 func uncoveredCompareValue(t *testing.T, query string, result, expected interface{}) {
 	t.Helper()
+	if expected == nil {
+		if result != nil {
+			t.Errorf("%s: got %v, want nil", query, result)
+		}
+		return
+	}
+	uncoveredCompareNonNil(t, query, result, expected)
+}
+
+func uncoveredCompareNonNil(t *testing.T, query string, result, expected interface{}) {
+	t.Helper()
 	switch exp := expected.(type) {
 	case int64:
 		if v, ok := result.(int64); !ok || v != exp {
@@ -650,10 +564,6 @@ func uncoveredCompareValue(t *testing.T, query string, result, expected interfac
 	case string:
 		if v, ok := result.(string); !ok || v != exp {
 			t.Errorf("%s: got %v, want %s", query, result, exp)
-		}
-	case nil:
-		if result != nil {
-			t.Errorf("%s: got %v, want nil", query, result)
 		}
 	}
 }

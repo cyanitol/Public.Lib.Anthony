@@ -291,6 +291,30 @@ func TestShiftRight(t *testing.T) {
 	}
 }
 
+func setLogicalOperand(m *Mem, val interface{}) {
+	if val == nil {
+		m.SetNull()
+	} else {
+		m.SetInt(int64(val.(int)))
+	}
+}
+
+func checkLogicalResult(t *testing.T, m *Mem, expectedNull bool, expectedInt int64) {
+	t.Helper()
+	if expectedNull {
+		if !m.IsNull() {
+			t.Errorf("expected NULL result, got %v", m.Value())
+		}
+		return
+	}
+	if !m.IsInt() {
+		t.Errorf("result is not an integer")
+	}
+	if m.IntValue() != expectedInt {
+		t.Errorf("expected %d, got %d", expectedInt, m.IntValue())
+	}
+}
+
 // TestLogicalAnd tests the OpAnd instruction
 func TestLogicalAnd(t *testing.T) {
 	t.Parallel()
@@ -318,45 +342,14 @@ func TestLogicalAnd(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			v := NewTestVDBE(10)
+			setLogicalOperand(v.Mem[1], tt.left)
+			setLogicalOperand(v.Mem[2], tt.right)
 
-			if tt.left == nil {
-				v.Mem[1].SetNull()
-			} else {
-				v.Mem[1].SetInt(int64(tt.left.(int)))
-			}
-
-			if tt.right == nil {
-				v.Mem[2].SetNull()
-			} else {
-				v.Mem[2].SetInt(int64(tt.right.(int)))
-			}
-
-			instr := &Instruction{
-				Opcode: OpAnd,
-				P1:     1,
-				P2:     2,
-				P3:     3,
-			}
-
-			err := v.execAnd(instr)
+			err := v.execAnd(&Instruction{Opcode: OpAnd, P1: 1, P2: 2, P3: 3})
 			if err != nil {
 				t.Fatalf("execAnd failed: %v", err)
 			}
-
-			if tt.expectedNull {
-				if !v.Mem[3].IsNull() {
-					t.Errorf("expected NULL result, got %v", v.Mem[3].Value())
-				}
-			} else {
-				if !v.Mem[3].IsInt() {
-					t.Errorf("result is not an integer")
-				}
-
-				result := v.Mem[3].IntValue()
-				if result != tt.expectedInt {
-					t.Errorf("expected %d, got %d", tt.expectedInt, result)
-				}
-			}
+			checkLogicalResult(t, v.Mem[3], tt.expectedNull, tt.expectedInt)
 		})
 	}
 }
@@ -388,45 +381,14 @@ func TestLogicalOr(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			v := NewTestVDBE(10)
+			setLogicalOperand(v.Mem[1], tt.left)
+			setLogicalOperand(v.Mem[2], tt.right)
 
-			if tt.left == nil {
-				v.Mem[1].SetNull()
-			} else {
-				v.Mem[1].SetInt(int64(tt.left.(int)))
-			}
-
-			if tt.right == nil {
-				v.Mem[2].SetNull()
-			} else {
-				v.Mem[2].SetInt(int64(tt.right.(int)))
-			}
-
-			instr := &Instruction{
-				Opcode: OpOr,
-				P1:     1,
-				P2:     2,
-				P3:     3,
-			}
-
-			err := v.execOr(instr)
+			err := v.execOr(&Instruction{Opcode: OpOr, P1: 1, P2: 2, P3: 3})
 			if err != nil {
 				t.Fatalf("execOr failed: %v", err)
 			}
-
-			if tt.expectedNull {
-				if !v.Mem[3].IsNull() {
-					t.Errorf("expected NULL result, got %v", v.Mem[3].Value())
-				}
-			} else {
-				if !v.Mem[3].IsInt() {
-					t.Errorf("result is not an integer")
-				}
-
-				result := v.Mem[3].IntValue()
-				if result != tt.expectedInt {
-					t.Errorf("expected %d, got %d", tt.expectedInt, result)
-				}
-			}
+			checkLogicalResult(t, v.Mem[3], tt.expectedNull, tt.expectedInt)
 		})
 	}
 }

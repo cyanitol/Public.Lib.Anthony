@@ -124,6 +124,20 @@ func TestProcessMasterViewRow_WrongStatementType(t *testing.T) {
 // parseMasterPage – multiple object types written then read back
 // ---------------------------------------------------------------------------
 
+// assertMasterRowTypes checks that the given rows contain all expected types.
+func assertMasterRowTypes(t *testing.T, rows []MasterRow, wantTypes []string) {
+	t.Helper()
+	typeSet := make(map[string]bool)
+	for _, r := range rows {
+		typeSet[r.Type] = true
+	}
+	for _, wt := range wantTypes {
+		if !typeSet[wt] {
+			t.Errorf("parseMasterPage: expected at least one %q row", wt)
+		}
+	}
+}
+
 func TestParseMasterPage_MultipleTypes(t *testing.T) {
 	t.Parallel()
 	s := NewSchema()
@@ -163,23 +177,7 @@ func TestParseMasterPage_MultipleTypes(t *testing.T) {
 		t.Fatal("parseMasterPage returned 0 rows")
 	}
 
-	typeSet := make(map[string]bool)
-	for _, r := range rows {
-		typeSet[r.Type] = true
-	}
-
-	if !typeSet["table"] {
-		t.Error("parseMasterPage: expected at least one 'table' row")
-	}
-	if !typeSet["index"] {
-		t.Error("parseMasterPage: expected at least one 'index' row")
-	}
-	if !typeSet["view"] {
-		t.Error("parseMasterPage: expected at least one 'view' row")
-	}
-	if !typeSet["trigger"] {
-		t.Error("parseMasterPage: expected at least one 'trigger' row")
-	}
+	assertMasterRowTypes(t, rows, []string{"table", "index", "view", "trigger"})
 }
 
 // ---------------------------------------------------------------------------

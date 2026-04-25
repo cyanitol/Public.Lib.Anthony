@@ -10,81 +10,89 @@ import (
 
 // TestCompileAggHelpersJSONGroupObject exercises json_group_object aggregate
 // which internally triggers emitJSONGroupObjectUpdate.
-func TestCompileAggHelpersJSONGroupObject(t *testing.T) {
-	t.Parallel()
+// jsonGroupObjectDB sets up the shared employees table for json_group_object tests.
+func jsonGroupObjectDB(t *testing.T) *sql.DB {
+	t.Helper()
 	db, err := sql.Open(DriverName, ":memory:")
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	db.SetMaxOpenConns(1)
-	defer db.Close()
-
 	if _, err := db.Exec(`CREATE TABLE employees (dept TEXT, name TEXT, salary INTEGER)`); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	inserts := []string{
+	for _, s := range []string{
 		`INSERT INTO employees VALUES ('eng', 'alice', 90000)`,
 		`INSERT INTO employees VALUES ('eng', 'bob', 80000)`,
 		`INSERT INTO employees VALUES ('hr', 'carol', 70000)`,
-	}
-	for _, s := range inserts {
+	} {
 		if _, err := db.Exec(s); err != nil {
 			t.Fatalf("insert %q: %v", s, err)
 		}
 	}
+	return db
+}
 
-	// Basic json_group_object without GROUP BY – one object for all rows.
-	func() {
-		rows, err := db.Query(`SELECT json_group_object(name, salary) FROM employees`)
-		if err != nil {
-			t.Fatalf("query: %v", err)
-		}
-		defer rows.Close()
-		if !rows.Next() {
-			t.Fatal("expected at least one row")
-		}
-		var result interface{}
-		if err := rows.Scan(&result); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		if result == nil {
-			t.Error("expected non-nil json_group_object result")
-		}
-	}()
+func TestCompileAggHelpersJSONGroupObjectBasic(t *testing.T) {
+	t.Parallel()
+	db := jsonGroupObjectDB(t)
+	defer db.Close()
 
-	// json_group_object with GROUP BY dept.
-	func() {
-		rows2, err := db.Query(`SELECT dept, json_group_object(name, salary) FROM employees GROUP BY dept ORDER BY dept`)
-		if err != nil {
-			t.Fatalf("grouped query: %v", err)
-		}
-		defer rows2.Close()
-		count := 0
-		for rows2.Next() {
-			var dept string
-			var obj interface{}
-			if err := rows2.Scan(&dept, &obj); err != nil {
-				t.Fatalf("scan grouped: %v", err)
-			}
-			count++
-		}
-		if err := rows2.Err(); err != nil {
-			t.Fatalf("rows2.Err: %v", err)
-		}
-		if count < 1 {
-			t.Errorf("expected grouped rows, got %d", count)
-		}
-	}()
+	rows, err := db.Query(`SELECT json_group_object(name, salary) FROM employees`)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("expected at least one row")
+	}
+	var result interface{}
+	if err := rows.Scan(&result); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if result == nil {
+		t.Error("expected non-nil json_group_object result")
+	}
+}
 
-	// NULL key should be skipped (covers the skip-NULL branch).
-	func() {
-		rows3, err := db.Query(`SELECT json_group_object(NULL, 1) FROM employees`)
-		if err != nil {
-			t.Fatalf("null key query: %v", err)
+func TestCompileAggHelpersJSONGroupObjectGrouped(t *testing.T) {
+	t.Parallel()
+	db := jsonGroupObjectDB(t)
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT dept, json_group_object(name, salary) FROM employees GROUP BY dept ORDER BY dept`)
+	if err != nil {
+		t.Fatalf("grouped query: %v", err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var dept string
+		var obj interface{}
+		if err := rows.Scan(&dept, &obj); err != nil {
+			t.Fatalf("scan grouped: %v", err)
 		}
-		defer rows3.Close()
-		rows3.Next()
-	}()
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	if count < 1 {
+		t.Errorf("expected grouped rows, got %d", count)
+	}
+}
+
+func TestCompileAggHelpersJSONGroupObjectNullKey(t *testing.T) {
+	t.Parallel()
+	db := jsonGroupObjectDB(t)
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT json_group_object(NULL, 1) FROM employees`)
+	if err != nil {
+		t.Fatalf("null key query: %v", err)
+	}
+	defer rows.Close()
+	rows.Next()
 }
 
 // ---- findColumnIndex coverage --------------------------------------------------

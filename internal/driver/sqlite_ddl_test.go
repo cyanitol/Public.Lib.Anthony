@@ -904,28 +904,7 @@ func ddlTestAllConstraints(t *testing.T, db *sql.DB) {
 
 // ddlTestCreateAsSelectJoin tests CREATE TABLE AS SELECT with joins
 func ddlTestCreateAsSelectJoin(t *testing.T, db *sql.DB) {
-	if _, err := db.Exec("CREATE TABLE orders (id INTEGER, user_id INTEGER, amount REAL)"); err != nil {
-		t.Fatalf("failed to create orders table: %v", err)
-	}
-	if _, err := db.Exec("CREATE TABLE customers (id INTEGER, cname TEXT)"); err != nil {
-		t.Fatalf("failed to create customers table: %v", err)
-	}
-
-	if _, err := db.Exec("INSERT INTO customers VALUES (1, 'Alice')"); err != nil {
-		t.Fatalf("failed to insert customer 1: %v", err)
-	}
-	if _, err := db.Exec("INSERT INTO customers VALUES (2, 'Bob')"); err != nil {
-		t.Fatalf("failed to insert customer 2: %v", err)
-	}
-	if _, err := db.Exec("INSERT INTO orders VALUES (1, 1, 100.0)"); err != nil {
-		t.Fatalf("failed to insert order 1: %v", err)
-	}
-	if _, err := db.Exec("INSERT INTO orders VALUES (2, 1, 200.0)"); err != nil {
-		t.Fatalf("failed to insert order 2: %v", err)
-	}
-	if _, err := db.Exec("INSERT INTO orders VALUES (3, 2, 150.0)"); err != nil {
-		t.Fatalf("failed to insert order 3: %v", err)
-	}
+	ddlSetupJoinTables(t, db)
 
 	createSQL := `CREATE TABLE customer_totals AS
 		SELECT c.cname, SUM(o.amount) as total
@@ -941,6 +920,24 @@ func ddlTestCreateAsSelectJoin(t *testing.T, db *sql.DB) {
 	count := ddlCountRows(t, db, "SELECT name FROM sqlite_master WHERE type='table' AND name='customer_totals'")
 	if count != 1 {
 		t.Fatalf("expected 1 entry for customer_totals in sqlite_master, got %d", count)
+	}
+}
+
+func ddlSetupJoinTables(t *testing.T, db *sql.DB) {
+	t.Helper()
+	stmts := []string{
+		"CREATE TABLE orders (id INTEGER, user_id INTEGER, amount REAL)",
+		"CREATE TABLE customers (id INTEGER, cname TEXT)",
+		"INSERT INTO customers VALUES (1, 'Alice')",
+		"INSERT INTO customers VALUES (2, 'Bob')",
+		"INSERT INTO orders VALUES (1, 1, 100.0)",
+		"INSERT INTO orders VALUES (2, 1, 200.0)",
+		"INSERT INTO orders VALUES (3, 2, 150.0)",
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("setup failed: %v\nSQL: %s", err, stmt)
+		}
 	}
 }
 

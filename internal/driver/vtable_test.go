@@ -279,37 +279,37 @@ type testVTableCursor struct {
 	filtered []testVTableRow
 }
 
+// vtabArgToInt64 converts a numeric interface value to int64 for vtable filtering.
+func vtabArgToInt64(v interface{}) (int64, error) {
+	switch n := v.(type) {
+	case int64:
+		return n, nil
+	case int:
+		return int64(n), nil
+	case int32:
+		return int64(n), nil
+	default:
+		return 0, fmt.Errorf("invalid ID type: %T", v)
+	}
+}
+
 func (c *testVTableCursor) Filter(idxNum int, idxStr string, argv []interface{}) error {
-	// Reset filtered data
 	c.filtered = nil
 
 	if idxNum == 1 && len(argv) > 0 {
-		// ID constraint is active
-		targetID, ok := argv[0].(int64)
-		if !ok {
-			// Try to convert from other numeric types
-			switch v := argv[0].(type) {
-			case int:
-				targetID = int64(v)
-			case int32:
-				targetID = int64(v)
-			default:
-				return fmt.Errorf("invalid ID type: %T", argv[0])
-			}
+		targetID, err := vtabArgToInt64(argv[0])
+		if err != nil {
+			return err
 		}
-
-		// Filter by ID
 		for _, row := range c.table.data {
 			if row.ID == targetID {
 				c.filtered = append(c.filtered, row)
 			}
 		}
 	} else {
-		// No constraint, return all rows
 		c.filtered = append([]testVTableRow(nil), c.table.data...)
 	}
 
-	// Position at first row
 	if len(c.filtered) > 0 {
 		c.pos = 0
 	} else {

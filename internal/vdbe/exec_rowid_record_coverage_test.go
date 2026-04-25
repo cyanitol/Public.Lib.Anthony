@@ -323,22 +323,26 @@ func TestExecRowidRecord_ParseRecordColumnHeaderManyColumns_Setup(t *testing.T) 
 	rrCheckManyColumns(t, bVal, cVal, dVal, eVal, fVal, gVal, hVal)
 }
 
-func rrCheckManyColumns(t *testing.T, bVal int64, cVal string, dVal float64, eVal []byte, fVal int64, gVal string, hVal []byte) {
+func rrCheckManyColumnsNumeric(t *testing.T, bVal int64, dVal float64, fVal int64) {
 	t.Helper()
 	if bVal != 999 {
 		t.Errorf("b: want 999, got %d", bVal)
 	}
-	if len(cVal) != 80 {
-		t.Errorf("c: want 80 chars, got %d", len(cVal))
-	}
 	if dVal < 2.70 || dVal > 2.72 {
 		t.Errorf("d: want ~2.71, got %f", dVal)
 	}
-	if len(eVal) != 100 {
-		t.Errorf("e: want 100 bytes, got %d", len(eVal))
-	}
 	if fVal != -42 {
 		t.Errorf("f: want -42, got %d", fVal)
+	}
+}
+
+func rrCheckManyColumnsOther(t *testing.T, cVal string, eVal []byte, gVal string, hVal []byte) {
+	t.Helper()
+	if len(cVal) != 80 {
+		t.Errorf("c: want 80 chars, got %d", len(cVal))
+	}
+	if len(eVal) != 100 {
+		t.Errorf("e: want 100 bytes, got %d", len(eVal))
 	}
 	if gVal != "short" {
 		t.Errorf("g: want 'short', got %q", gVal)
@@ -346,6 +350,12 @@ func rrCheckManyColumns(t *testing.T, bVal int64, cVal string, dVal float64, eVa
 	if len(hVal) != 2 {
 		t.Errorf("h: want 2 bytes, got %d", len(hVal))
 	}
+}
+
+func rrCheckManyColumns(t *testing.T, bVal int64, cVal string, dVal float64, eVal []byte, fVal int64, gVal string, hVal []byte) {
+	t.Helper()
+	rrCheckManyColumnsNumeric(t, bVal, dVal, fVal)
+	rrCheckManyColumnsOther(t, cVal, eVal, gVal, hVal)
 }
 
 // TestExecRowidRecord_ParseRecordColumnHeaderNullCols exercises the NULL serial
@@ -384,6 +394,24 @@ func TestExecRowidRecord_ParseRecordColumnHeaderNullCols(t *testing.T) {
 //    Serial types with even number >= 12 → blob; odd >= 13 → text.
 // ─────────────────────────────────────────────────────────────────────────────
 
+func rrVerifyBlob(t *testing.T, db *sql.DB, id int, want []byte) {
+	t.Helper()
+	var got []byte
+	if err := db.QueryRow(`SELECT dat FROM blbtypes WHERE id=?`, id).Scan(&got); err != nil {
+		t.Fatalf("id=%d: %v", id, err)
+	}
+	if len(got) != len(want) {
+		t.Errorf("id=%d: want %d bytes, got %d", id, len(want), len(got))
+		return
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("id=%d byte[%d]: want %02x, got %02x", id, i, want[i], got[i])
+			return
+		}
+	}
+}
+
 // TestExecRowidRecord_ParseSerialBlobType exercises the blob branch in
 // parseSerialBlobOrText (st%2 == 0) by storing and retrieving binary BLOBs.
 func TestExecRowidRecord_ParseSerialBlobType(t *testing.T) {
@@ -414,20 +442,7 @@ func TestExecRowidRecord_ParseSerialBlobType(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		var got []byte
-		if err := db.QueryRow(`SELECT dat FROM blbtypes WHERE id=?`, c.id).Scan(&got); err != nil {
-			t.Fatalf("id=%d: %v", c.id, err)
-		}
-		if len(got) != len(c.data) {
-			t.Errorf("id=%d: want %d bytes, got %d", c.id, len(c.data), len(got))
-			continue
-		}
-		for i := range c.data {
-			if got[i] != c.data[i] {
-				t.Errorf("id=%d byte[%d]: want %02x, got %02x", c.id, i, c.data[i], got[i])
-				break
-			}
-		}
+		rrVerifyBlob(t, db, c.id, c.data)
 	}
 }
 

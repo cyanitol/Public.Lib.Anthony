@@ -200,152 +200,131 @@ func TestCompileCompoundBlobOrdering(t *testing.T) {
 
 // TestCompileCompoundNullTypedOrdering exercises typeOrder and cmpDifferentTypes
 // when NULL values sort against typed values of each storage class.
-func TestCompileCompoundNullTypedOrdering(t *testing.T) {
+func TestCompileCompoundNullTypedOrdering_NullBeforeInt(t *testing.T) {
 	t.Parallel()
+	db := openCompoundCovDB(t)
+	rows := queryCompound(t, db,
+		"SELECT NULL UNION ALL SELECT 42 ORDER BY 1 ASC")
+	if len(rows) != 2 {
+		t.Fatalf("want 2, got %d", len(rows))
+	}
+	if rows[0][0] != nil {
+		t.Errorf("want NULL first, got %v", rows[0][0])
+	}
+}
 
-	t.Run("null_before_integer_asc", func(t *testing.T) {
-		t.Parallel()
-		db := openCompoundCovDB(t)
-		// NULL typeOrder=0, int64 typeOrder=1: cmpDifferentTypes returns -1
-		rows := queryCompound(t, db,
-			"SELECT NULL UNION ALL SELECT 42 ORDER BY 1 ASC")
-		if len(rows) != 2 {
-			t.Fatalf("want 2, got %d", len(rows))
-		}
-		if rows[0][0] != nil {
-			t.Errorf("want NULL first, got %v", rows[0][0])
-		}
-	})
+func TestCompileCompoundNullTypedOrdering_IntBeforeText(t *testing.T) {
+	t.Parallel()
+	db := openCompoundCovDB(t)
+	rows := queryCompound(t, db,
+		"SELECT 1 UNION ALL SELECT 'hello' ORDER BY 1 ASC")
+	if len(rows) != 2 {
+		t.Fatalf("want 2, got %d", len(rows))
+	}
+	if rows[0][0] != int64(1) {
+		t.Errorf("want integer first, got %v", rows[0][0])
+	}
+}
 
-	t.Run("integer_before_text", func(t *testing.T) {
-		t.Parallel()
-		db := openCompoundCovDB(t)
-		// int64 typeOrder=1 < string typeOrder=2: cmpDifferentTypes returns -1
-		rows := queryCompound(t, db,
-			"SELECT 1 UNION ALL SELECT 'hello' ORDER BY 1 ASC")
-		if len(rows) != 2 {
-			t.Fatalf("want 2, got %d", len(rows))
-		}
-		if rows[0][0] != int64(1) {
-			t.Errorf("want integer first, got %v", rows[0][0])
-		}
-	})
+func TestCompileCompoundNullTypedOrdering_TextBeforeBlob(t *testing.T) {
+	t.Parallel()
+	db := openCompoundCovDB(t)
+	execCompound(t, db,
+		"CREATE TABLE tc(v)",
+		"INSERT INTO tc VALUES('text')",
+		"CREATE TABLE td(b BLOB)",
+		"INSERT INTO td VALUES(X'AABB')",
+	)
+	rows := queryCompound(t, db,
+		"SELECT v FROM tc UNION ALL SELECT b FROM td ORDER BY 1 ASC")
+	if len(rows) != 2 {
+		t.Fatalf("want 2, got %d", len(rows))
+	}
+}
 
-	t.Run("text_before_blob", func(t *testing.T) {
-		t.Parallel()
-		db := openCompoundCovDB(t)
-		execCompound(t, db,
-			"CREATE TABLE tc(v)",
-			"INSERT INTO tc VALUES('text')",
-		)
-		execCompound(t, db,
-			"CREATE TABLE td(b BLOB)",
-			"INSERT INTO td VALUES(X'AABB')",
-		)
-		// string typeOrder=2 < []byte typeOrder=3: exercises the aOrder < bOrder branch
-		rows := queryCompound(t, db,
-			"SELECT v FROM tc UNION ALL SELECT b FROM td ORDER BY 1 ASC")
-		if len(rows) != 2 {
-			t.Fatalf("want 2, got %d", len(rows))
-		}
-	})
+func TestCompileCompoundNullTypedOrdering_BlobAfterIntDesc(t *testing.T) {
+	t.Parallel()
+	db := openCompoundCovDB(t)
+	execCompound(t, db,
+		"CREATE TABLE te(b BLOB)",
+		"INSERT INTO te VALUES(X'FF')",
+	)
+	rows := queryCompound(t, db,
+		"SELECT b FROM te UNION ALL SELECT 7 ORDER BY 1 DESC")
+	if len(rows) != 2 {
+		t.Fatalf("want 2, got %d", len(rows))
+	}
+}
 
-	t.Run("blob_after_integer_in_desc", func(t *testing.T) {
-		t.Parallel()
-		db := openCompoundCovDB(t)
-		execCompound(t, db,
-			"CREATE TABLE te(b BLOB)",
-			"INSERT INTO te VALUES(X'FF')",
-		)
-		// []byte typeOrder=3 > int64 typeOrder=1: DESC puts blob first
-		// exercises aOrder > bOrder branch in cmpDifferentTypes
-		rows := queryCompound(t, db,
-			"SELECT b FROM te UNION ALL SELECT 7 ORDER BY 1 DESC")
-		if len(rows) != 2 {
-			t.Fatalf("want 2, got %d", len(rows))
-		}
-	})
-
-	t.Run("null_after_all_types_desc", func(t *testing.T) {
-		t.Parallel()
-		db := openCompoundCovDB(t)
-		execCompound(t, db,
-			"CREATE TABLE tf(b BLOB)",
-			"INSERT INTO tf VALUES(X'AA')",
-		)
-		// NULL typeOrder=0 is smallest; DESC puts it last
-		rows := queryCompound(t, db,
-			"SELECT NULL UNION ALL SELECT 'text' UNION ALL SELECT 5 UNION ALL SELECT b FROM tf ORDER BY 1 DESC")
-		if len(rows) != 4 {
-			t.Fatalf("want 4, got %d", len(rows))
-		}
-		if rows[len(rows)-1][0] != nil {
-			t.Errorf("want NULL last in DESC, got %v", rows[len(rows)-1][0])
-		}
-	})
+func TestCompileCompoundNullTypedOrdering_NullAfterAllDesc(t *testing.T) {
+	t.Parallel()
+	db := openCompoundCovDB(t)
+	execCompound(t, db,
+		"CREATE TABLE tf(b BLOB)",
+		"INSERT INTO tf VALUES(X'AA')",
+	)
+	rows := queryCompound(t, db,
+		"SELECT NULL UNION ALL SELECT 'text' UNION ALL SELECT 5 UNION ALL SELECT b FROM tf ORDER BY 1 DESC")
+	if len(rows) != 4 {
+		t.Fatalf("want 4, got %d", len(rows))
+	}
+	if rows[len(rows)-1][0] != nil {
+		t.Errorf("want NULL last in DESC, got %v", rows[len(rows)-1][0])
+	}
 }
 
 // TestCompileCompoundFloatEdgeCases exercises cmpFloats with equal floats,
 // and float vs integer cross-type sorting.
-func TestCompileCompoundFloatEdgeCases(t *testing.T) {
+func TestCompileCompoundFloatEdgeCases_Dedup(t *testing.T) {
 	t.Parallel()
+	db := openCompoundCovDB(t)
+	rows := queryCompound(t, db,
+		"SELECT 3.14 UNION SELECT 3.14 ORDER BY 1")
+	if len(rows) != 1 {
+		t.Errorf("want 1 row after dedup, got %d", len(rows))
+	}
+}
 
-	t.Run("equal_floats_dedup", func(t *testing.T) {
-		t.Parallel()
-		db := openCompoundCovDB(t)
-		// Two identical floats; UNION deduplicates to 1 row.
-		// cmpFloats is called during sort and returns 0 for equal values.
-		rows := queryCompound(t, db,
-			"SELECT 3.14 UNION SELECT 3.14 ORDER BY 1")
-		if len(rows) != 1 {
-			t.Errorf("want 1 row after dedup, got %d", len(rows))
-		}
-	})
+func TestCompileCompoundFloatEdgeCases_SortStability(t *testing.T) {
+	t.Parallel()
+	db := openCompoundCovDB(t)
+	rows := queryCompound(t, db,
+		"SELECT 2.5 UNION ALL SELECT 2.5 UNION ALL SELECT 1.0 ORDER BY 1")
+	if len(rows) != 3 {
+		t.Fatalf("want 3, got %d", len(rows))
+	}
+	if rows[0][0] != 1.0 {
+		t.Errorf("want 1.0 first, got %v", rows[0][0])
+	}
+}
 
-	t.Run("equal_floats_sort_stability", func(t *testing.T) {
-		t.Parallel()
-		db := openCompoundCovDB(t)
-		// Multiple equal floats in UNION ALL; sort must be stable and cmpFloats returns 0.
-		rows := queryCompound(t, db,
-			"SELECT 2.5 UNION ALL SELECT 2.5 UNION ALL SELECT 1.0 ORDER BY 1")
-		if len(rows) != 3 {
-			t.Fatalf("want 3, got %d", len(rows))
-		}
-		if rows[0][0] != 1.0 {
-			t.Errorf("want 1.0 first, got %v", rows[0][0])
-		}
-	})
+func TestCompileCompoundFloatEdgeCases_CrossSort(t *testing.T) {
+	t.Parallel()
+	db := openCompoundCovDB(t)
+	rows := queryCompound(t, db,
+		"SELECT 0.5 UNION ALL SELECT 1 UNION ALL SELECT 1.5 ORDER BY 1")
+	if len(rows) != 3 {
+		t.Fatalf("want 3, got %d", len(rows))
+	}
+	if rows[0][0] != 0.5 {
+		t.Errorf("want 0.5 first, got %v", rows[0][0])
+	}
+	if rows[2][0] != 1.5 {
+		t.Errorf("want 1.5 last, got %v", rows[2][0])
+	}
+}
 
-	t.Run("float64_vs_int64_cross_sort", func(t *testing.T) {
-		t.Parallel()
-		db := openCompoundCovDB(t)
-		// float64 0.5 < int64 1 < float64 1.5: exercises int64 vs float64 cross path
-		rows := queryCompound(t, db,
-			"SELECT 0.5 UNION ALL SELECT 1 UNION ALL SELECT 1.5 ORDER BY 1")
-		if len(rows) != 3 {
-			t.Fatalf("want 3, got %d", len(rows))
-		}
-		if rows[0][0] != 0.5 {
-			t.Errorf("want 0.5 first, got %v", rows[0][0])
-		}
-		if rows[2][0] != 1.5 {
-			t.Errorf("want 1.5 last, got %v", rows[2][0])
-		}
-	})
-
-	t.Run("float_positive_infinity_ordering", func(t *testing.T) {
-		t.Parallel()
-		db := openCompoundCovDB(t)
-		// 1e308 * 10 overflows to Inf in SQLite arithmetic; exercises cmpFloats a > b
-		rows := queryCompound(t, db,
-			"SELECT 1.0 UNION ALL SELECT 2.0 UNION ALL SELECT 0.5 ORDER BY 1 DESC")
-		if len(rows) != 3 {
-			t.Fatalf("want 3, got %d", len(rows))
-		}
-		if rows[0][0] != 2.0 {
-			t.Errorf("want 2.0 first in DESC, got %v", rows[0][0])
-		}
-	})
+func TestCompileCompoundFloatEdgeCases_DescOrdering(t *testing.T) {
+	t.Parallel()
+	db := openCompoundCovDB(t)
+	rows := queryCompound(t, db,
+		"SELECT 1.0 UNION ALL SELECT 2.0 UNION ALL SELECT 0.5 ORDER BY 1 DESC")
+	if len(rows) != 3 {
+		t.Fatalf("want 3, got %d", len(rows))
+	}
+	if rows[0][0] != 2.0 {
+		t.Errorf("want 2.0 first in DESC, got %v", rows[0][0])
+	}
 }
 
 // TestCompileCompoundLimitOffsetBasic exercises basic LIMIT/OFFSET combinations.

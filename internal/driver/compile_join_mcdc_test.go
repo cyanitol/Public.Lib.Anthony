@@ -280,6 +280,46 @@ func TestMCDC_ExpandOneResultColumn_TableStarMatch(t *testing.T) {
 // side columns should appear as NULL when there is no matching row.
 // ============================================================================
 
+// scanRowVals scans all columns in the current row into an interface{} slice.
+func scanRowVals(t *testing.T, rows *sql.Rows, n int) []interface{} {
+	t.Helper()
+	vals := make([]interface{}, n)
+	ptrs := make([]interface{}, n)
+	for i := range vals {
+		ptrs[i] = &vals[i]
+	}
+	if err := rows.Scan(ptrs...); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	return vals
+}
+
+// queryHasNull runs a query and returns whether any result column value is NULL.
+func queryHasNull(t *testing.T, db *sql.DB, query string) bool {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("Columns: %v", err)
+	}
+	foundNull := false
+	for rows.Next() {
+		for _, v := range scanRowVals(t, rows, len(cols)) {
+			if v == nil {
+				foundNull = true
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return foundNull
+}
+
 func TestMCDC_FindColumnTableIndex_IdentMatch(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -328,34 +368,7 @@ func TestMCDC_FindColumnTableIndex_IdentMatch(t *testing.T) {
 			for _, s := range splitSemicolon(tt.setup) {
 				mustExec(t, db, s)
 			}
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-			cols, err := rows.Columns()
-			if err != nil {
-				t.Fatalf("Columns: %v", err)
-			}
-			foundNull := false
-			for rows.Next() {
-				vals := make([]interface{}, len(cols))
-				ptrs := make([]interface{}, len(cols))
-				for i := range vals {
-					ptrs[i] = &vals[i]
-				}
-				if err := rows.Scan(ptrs...); err != nil {
-					t.Fatalf("Scan: %v", err)
-				}
-				for _, v := range vals {
-					if v == nil {
-						foundNull = true
-					}
-				}
-			}
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows.Err: %v", err)
-			}
+			foundNull := queryHasNull(t, db, tt.query)
 			if tt.wantNull && !foundNull {
 				t.Error("expected a NULL value in result but found none")
 			}
@@ -455,34 +468,47 @@ func TestMCDC_EmitDefaultAggregateRow_AggGuard(t *testing.T) {
 			for _, s := range splitSemicolon(tt.setup) {
 				mustExec(t, db, s)
 			}
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-			if !rows.Next() {
-				t.Fatal("expected one result row, got none")
-			}
-			got := make([]interface{}, len(tt.wantRow))
-			ptrs := make([]interface{}, len(tt.wantRow))
-			for i := range got {
-				ptrs[i] = &got[i]
-			}
-			if err := rows.Scan(ptrs...); err != nil {
-				t.Fatalf("Scan: %v", err)
-			}
-			for i, want := range tt.wantRow {
-				if want == nil {
-					if got[i] != nil {
-						t.Errorf("col[%d]: got %v, want nil", i, got[i])
-					}
-				} else {
-					if got[i] != want {
-						t.Errorf("col[%d]: got %v (%T), want %v (%T)", i, got[i], got[i], want, want)
-					}
-				}
-			}
+			got := querySingleRow(t, db, tt.query, len(tt.wantRow))
+			assertRowValues(t, got, tt.wantRow)
 		})
+	}
+}
+
+// querySingleRow executes a query and scans the first row into n interface{} values.
+func querySingleRow(t *testing.T, db *sql.DB, query string, n int) []interface{} {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("expected one result row, got none")
+	}
+	got := make([]interface{}, n)
+	ptrs := make([]interface{}, n)
+	for i := range got {
+		ptrs[i] = &got[i]
+	}
+	if err := rows.Scan(ptrs...); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	return got
+}
+
+// assertRowValues checks that got values match want values, handling nil comparisons.
+func assertRowValues(t *testing.T, got, want []interface{}) {
+	t.Helper()
+	for i, w := range want {
+		if w == nil {
+			if got[i] != nil {
+				t.Errorf("col[%d]: got %v, want nil", i, got[i])
+			}
+		} else {
+			if got[i] != w {
+				t.Errorf("col[%d]: got %v (%T), want %v (%T)", i, got[i], got[i], w, w)
+			}
+		}
 	}
 }
 

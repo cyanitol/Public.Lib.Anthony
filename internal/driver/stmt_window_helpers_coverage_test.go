@@ -29,6 +29,17 @@ func execWH(t *testing.T, db *sql.DB, q string) {
 	}
 }
 
+// wHConvertVal converts a single scanned value to a string.
+func wHConvertVal(v interface{}) string {
+	if v == nil {
+		return "NULL"
+	}
+	if b, ok := v.([]byte); ok {
+		return string(b)
+	}
+	return wHFormatVal(v)
+}
+
 // queryWHRows runs a query, returns each row joined with "|", rows joined with " ".
 func queryWHRows(t *testing.T, db *sql.DB, q string) string {
 	t.Helper()
@@ -53,13 +64,7 @@ func queryWHRows(t *testing.T, db *sql.DB, q string) string {
 		}
 		parts := make([]string, len(cols))
 		for i, v := range vals {
-			if v == nil {
-				parts[i] = "NULL"
-			} else if b, ok := v.([]byte); ok {
-				parts[i] = string(b)
-			} else {
-				parts[i] = wHFormatVal(v)
-			}
+			parts[i] = wHConvertVal(v)
 		}
 		rowStrs = append(rowStrs, strings.Join(parts, "|"))
 	}

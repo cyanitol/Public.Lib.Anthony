@@ -259,10 +259,9 @@ func verifyDeletedEntry(t *testing.T, rtree *RTree, deletedID int64, remainingID
 	}
 }
 
-// TestRTreeBasicUpdate tests basic update operations
-func TestRTreeBasicUpdate(t *testing.T) {
-	t.Parallel()
-
+// createBasicRTree creates an RTree with a 2D schema for testing.
+func createBasicRTree(t *testing.T) *RTree {
+	t.Helper()
 	module := NewRTreeModule()
 	table, _, err := module.Create(
 		nil, "rtree", "main", "t1",
@@ -271,17 +270,28 @@ func TestRTreeBasicUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
+	return table.(*RTree)
+}
 
-	rtree := table.(*RTree)
+// assertBBox checks that entry bounds match the expected values.
+func assertBBox(t *testing.T, entry *Entry, minX, maxX, minY, maxY float64) {
+	t.Helper()
+	if entry.BBox.Min[0] != minX || entry.BBox.Max[0] != maxX ||
+		entry.BBox.Min[1] != minY || entry.BBox.Max[1] != maxY {
+		t.Errorf("Entry bounds not correct: got (%v, %v, %v, %v), want (%v, %v, %v, %v)",
+			entry.BBox.Min[0], entry.BBox.Max[0], entry.BBox.Min[1], entry.BBox.Max[1],
+			minX, maxX, minY, maxY)
+	}
+}
+
+// TestRTreeBasicUpdate tests basic update operations
+func TestRTreeBasicUpdate(t *testing.T) {
+	t.Parallel()
+	rtree := createBasicRTree(t)
 
 	// Insert entry
-	_, err = rtree.Update(7, []interface{}{
-		nil,
-		int64(1),
-		float64(0),
-		float64(10),
-		float64(0),
-		float64(10),
+	_, err := rtree.Update(7, []interface{}{
+		nil, int64(1), float64(0), float64(10), float64(0), float64(10),
 	})
 	if err != nil {
 		t.Fatalf("Insert failed: %v", err)
@@ -289,28 +299,17 @@ func TestRTreeBasicUpdate(t *testing.T) {
 
 	// Update the entry
 	_, err = rtree.Update(7, []interface{}{
-		int64(1), // old rowid
-		int64(1), // new rowid (same)
-		float64(5),
-		float64(15),
-		float64(5),
-		float64(15),
+		int64(1), int64(1), float64(5), float64(15), float64(5), float64(15),
 	})
 	if err != nil {
 		t.Fatalf("Update failed: %v", err)
 	}
 
-	// Verify the update
 	entry, exists := rtree.GetEntry(1)
 	if !exists {
 		t.Fatal("Entry 1 should exist after update")
 	}
-
-	if entry.BBox.Min[0] != 5 || entry.BBox.Max[0] != 15 ||
-		entry.BBox.Min[1] != 5 || entry.BBox.Max[1] != 15 {
-		t.Errorf("Entry bounds not updated correctly: got (%v, %v, %v, %v)",
-			entry.BBox.Min[0], entry.BBox.Max[0], entry.BBox.Min[1], entry.BBox.Max[1])
-	}
+	assertBBox(t, entry, 5, 15, 5, 15)
 }
 
 // TestRTreeBestIndexSimple tests simple BestIndex scenarios

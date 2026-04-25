@@ -353,33 +353,37 @@ func TestExtractUniqueConstraints(t *testing.T) {
 					len(constraints), tt.wantCount)
 			}
 
-			// Verify columns match
-			for i, constraint := range constraints {
-				if i >= len(tt.wantCols) {
-					break
-				}
-
-				expectedCols := tt.wantCols[i]
-				if len(constraint.Columns) != len(expectedCols) {
-					t.Errorf("Constraint %d has %d columns, want %d",
-						i, len(constraint.Columns), len(expectedCols))
-					continue
-				}
-
-				for j, col := range expectedCols {
-					if constraint.Columns[j] != col {
-						t.Errorf("Constraint %d, column %d = %v, want %v",
-							i, j, constraint.Columns[j], col)
-					}
-				}
-
-				// Verify table name is set
-				if constraint.TableName != tt.table.Name {
-					t.Errorf("Constraint %d TableName = %v, want %v",
-						i, constraint.TableName, tt.table.Name)
-				}
-			}
+			verifyUniqueConstraintColumns(t, constraints, tt.wantCols, tt.table.Name)
 		})
+	}
+}
+
+// verifyUniqueConstraintColumns checks constraint columns and table names.
+func verifyUniqueConstraintColumns(t *testing.T, constraints []*UniqueConstraint, wantCols [][]string, tableName string) {
+	t.Helper()
+	for i, constraint := range constraints {
+		if i >= len(wantCols) {
+			break
+		}
+
+		expectedCols := wantCols[i]
+		if len(constraint.Columns) != len(expectedCols) {
+			t.Errorf("Constraint %d has %d columns, want %d",
+				i, len(constraint.Columns), len(expectedCols))
+			continue
+		}
+
+		for j, col := range expectedCols {
+			if constraint.Columns[j] != col {
+				t.Errorf("Constraint %d, column %d = %v, want %v",
+					i, j, constraint.Columns[j], col)
+			}
+		}
+
+		if constraint.TableName != tableName {
+			t.Errorf("Constraint %d TableName = %v, want %v",
+				i, constraint.TableName, tableName)
+		}
 	}
 }
 

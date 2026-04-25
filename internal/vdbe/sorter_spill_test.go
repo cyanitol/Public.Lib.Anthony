@@ -46,25 +46,30 @@ func TestSorterConfig(t *testing.T) {
 	})
 }
 
+func verifySortedInts(t *testing.T, sorter *SorterWithSpill, expected []int64) {
+	t.Helper()
+	for i, exp := range expected {
+		if !sorter.Next() {
+			t.Fatalf("Expected row %d to exist", i)
+		}
+		row := sorter.CurrentRow()
+		if row[0].IntValue() != exp {
+			t.Errorf("Row %d: expected %d, got %d", i, exp, row[0].IntValue())
+		}
+	}
+}
+
 func TestSorterWithSpill_NoSpill(t *testing.T) {
 	t.Parallel()
 
-	// Create sorter with large memory limit
 	config := &SorterConfig{
-		MaxMemoryBytes: 100 * 1024 * 1024, // 100 MB
+		MaxMemoryBytes: 100 * 1024 * 1024,
 		EnableSpill:    true,
 	}
 
-	sorter := NewSorterWithSpill(
-		[]int{0},      // Sort by first column
-		[]bool{false}, // Ascending
-		[]string{""},  // Default collation
-		2,             // 2 columns
-		config,
-	)
+	sorter := NewSorterWithSpill([]int{0}, []bool{false}, []string{""}, 2, config)
 	defer sorter.Close()
 
-	// Insert some rows (should fit in memory)
 	testData := []struct {
 		col1 int64
 		col2 string
@@ -75,43 +80,23 @@ func TestSorterWithSpill_NoSpill(t *testing.T) {
 	}
 
 	for _, row := range testData {
-		mem1 := NewMemInt(row.col1)
-		mem2 := NewMemStr(row.col2)
-		err := sorter.Insert([]*Mem{mem1, mem2})
-		if err != nil {
+		if err := sorter.Insert([]*Mem{NewMemInt(row.col1), NewMemStr(row.col2)}); err != nil {
 			t.Fatalf("Insert failed: %v", err)
 		}
 	}
 
-	// Should have 3 rows in memory
 	if len(sorter.Rows) != 3 {
 		t.Errorf("Expected 3 rows in memory, got %d", len(sorter.Rows))
 	}
-
-	// Should have no spilled runs
 	if sorter.GetNumSpilledRuns() != 0 {
 		t.Errorf("Expected 0 spilled runs, got %d", sorter.GetNumSpilledRuns())
 	}
 
-	// Sort
-	err := sorter.Sort()
-	if err != nil {
+	if err := sorter.Sort(); err != nil {
 		t.Fatalf("Sort failed: %v", err)
 	}
 
-	// Check sorted order
-	// Don't call Rewind() - Sort() already sets Current to -1
-	expectedOrder := []int64{1, 2, 3}
-	for i, expected := range expectedOrder {
-		if !sorter.Next() {
-			t.Fatalf("Expected row %d to exist", i)
-		}
-
-		row := sorter.CurrentRow()
-		if row[0].IntValue() != expected {
-			t.Errorf("Row %d: expected %d, got %d", i, expected, row[0].IntValue())
-		}
-	}
+	verifySortedInts(t, sorter, []int64{1, 2, 3})
 }
 
 func createSpillSorter(tempDir string) *SorterWithSpill {
@@ -178,62 +163,44 @@ func TestSorterWithSpill_SingleSpill(t *testing.T) {
 	}
 }
 
+func insertDescendingInts(t *testing.T, sorter *SorterWithSpill, n int) {
+	t.Helper()
+	for i := n; i > 0; i-- {
+		if err := sorter.Insert([]*Mem{NewMemInt(int64(i))}); err != nil {
+			t.Fatalf("Insert failed: %v", err)
+		}
+	}
+}
+
 func TestSorterWithSpill_MultipleSpills(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
-
 	config := &SorterConfig{
-		MaxMemoryBytes: 300, // Very small to force multiple spills
+		MaxMemoryBytes: 300,
 		TempDir:        tempDir,
 		EnableSpill:    true,
 	}
-
-	sorter := NewSorterWithSpill(
-		[]int{0},
-		[]bool{false},
-		[]string{""},
-		1,
-		config,
-	)
+	sorter := NewSorterWithSpill([]int{0}, []bool{false}, []string{""}, 1, config)
 	defer sorter.Close()
 
-	// Insert 50 rows to force multiple spills
 	numRows := 50
-	for i := numRows; i > 0; i-- {
-		mem := NewMemInt(int64(i))
-		err := sorter.Insert([]*Mem{mem})
-		if err != nil {
-			t.Fatalf("Insert failed: %v", err)
-		}
-	}
+	insertDescendingInts(t, sorter, numRows)
 
-	// Should have multiple spilled runs
-	numSpills := sorter.GetNumSpilledRuns()
-	if numSpills < 2 {
+	if numSpills := sorter.GetNumSpilledRuns(); numSpills < 2 {
 		t.Errorf("Expected at least 2 spilled runs, got %d", numSpills)
 	}
 
-	// Sort (triggers k-way merge)
-	err := sorter.Sort()
-	if err != nil {
+	if err := sorter.Sort(); err != nil {
 		t.Fatalf("Sort failed: %v", err)
 	}
 
-	// Verify all rows are sorted correctly
-	// Sort() already sets Current to -1, so don't call Rewind()
-	for i := 1; i <= numRows; i++ {
-		if !sorter.Next() {
-			t.Fatalf("Expected row %d to exist", i)
-		}
-
-		row := sorter.CurrentRow()
-		if row[0].IntValue() != int64(i) {
-			t.Errorf("Row %d: expected %d, got %d", i, i, row[0].IntValue())
-		}
+	expected := make([]int64, numRows)
+	for i := range expected {
+		expected[i] = int64(i + 1)
 	}
+	verifySortedInts(t, sorter, expected)
 
-	// Should have exactly numRows
 	if sorter.Next() {
 		t.Error("Expected no more rows after 50")
 	}
@@ -518,59 +485,34 @@ func TestSorterWithSpill_LargeDataset(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
-
 	config := &SorterConfig{
-		MaxMemoryBytes: 8 * 1024, // 8 KB
+		MaxMemoryBytes: 8 * 1024,
 		TempDir:        tempDir,
 		EnableSpill:    true,
 	}
-
-	sorter := NewSorterWithSpill(
-		[]int{0},
-		[]bool{false},
-		[]string{""},
-		2,
-		config,
-	)
+	sorter := NewSorterWithSpill([]int{0}, []bool{false}, []string{""}, 2, config)
 	defer sorter.Close()
 
-	// Insert 1000 rows in reverse order
 	numRows := 1000
 	for i := numRows; i > 0; i-- {
-		mem1 := NewMemInt(int64(i))
-		mem2 := NewMemStr(fmt.Sprintf("row_data_%04d", i))
-		err := sorter.Insert([]*Mem{mem1, mem2})
-		if err != nil {
+		if err := sorter.Insert([]*Mem{NewMemInt(int64(i)), NewMemStr(fmt.Sprintf("row_data_%04d", i))}); err != nil {
 			t.Fatalf("Insert failed at row %d: %v", i, err)
 		}
 	}
 
-	// Should have spilled multiple times
-	numSpills := sorter.GetNumSpilledRuns()
-	if numSpills == 0 {
+	if sorter.GetNumSpilledRuns() == 0 {
 		t.Error("Expected multiple spilled runs for large dataset")
 	}
 
-	t.Logf("Large dataset test: %d rows, %d spilled runs", numRows, numSpills)
-
-	// Sort
-	err := sorter.Sort()
-	if err != nil {
+	if err := sorter.Sort(); err != nil {
 		t.Fatalf("Sort failed: %v", err)
 	}
 
-	// Verify all rows are present and sorted
-	// Sort() already sets Current to -1, so don't call Rewind()
-	for i := 1; i <= numRows; i++ {
-		if !sorter.Next() {
-			t.Fatalf("Missing row %d", i)
-		}
-
-		row := sorter.CurrentRow()
-		if row[0].IntValue() != int64(i) {
-			t.Errorf("Row %d: expected %d, got %d", i, i, row[0].IntValue())
-		}
+	expected := make([]int64, numRows)
+	for i := range expected {
+		expected[i] = int64(i + 1)
 	}
+	verifySortedInts(t, sorter, expected)
 
 	if sorter.Next() {
 		t.Error("Found extra rows beyond expected count")

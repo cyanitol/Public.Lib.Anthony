@@ -631,10 +631,19 @@ func TestDebugFunctionsMemBlobValueBranches(t *testing.T) {
 
 // TestDebugFunctionsMemStringifyBranches exercises each branch of Stringify:
 // already-string (no-op), int, real, blob, null, and undefined-error.
+func debugStringifyAndCheck(t *testing.T, m *vdbe.Mem, wantContains string) {
+	t.Helper()
+	if err := m.Stringify(); err != nil {
+		t.Fatalf("Stringify failed: %v", err)
+	}
+	if !strings.Contains(m.StrValue(), wantContains) {
+		t.Errorf("Stringify = %q, want string containing %q", m.StrValue(), wantContains)
+	}
+}
+
 func TestDebugFunctionsMemStringifyBranches_TypeConversions(t *testing.T) {
 	t.Parallel()
 
-	// already_string_noop
 	m := vdbe.NewMemStr("already")
 	if err := m.Stringify(); err != nil {
 		t.Fatalf("Stringify on MemStr: %v", err)
@@ -643,32 +652,9 @@ func TestDebugFunctionsMemStringifyBranches_TypeConversions(t *testing.T) {
 		t.Error("expected IsStr true after Stringify no-op")
 	}
 
-	// int_to_string
-	m = vdbe.NewMemInt(12345)
-	if err := m.Stringify(); err != nil {
-		t.Fatalf("Stringify on MemInt: %v", err)
-	}
-	if m.StrValue() != "12345" {
-		t.Errorf("Stringify(MemInt) = %q, want '12345'", m.StrValue())
-	}
-
-	// real_to_string
-	m = vdbe.NewMemReal(9.9)
-	if err := m.Stringify(); err != nil {
-		t.Fatalf("Stringify on MemReal: %v", err)
-	}
-	if !strings.Contains(m.StrValue(), "9.9") {
-		t.Errorf("Stringify(MemReal) = %q, want string containing '9.9'", m.StrValue())
-	}
-
-	// blob_to_string
-	m = vdbe.NewMemBlob([]byte("blobdata"))
-	if err := m.Stringify(); err != nil {
-		t.Fatalf("Stringify on MemBlob: %v", err)
-	}
-	if m.StrValue() != "blobdata" {
-		t.Errorf("Stringify(MemBlob) = %q, want 'blobdata'", m.StrValue())
-	}
+	debugStringifyAndCheck(t, vdbe.NewMemInt(12345), "12345")
+	debugStringifyAndCheck(t, vdbe.NewMemReal(9.9), "9.9")
+	debugStringifyAndCheck(t, vdbe.NewMemBlob([]byte("blobdata")), "blobdata")
 }
 
 func TestDebugFunctionsMemStringifyBranches_NullAndUndefined(t *testing.T) {
@@ -696,11 +682,8 @@ func TestDebugFunctionsMemStringifyBranches_NullAndUndefined(t *testing.T) {
 // DecodeRecord/EncodeSimpleRecord, covering the happy path (enough bytes)
 // and the truncated error path.
 // debugFuncCheckFloat64Roundtrip verifies a single float64 round-trip through encode/decode.
-func debugFuncCheckFloat64Roundtrip(t *testing.T, f float64) {
+func debugFuncDecodeFloat64(t *testing.T, f float64) float64 {
 	t.Helper()
-	if math.IsNaN(f) {
-		return
-	}
 	encoded := vdbe.EncodeSimpleRecord([]interface{}{f})
 	decoded, err := vdbe.DecodeRecord(encoded)
 	if err != nil {
@@ -713,6 +696,15 @@ func debugFuncCheckFloat64Roundtrip(t *testing.T, f float64) {
 	if !ok {
 		t.Fatalf("expected float64, got %T (%v)", decoded[0], decoded[0])
 	}
+	return got
+}
+
+func debugFuncCheckFloat64Roundtrip(t *testing.T, f float64) {
+	t.Helper()
+	if math.IsNaN(f) {
+		return
+	}
+	got := debugFuncDecodeFloat64(t, f)
 	if math.IsInf(f, 0) {
 		if got != f {
 			t.Errorf("float64 inf round-trip: got %v, want %v", got, f)

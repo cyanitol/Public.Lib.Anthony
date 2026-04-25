@@ -683,43 +683,39 @@ func TestMCDC_NodeSplit(t *testing.T) {
 //
 // We verify via Count() / root state after targeted deletions.
 
-func TestMCDC_handleRootAfterRemoval(t *testing.T) {
+func TestMCDC_handleRootAfterRemoval_RemoveAll(t *testing.T) {
 	t.Parallel()
+	rt := newTestTable(t)
+	id := insertEntry(t, rt, 0, 10, 0, 10)
+	if _, err := rt.Update(1, []interface{}{id}); err != nil {
+		t.Fatalf("Update(delete) error: %v", err)
+	}
+	if rt.root != nil {
+		t.Errorf("root should be nil after deleting all entries, got non-nil")
+	}
+}
 
-	t.Run("MCDC_RemoveAll_root_nil", func(t *testing.T) {
-		t.Parallel()
-		rt := newTestTable(t)
-		id := insertEntry(t, rt, 0, 10, 0, 10)
-		if _, err := rt.Update(1, []interface{}{id}); err != nil {
-			t.Fatalf("Update(delete) error: %v", err)
+func TestMCDC_handleRootAfterRemoval_CollapsesRoot(t *testing.T) {
+	t.Parallel()
+	rt := newTestTable(t)
+	// Insert MaxEntries+1 to force a split → internal root with 2 children.
+	ids := make([]int64, MaxEntries+1)
+	for i := 0; i < MaxEntries+1; i++ {
+		base := float64(i * 20)
+		ids[i] = insertEntry(t, rt, base, base+10, 0, 10)
+	}
+	if rt.root == nil || rt.root.IsLeaf {
+		t.Skip("tree did not produce an internal root — skipping collapse test")
+	}
+	// Delete all but one entry; the root should eventually collapse to a leaf.
+	for i := 1; i < len(ids); i++ {
+		if _, err := rt.Update(1, []interface{}{ids[i]}); err != nil {
+			t.Fatalf("Update(delete id=%d) error: %v", ids[i], err)
 		}
-		if rt.root != nil {
-			t.Errorf("root should be nil after deleting all entries, got non-nil")
-		}
-	})
-
-	t.Run("MCDC_RemoveUntilOneChild_collapses_root", func(t *testing.T) {
-		t.Parallel()
-		rt := newTestTable(t)
-		// Insert MaxEntries+1 to force a split → internal root with 2 children.
-		ids := make([]int64, MaxEntries+1)
-		for i := 0; i < MaxEntries+1; i++ {
-			base := float64(i * 20)
-			ids[i] = insertEntry(t, rt, base, base+10, 0, 10)
-		}
-		if rt.root == nil || rt.root.IsLeaf {
-			t.Skip("tree did not produce an internal root — skipping collapse test")
-		}
-		// Delete all but one entry; the root should eventually collapse to a leaf.
-		for i := 1; i < len(ids); i++ {
-			if _, err := rt.Update(1, []interface{}{ids[i]}); err != nil {
-				t.Fatalf("Update(delete id=%d) error: %v", ids[i], err)
-			}
-		}
-		if rt.Count() != 1 {
-			t.Errorf("expected 1 entry remaining, got %d", rt.Count())
-		}
-	})
+	}
+	if rt.Count() != 1 {
+		t.Errorf("expected 1 entry remaining, got %d", rt.Count())
+	}
 }
 
 // ─── MC/DC: Remove — leaf.Parent != nil && leaf.IsUnderflow() ────────────────

@@ -48,49 +48,33 @@ func TestMemRealify(t *testing.T) {
 	})
 }
 
+func integerifyAndCheck(t *testing.T, mem *Mem, wantVal int64) {
+	t.Helper()
+	if err := mem.Integerify(); err != nil {
+		t.Fatalf("Integerify failed: %v", err)
+	}
+	if !mem.IsInt() {
+		t.Error("Expected mem to be int")
+	}
+	if mem.IntValue() != wantVal {
+		t.Errorf("Expected %d, got %d", wantVal, mem.IntValue())
+	}
+}
+
 // TestMemIntegerify tests Integerify function (72.7% coverage)
 func TestMemIntegerify(t *testing.T) {
 	t.Parallel()
 	t.Run("RealToInt", func(t *testing.T) {
 		t.Parallel()
-		mem := NewMemReal(42.7)
-		err := mem.Integerify()
-		if err != nil {
-			t.Fatalf("Integerify failed: %v", err)
-		}
-		if !mem.IsInt() {
-			t.Error("Expected mem to be int")
-		}
-		if mem.IntValue() != 42 {
-			t.Errorf("Expected 42, got %d", mem.IntValue())
-		}
+		integerifyAndCheck(t, NewMemReal(42.7), 42)
 	})
-
 	t.Run("StringToInt", func(t *testing.T) {
 		t.Parallel()
-		mem := NewMemStr("123")
-		err := mem.Integerify()
-		if err != nil {
-			t.Fatalf("Integerify failed: %v", err)
-		}
-		if !mem.IsInt() {
-			t.Error("Expected mem to be int")
-		}
-		if mem.IntValue() != 123 {
-			t.Errorf("Expected 123, got %d", mem.IntValue())
-		}
+		integerifyAndCheck(t, NewMemStr("123"), 123)
 	})
-
 	t.Run("IntNoOp", func(t *testing.T) {
 		t.Parallel()
-		mem := NewMemInt(99)
-		err := mem.Integerify()
-		if err != nil {
-			t.Fatalf("Integerify failed: %v", err)
-		}
-		if mem.IntValue() != 99 {
-			t.Errorf("Expected 99, got %d", mem.IntValue())
-		}
+		integerifyAndCheck(t, NewMemInt(99), 99)
 	})
 }
 

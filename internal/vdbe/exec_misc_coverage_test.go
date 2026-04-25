@@ -235,18 +235,34 @@ func TestMemToInterface_NilAndNull(t *testing.T) {
 	}
 }
 
-func TestMemToInterface_TypedValues(t *testing.T) {
-	t.Parallel()
+func testMemToInterfaceInt(t *testing.T) {
 	if v, ok := MemToInterface(NewMemInt(123)).(int64); !ok || v != 123 {
 		t.Errorf("expected int64(123), got %v", MemToInterface(NewMemInt(123)))
 	}
+}
+
+func testMemToInterfaceReal(t *testing.T) {
 	if v, ok := MemToInterface(NewMemReal(3.14)).(float64); !ok || v != 3.14 {
 		t.Errorf("expected float64(3.14), got %v", MemToInterface(NewMemReal(3.14)))
 	}
+}
+
+func testMemToInterfaceString(t *testing.T) {
 	if v, ok := MemToInterface(NewMemStr("hi")).(string); !ok || v != "hi" {
 		t.Errorf("expected \"hi\", got %v", MemToInterface(NewMemStr("hi")))
 	}
+}
+
+func testMemToInterfaceBlob(t *testing.T) {
 	if v, ok := MemToInterface(NewMemBlob([]byte{1, 2, 3})).([]byte); !ok || len(v) != 3 {
 		t.Errorf("expected []byte{1,2,3}, got %v", MemToInterface(NewMemBlob([]byte{1, 2, 3})))
 	}
+}
+
+func TestMemToInterface_TypedValues(t *testing.T) {
+	t.Parallel()
+	t.Run("Int", testMemToInterfaceInt)
+	t.Run("Real", testMemToInterfaceReal)
+	t.Run("String", testMemToInterfaceString)
+	t.Run("Blob", testMemToInterfaceBlob)
 }

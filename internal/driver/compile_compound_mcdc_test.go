@@ -348,30 +348,38 @@ func TestMCDC_ResolveLiteralExpr_TypeGuard(t *testing.T) {
 			for _, s := range splitSemicolon(tt.setup) {
 				mustExec(t, db, s)
 			}
-			rows, err := db.Query(tt.query)
-			if tt.wantErr {
-				if err == nil {
-					rows.Close()
-					t.Fatalf("expected error but got none")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			defer rows.Close()
-			count := 0
-			for rows.Next() {
-				count++
-			}
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows error: %v", err)
-			}
-			if count != tt.wantRows {
+			count := queryRowCountOrErr(t, db, tt.query, tt.wantErr)
+			if !tt.wantErr && count != tt.wantRows {
 				t.Errorf("got %d rows, want %d", count, tt.wantRows)
 			}
 		})
 	}
+}
+
+// queryRowCountOrErr runs a query. If wantErr is true, it expects an error and
+// returns 0. Otherwise it counts and returns the number of rows.
+func queryRowCountOrErr(t *testing.T, db *sql.DB, query string, wantErr bool) int {
+	t.Helper()
+	rows, err := db.Query(query)
+	if wantErr {
+		if err == nil {
+			rows.Close()
+			t.Fatalf("expected error but got none")
+		}
+		return 0
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows error: %v", err)
+	}
+	return count
 }
 
 // ============================================================================
@@ -510,28 +518,7 @@ func TestMCDC_CompareCompoundNull_BothNonNil(t *testing.T) {
 			for _, s := range splitSemicolon(tt.setup) {
 				mustExec(t, db, s)
 			}
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query error: %v", err)
-			}
-			defer rows.Close()
-			var got []string
-			for rows.Next() {
-				var v sql.NullInt64
-				if err := rows.Scan(&v); err != nil {
-					t.Fatalf("scan error: %v", err)
-				}
-				if v.Valid {
-					got = append(got, "1")
-					// Use the actual numeric value representation
-					got[len(got)-1] = itoa(v.Int64)
-				} else {
-					got = append(got, "NULL")
-				}
-			}
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows error: %v", err)
-			}
+			got := queryNullableIntStrings(t, db, tt.query)
 			if len(got) != len(tt.wantRows) {
 				t.Errorf("got %d rows, want %d: %v", len(got), len(tt.wantRows), got)
 				return
@@ -543,6 +530,33 @@ func TestMCDC_CompareCompoundNull_BothNonNil(t *testing.T) {
 			}
 		})
 	}
+}
+
+// queryNullableIntStrings runs a query returning one NullInt64 column and returns
+// each row as either its decimal string or "NULL".
+func queryNullableIntStrings(t *testing.T, db *sql.DB, query string) []string {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query error: %v", err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var v sql.NullInt64
+		if err := rows.Scan(&v); err != nil {
+			t.Fatalf("scan error: %v", err)
+		}
+		if v.Valid {
+			got = append(got, itoa(v.Int64))
+		} else {
+			got = append(got, "NULL")
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows error: %v", err)
+	}
+	return got
 }
 
 // itoa converts an int64 to its decimal string representation.

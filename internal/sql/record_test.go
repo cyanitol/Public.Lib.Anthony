@@ -133,6 +133,12 @@ func verifyMakeRecordCase(t *testing.T, values []Value, expectErr bool) {
 	if len(record) == 0 {
 		t.Error("record is empty")
 	}
+	verifyRecordRoundTrip(t, record, values)
+}
+
+// verifyRecordRoundTrip parses a record and checks that the values match.
+func verifyRecordRoundTrip(t *testing.T, record []byte, values []Value) {
+	t.Helper()
 	parsed, err := ParseRecord(record)
 	if err != nil {
 		t.Fatalf("failed to parse record: %v", err)

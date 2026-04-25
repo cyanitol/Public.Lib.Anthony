@@ -865,6 +865,22 @@ func TestAllocateResultRegisters(t *testing.T) {
 }
 
 // Test generateSorterLoop
+// requireSorterOpcodes checks that all opcodes in want appear in the ops list.
+func requireSorterOpcodes(t *testing.T, ops []VdbeOp, want map[Opcode]string) {
+	t.Helper()
+	found := make(map[Opcode]bool, len(want))
+	for _, op := range ops {
+		if _, ok := want[op.Opcode]; ok {
+			found[op.Opcode] = true
+		}
+	}
+	for opcode, desc := range want {
+		if !found[opcode] {
+			t.Errorf("Expected %s", desc)
+		}
+	}
+}
+
 func TestGenerateSorterLoop(t *testing.T) {
 	parse := &Parse{
 		Vdbe: NewVdbe(nil),
@@ -888,24 +904,10 @@ func TestGenerateSorterLoop(t *testing.T) {
 		t.Error("addr should be set")
 	}
 
-	// Check for OP_OpenPseudo and OP_SorterSort
-	hasOpenPseudo := false
-	hasSorterSort := false
-	for _, op := range parse.Vdbe.Ops {
-		if op.Opcode == OP_OpenPseudo {
-			hasOpenPseudo = true
-		}
-		if op.Opcode == OP_SorterSort {
-			hasSorterSort = true
-		}
-	}
-
-	if !hasOpenPseudo {
-		t.Error("Expected OP_OpenPseudo")
-	}
-	if !hasSorterSort {
-		t.Error("Expected OP_SorterSort")
-	}
+	requireSorterOpcodes(t, parse.Vdbe.Ops, map[Opcode]string{
+		OP_OpenPseudo: "OP_OpenPseudo",
+		OP_SorterSort: "OP_SorterSort",
+	})
 }
 
 // Test generateEphemeralLoop

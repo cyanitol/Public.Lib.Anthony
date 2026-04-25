@@ -467,38 +467,52 @@ func TestSQLiteAutoincrement(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			for _, stmt := range tt.setup {
-				_, err := db.Exec(stmt)
-				if err != nil {
-					t.Logf("setup statement failed (may be expected): %v", err)
-				}
-			}
+			autoincRunSetup(t, db, tt.setup)
 			if tt.wantErr {
-				// For queries (SELECT), check scan error; for exec, check exec error
-				var gotErr bool
-				if tt.want != nil {
-					row := db.QueryRow(tt.query)
-					var dummy interface{}
-					if err := row.Scan(&dummy); err != nil {
-						gotErr = true
-					}
-				} else {
-					_, err := db.Exec(tt.query)
-					gotErr = err != nil
-				}
-				if !gotErr {
-					t.Errorf("expected error but got none")
-				}
+				autoincExpectError(t, db, tt.query, tt.want)
 				return
 			}
-			if tt.want != nil {
-				autoincCheckResult(t, db, tt.query, tt.want)
-			} else {
-				if _, err := db.Exec(tt.query); err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-			}
+			autoincVerifyResult(t, db, tt.query, tt.want)
 		})
+	}
+}
+
+func autoincRunSetup(t *testing.T, db *sql.DB, stmts []string) {
+	t.Helper()
+	for _, stmt := range stmts {
+		_, err := db.Exec(stmt)
+		if err != nil {
+			t.Logf("setup statement failed (may be expected): %v", err)
+		}
+	}
+}
+
+func autoincExpectError(t *testing.T, db *sql.DB, query string, want interface{}) {
+	t.Helper()
+	var gotErr bool
+	if want != nil {
+		row := db.QueryRow(query)
+		var dummy interface{}
+		if err := row.Scan(&dummy); err != nil {
+			gotErr = true
+		}
+	} else {
+		_, err := db.Exec(query)
+		gotErr = err != nil
+	}
+	if !gotErr {
+		t.Errorf("expected error but got none")
+	}
+}
+
+func autoincVerifyResult(t *testing.T, db *sql.DB, query string, want interface{}) {
+	t.Helper()
+	if want != nil {
+		autoincCheckResult(t, db, query, want)
+	} else {
+		if _, err := db.Exec(query); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
 	}
 }
 

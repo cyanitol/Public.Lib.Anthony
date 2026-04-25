@@ -216,68 +216,57 @@ func TestCompileCompoundDeepUnionOrderByNull(t *testing.T) {
 // TestCompileCompoundDeepCmpDifferentTypes exercises cmpDifferentTypes (and
 // transitively typeOrder) for integer vs string pairings so that cmpCompoundValues
 // routes through the type-order comparison branch rather than same-type dispatch.
-func TestCompileCompoundDeepCmpDifferentTypes(t *testing.T) {
+func TestCompileCompoundDeepCmpDifferentTypes_IntBeforeString(t *testing.T) {
 	t.Parallel()
+	db := openDeepDB(t)
+	rows := queryDeep(t, db,
+		"SELECT 42 UNION ALL SELECT 'hello' UNION ALL SELECT 99 UNION ALL SELECT 'world' ORDER BY 1 ASC")
+	if len(rows) != 4 {
+		t.Fatalf("want 4 rows, got %d", len(rows))
+	}
+	if _, ok := rows[0][0].(int64); !ok {
+		t.Errorf("want int64 first, got %T %v", rows[0][0], rows[0][0])
+	}
+	if _, ok := rows[1][0].(int64); !ok {
+		t.Errorf("want int64 second, got %T %v", rows[1][0], rows[1][0])
+	}
+	if _, ok := rows[2][0].(string); !ok {
+		t.Errorf("want string third, got %T %v", rows[2][0], rows[2][0])
+	}
+}
 
-	t.Run("int_before_string_in_asc", func(t *testing.T) {
-		t.Parallel()
-		db := openDeepDB(t)
-		// typeOrder(int64)=1 < typeOrder(string)=2 -> cmpDifferentTypes returns -1.
-		// ORDER BY ASC: integer rows come before string rows.
-		rows := queryDeep(t, db,
-			"SELECT 42 UNION ALL SELECT 'hello' UNION ALL SELECT 99 UNION ALL SELECT 'world' ORDER BY 1 ASC")
-		if len(rows) != 4 {
-			t.Fatalf("want 4 rows, got %d", len(rows))
-		}
-		// First two should be integers
-		if _, ok := rows[0][0].(int64); !ok {
-			t.Errorf("want int64 first, got %T %v", rows[0][0], rows[0][0])
-		}
-		if _, ok := rows[1][0].(int64); !ok {
-			t.Errorf("want int64 second, got %T %v", rows[1][0], rows[1][0])
-		}
-		// Last two should be strings
-		if _, ok := rows[2][0].(string); !ok {
-			t.Errorf("want string third, got %T %v", rows[2][0], rows[2][0])
-		}
-	})
+func TestCompileCompoundDeepCmpDifferentTypes_StringBeforeBlob(t *testing.T) {
+	t.Parallel()
+	db := openDeepDB(t)
+	execDeep(t, db,
+		"CREATE TABLE deep_sb(b BLOB)",
+		"INSERT INTO deep_sb VALUES(X'deadbeef')",
+	)
+	rows := queryDeep(t, db,
+		"SELECT 'text' UNION ALL SELECT b FROM deep_sb ORDER BY 1 ASC")
+	if len(rows) != 2 {
+		t.Fatalf("want 2 rows, got %d", len(rows))
+	}
+	if _, ok := rows[0][0].(string); !ok {
+		t.Errorf("want string first, got %T %v", rows[0][0], rows[0][0])
+	}
+}
 
-	t.Run("string_before_blob_in_asc", func(t *testing.T) {
-		t.Parallel()
-		db := openDeepDB(t)
-		execDeep(t, db,
-			"CREATE TABLE deep_sb(b BLOB)",
-			"INSERT INTO deep_sb VALUES(X'deadbeef')",
-		)
-		// typeOrder(string)=2 < typeOrder([]byte)=3.
-		rows := queryDeep(t, db,
-			"SELECT 'text' UNION ALL SELECT b FROM deep_sb ORDER BY 1 ASC")
-		if len(rows) != 2 {
-			t.Fatalf("want 2 rows, got %d", len(rows))
-		}
-		if _, ok := rows[0][0].(string); !ok {
-			t.Errorf("want string first, got %T %v", rows[0][0], rows[0][0])
-		}
-	})
-
-	t.Run("blob_after_int_desc", func(t *testing.T) {
-		t.Parallel()
-		db := openDeepDB(t)
-		execDeep(t, db,
-			"CREATE TABLE deep_bi(b BLOB)",
-			"INSERT INTO deep_bi VALUES(X'01')",
-		)
-		// DESC: typeOrder([]byte)=3 > typeOrder(int64)=1 -> blob first in DESC.
-		// Exercises aOrder > bOrder branch in cmpDifferentTypes returning 1.
-		rows := queryDeep(t, db,
-			"SELECT b FROM deep_bi UNION ALL SELECT 100 ORDER BY 1 DESC")
-		if len(rows) != 2 {
-			t.Fatalf("want 2 rows, got %d", len(rows))
-		}
-		if _, ok := rows[0][0].([]byte); !ok {
-			t.Errorf("want blob first in DESC, got %T %v", rows[0][0], rows[0][0])
-		}
-	})
+func TestCompileCompoundDeepCmpDifferentTypes_BlobAfterIntDesc(t *testing.T) {
+	t.Parallel()
+	db := openDeepDB(t)
+	execDeep(t, db,
+		"CREATE TABLE deep_bi(b BLOB)",
+		"INSERT INTO deep_bi VALUES(X'01')",
+	)
+	rows := queryDeep(t, db,
+		"SELECT b FROM deep_bi UNION ALL SELECT 100 ORDER BY 1 DESC")
+	if len(rows) != 2 {
+		t.Fatalf("want 2 rows, got %d", len(rows))
+	}
+	if _, ok := rows[0][0].([]byte); !ok {
+		t.Errorf("want blob first in DESC, got %T %v", rows[0][0], rows[0][0])
+	}
 }
 
 // TestCompileCompoundDeepCmpSameType_EqualIntegers exercises equal-integer sorting.
@@ -383,170 +372,139 @@ func TestCompileCompoundDeepCmpSameType_FloatAndCross(t *testing.T) {
 // This exercises the left-recursion branch in flattenCompound (c.Left.Compound != nil)
 // which is the branch that builds left-nested trees, and applyWithPrecedence
 // with multiple ops after the INTERSECT collapse pass leaves no INTERSECTs.
-func TestCompileCompoundDeepApplyWithPrecedence(t *testing.T) {
+func TestCompileCompoundDeepApplyWithPrecedence_LeftNested(t *testing.T) {
 	t.Parallel()
+	db := openDeepDB(t)
+	execDeep(t, db,
+		"CREATE TABLE deep_wp1(a INTEGER)",
+		"CREATE TABLE deep_wp2(a INTEGER)",
+		"CREATE TABLE deep_wp3(a INTEGER)",
+		"INSERT INTO deep_wp1 VALUES(1),(2),(3)",
+		"INSERT INTO deep_wp2 VALUES(3),(4),(5)",
+		"INSERT INTO deep_wp3 VALUES(5),(6),(7)",
+	)
+	rows := queryDeep(t, db,
+		"SELECT a FROM (SELECT a FROM deep_wp1 UNION SELECT a FROM deep_wp2) UNION SELECT a FROM deep_wp3 ORDER BY a")
+	if len(rows) != 7 {
+		t.Fatalf("want 7 distinct rows (1-7), got %d: %v", len(rows), rows)
+	}
+	want := []int64{1, 2, 3, 4, 5, 6, 7}
+	for i, r := range rows {
+		if r[0] != want[i] {
+			t.Errorf("row %d: want %d, got %v", i, want[i], r[0])
+		}
+	}
+}
 
-	t.Run("left_nested_union_via_subquery", func(t *testing.T) {
-		t.Parallel()
-		db := openDeepDB(t)
-		execDeep(t, db,
-			"CREATE TABLE deep_wp1(a INTEGER)",
-			"CREATE TABLE deep_wp2(a INTEGER)",
-			"CREATE TABLE deep_wp3(a INTEGER)",
-			"INSERT INTO deep_wp1 VALUES(1),(2),(3)",
-			"INSERT INTO deep_wp2 VALUES(3),(4),(5)",
-			"INSERT INTO deep_wp3 VALUES(5),(6),(7)",
-		)
-		// The outer UNION takes a sub-select (which is itself a UNION) on the left.
-		// Parser produces a CompoundSelect with Left.Compound != nil.
-		// flattenCompound recurses into Left.Compound, exercising the left-recursion
-		// branch. applyWithPrecedence then processes [UNION, UNION] ops left-to-right.
-		rows := queryDeep(t, db,
-			"SELECT a FROM (SELECT a FROM deep_wp1 UNION SELECT a FROM deep_wp2) UNION SELECT a FROM deep_wp3 ORDER BY a")
-		if len(rows) != 7 {
-			t.Fatalf("want 7 distinct rows (1-7), got %d: %v", len(rows), rows)
+func TestCompileCompoundDeepApplyWithPrecedence_TripleUnion(t *testing.T) {
+	t.Parallel()
+	db := openDeepDB(t)
+	execDeep(t, db,
+		"CREATE TABLE deep_tri1(v INTEGER)",
+		"CREATE TABLE deep_tri2(v INTEGER)",
+		"CREATE TABLE deep_tri3(v INTEGER)",
+		"INSERT INTO deep_tri1 VALUES(10),(20)",
+		"INSERT INTO deep_tri2 VALUES(20),(30)",
+		"INSERT INTO deep_tri3 VALUES(30),(40)",
+	)
+	rows := queryDeep(t, db,
+		"SELECT v FROM deep_tri1 UNION SELECT v FROM deep_tri2 UNION SELECT v FROM deep_tri3 ORDER BY v")
+	if len(rows) != 4 {
+		t.Fatalf("want 4 distinct rows, got %d", len(rows))
+	}
+	expected := []int64{10, 20, 30, 40}
+	for i, r := range rows {
+		if r[0] != expected[i] {
+			t.Errorf("row %d: want %d, got %v", i, expected[i], r[0])
 		}
-		want := []int64{1, 2, 3, 4, 5, 6, 7}
-		for i, r := range rows {
-			if r[0] != want[i] {
-				t.Errorf("row %d: want %d, got %v", i, want[i], r[0])
-			}
-		}
-	})
+	}
+}
 
-	t.Run("triple_union_applyWithPrecedence_no_intersect", func(t *testing.T) {
-		t.Parallel()
-		db := openDeepDB(t)
-		execDeep(t, db,
-			"CREATE TABLE deep_tri1(v INTEGER)",
-			"CREATE TABLE deep_tri2(v INTEGER)",
-			"CREATE TABLE deep_tri3(v INTEGER)",
-			"INSERT INTO deep_tri1 VALUES(10),(20)",
-			"INSERT INTO deep_tri2 VALUES(20),(30)",
-			"INSERT INTO deep_tri3 VALUES(30),(40)",
-		)
-		// Three-way UNION: applyWithPrecedence collapseOp finds no INTERSECT,
-		// then the for loop runs twice (once for each op in workOps).
-		// This covers the loop body in applyWithPrecedence for len(ops)=2.
-		rows := queryDeep(t, db,
-			"SELECT v FROM deep_tri1 UNION SELECT v FROM deep_tri2 UNION SELECT v FROM deep_tri3 ORDER BY v")
-		if len(rows) != 4 {
-			t.Fatalf("want 4 distinct rows, got %d", len(rows))
-		}
-		expected := []int64{10, 20, 30, 40}
-		for i, r := range rows {
-			if r[0] != expected[i] {
-				t.Errorf("row %d: want %d, got %v", i, expected[i], r[0])
-			}
-		}
-	})
+func TestCompileCompoundDeepApplyWithPrecedence_IntersectBetweenUnions(t *testing.T) {
+	t.Parallel()
+	db := openDeepDB(t)
+	execDeep(t, db,
+		"CREATE TABLE deep_ibu1(n INTEGER)",
+		"CREATE TABLE deep_ibu2(n INTEGER)",
+		"CREATE TABLE deep_ibu3(n INTEGER)",
+		"INSERT INTO deep_ibu1 VALUES(1),(2),(3),(4)",
+		"INSERT INTO deep_ibu2 VALUES(2),(3),(4),(5)",
+		"INSERT INTO deep_ibu3 VALUES(10),(11)",
+	)
+	rows := queryDeep(t, db,
+		"SELECT n FROM deep_ibu1 UNION SELECT n FROM deep_ibu2 INTERSECT SELECT n FROM deep_ibu3 ORDER BY n")
+	if len(rows) == 0 {
+		t.Fatal("expected non-empty result")
+	}
+}
 
-	t.Run("intersect_between_unions_precedence", func(t *testing.T) {
-		t.Parallel()
-		db := openDeepDB(t)
-		execDeep(t, db,
-			"CREATE TABLE deep_ibu1(n INTEGER)",
-			"CREATE TABLE deep_ibu2(n INTEGER)",
-			"CREATE TABLE deep_ibu3(n INTEGER)",
-			"INSERT INTO deep_ibu1 VALUES(1),(2),(3),(4)",
-			"INSERT INTO deep_ibu2 VALUES(2),(3),(4),(5)",
-			"INSERT INTO deep_ibu3 VALUES(10),(11)",
-		)
-		// A UNION B INTERSECT C: INTERSECT has higher precedence.
-		// applyWithPrecedence collapseOp collapses (B INTERSECT C) first, then
-		// applies (A UNION result). B INTERSECT C = {} (disjoint from ibu3).
-		// So result = ibu1 UNION {} = {1,2,3,4}.
-		rows := queryDeep(t, db,
-			"SELECT n FROM deep_ibu1 UNION SELECT n FROM deep_ibu2 INTERSECT SELECT n FROM deep_ibu3 ORDER BY n")
-		// B INTERSECT C = {2,3,4,5} intersect {10,11} = {}
-		// A UNION {} = {1,2,3,4}
-		if len(rows) == 0 {
-			t.Fatal("expected non-empty result")
-		}
-	})
-
-	t.Run("union_all_then_union_applyWithPrecedence", func(t *testing.T) {
-		t.Parallel()
-		db := openDeepDB(t)
-		// UNION ALL keeps duplicates, then UNION deduplicates with the third set.
-		// applyWithPrecedence: no INTERSECTs, loop runs for UNION_ALL then UNION.
-		rows := queryDeep(t, db,
-			"SELECT 1 UNION ALL SELECT 1 UNION ALL SELECT 2 UNION SELECT 3 ORDER BY 1")
-		if len(rows) == 0 {
-			t.Fatal("expected non-empty result")
-		}
-	})
+func TestCompileCompoundDeepApplyWithPrecedence_UnionAllThenUnion(t *testing.T) {
+	t.Parallel()
+	db := openDeepDB(t)
+	rows := queryDeep(t, db,
+		"SELECT 1 UNION ALL SELECT 1 UNION ALL SELECT 2 UNION SELECT 3 ORDER BY 1")
+	if len(rows) == 0 {
+		t.Fatal("expected non-empty result")
+	}
 }
 
 // TestCompileCompoundDeepEmitLoadValueFloat exercises emitLoadValue for a
 // float64 value. This causes vm.AddOpWithP4Real to be called (the float64 case).
 // The compound result contains a float row, which goes through emitLoadValue.
-func TestCompileCompoundDeepEmitLoadValueFloat(t *testing.T) {
+func TestCompileCompoundDeepEmitLoadValueFloat_Float(t *testing.T) {
 	t.Parallel()
+	db := openDeepDB(t)
+	rows := queryDeep(t, db,
+		"SELECT 3.14 UNION ALL SELECT 2.71 ORDER BY 1 ASC")
+	if len(rows) != 2 {
+		t.Fatalf("want 2 rows, got %d", len(rows))
+	}
+	if rows[0][0] != 2.71 {
+		t.Errorf("want 2.71 first, got %v", rows[0][0])
+	}
+}
 
-	t.Run("float_value_in_compound_result", func(t *testing.T) {
-		t.Parallel()
-		db := openDeepDB(t)
-		// emitLoadValue(vm, float64(3.14), reg) exercises the float64 case,
-		// calling vm.AddOpWithP4Real.
-		rows := queryDeep(t, db,
-			"SELECT 3.14 UNION ALL SELECT 2.71 ORDER BY 1 ASC")
-		if len(rows) != 2 {
-			t.Fatalf("want 2 rows, got %d", len(rows))
-		}
-		if rows[0][0] != 2.71 {
-			t.Errorf("want 2.71 first, got %v", rows[0][0])
-		}
-	})
+func TestCompileCompoundDeepEmitLoadValueFloat_Blob(t *testing.T) {
+	t.Parallel()
+	db := openDeepDB(t)
+	execDeep(t, db,
+		"CREATE TABLE deep_blob(b BLOB)",
+		"INSERT INTO deep_blob VALUES(X'CAFEBABE')",
+	)
+	rows := queryDeep(t, db,
+		"SELECT b FROM deep_blob UNION ALL SELECT b FROM deep_blob ORDER BY b")
+	if len(rows) != 2 {
+		t.Fatalf("want 2 rows, got %d", len(rows))
+	}
+	if _, ok := rows[0][0].([]byte); !ok {
+		t.Errorf("want []byte, got %T %v", rows[0][0], rows[0][0])
+	}
+}
 
-	t.Run("blob_value_in_compound_result", func(t *testing.T) {
-		t.Parallel()
-		db := openDeepDB(t)
-		execDeep(t, db,
-			"CREATE TABLE deep_blob(b BLOB)",
-			"INSERT INTO deep_blob VALUES(X'CAFEBABE')",
-		)
-		// emitLoadValue(vm, []byte{...}, reg) exercises the []byte case,
-		// calling vm.AddOpWithP4Blob.
-		rows := queryDeep(t, db,
-			"SELECT b FROM deep_blob UNION ALL SELECT b FROM deep_blob ORDER BY b")
-		if len(rows) != 2 {
-			t.Fatalf("want 2 rows, got %d", len(rows))
-		}
-		if _, ok := rows[0][0].([]byte); !ok {
-			t.Errorf("want []byte, got %T %v", rows[0][0], rows[0][0])
-		}
-	})
+func TestCompileCompoundDeepEmitLoadValueFloat_String(t *testing.T) {
+	t.Parallel()
+	db := openDeepDB(t)
+	rows := queryDeep(t, db,
+		"SELECT 'hello' UNION ALL SELECT 'world' ORDER BY 1 ASC")
+	if len(rows) != 2 {
+		t.Fatalf("want 2 rows, got %d", len(rows))
+	}
+	if rows[0][0] != "hello" {
+		t.Errorf("want 'hello' first, got %v", rows[0][0])
+	}
+}
 
-	t.Run("string_value_in_compound_result", func(t *testing.T) {
-		t.Parallel()
-		db := openDeepDB(t)
-		// emitLoadValue(vm, string("hello"), reg) exercises the string case,
-		// calling vm.AddOpWithP4Str.
-		rows := queryDeep(t, db,
-			"SELECT 'hello' UNION ALL SELECT 'world' ORDER BY 1 ASC")
-		if len(rows) != 2 {
-			t.Fatalf("want 2 rows, got %d", len(rows))
-		}
-		if rows[0][0] != "hello" {
-			t.Errorf("want 'hello' first, got %v", rows[0][0])
-		}
-	})
-
-	t.Run("null_value_in_compound_result", func(t *testing.T) {
-		t.Parallel()
-		db := openDeepDB(t)
-		// emitLoadValue(vm, nil, reg) exercises the nil case (OpNull).
-		// Also exercises the emitCompoundResult path where val is nil.
-		rows := queryDeep(t, db,
-			"SELECT NULL UNION ALL SELECT 1 ORDER BY 1 ASC")
-		if len(rows) != 2 {
-			t.Fatalf("want 2 rows, got %d", len(rows))
-		}
-		if rows[0][0] != nil {
-			t.Errorf("want nil first, got %v", rows[0][0])
-		}
-	})
+func TestCompileCompoundDeepEmitLoadValueFloat_Null(t *testing.T) {
+	t.Parallel()
+	db := openDeepDB(t)
+	rows := queryDeep(t, db,
+		"SELECT NULL UNION ALL SELECT 1 ORDER BY 1 ASC")
+	if len(rows) != 2 {
+		t.Fatalf("want 2 rows, got %d", len(rows))
+	}
+	if rows[0][0] != nil {
+		t.Errorf("want nil first, got %v", rows[0][0])
+	}
 }
 
 // TestCompileCompoundDeepEmitCompoundResultShortRow exercises the else-branch

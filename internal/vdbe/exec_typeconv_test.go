@@ -438,20 +438,26 @@ func buildTypeConversionProgram() []*Instruction {
 	}
 }
 
+func expectMemStr(t *testing.T, label string, m *Mem, want string) {
+	t.Helper()
+	if !m.IsString() || m.StrValue() != want {
+		t.Errorf("%s: expected string %q, got %v", label, want, m)
+	}
+}
+
+func expectMemInt(t *testing.T, label string, m *Mem, want int64) {
+	t.Helper()
+	if !m.IsInt() || m.IntValue() != want {
+		t.Errorf("%s: expected int %d, got %v", label, want, m)
+	}
+}
+
 func verifyTypeConversionResults(t *testing.T, v *VDBE) {
 	t.Helper()
-	if !v.Mem[1].IsString() || v.Mem[1].StrValue() != "42" {
-		t.Errorf("r1: expected string '42', got %v", v.Mem[1])
-	}
-	if !v.Mem[2].IsInt() || v.Mem[2].IntValue() != 3 {
-		t.Errorf("r2: expected int 3, got %v", v.Mem[2])
-	}
-	if !v.Mem[3].IsInt() || v.Mem[3].IntValue() != 123 {
-		t.Errorf("r3: expected int 123, got %v", v.Mem[3])
-	}
-	if !v.Mem[4].IsString() || v.Mem[4].StrValue() != "hello" {
-		t.Errorf("r4: expected string 'hello', got %v", v.Mem[4])
-	}
+	expectMemStr(t, "r1", v.Mem[1], "42")
+	expectMemInt(t, "r2", v.Mem[2], 3)
+	expectMemInt(t, "r3", v.Mem[3], 123)
+	expectMemStr(t, "r4", v.Mem[4], "hello")
 }
 
 // TestTypeConversionIntegration tests type conversions in a VDBE program.

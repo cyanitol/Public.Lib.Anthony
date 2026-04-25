@@ -204,55 +204,59 @@ func TestMemArithmetic(t *testing.T) {
 	t.Run("Remainder", testRemainder)
 }
 
+func testMemComparisonInteger(t *testing.T) {
+	t.Parallel()
+	a := NewMemInt(10)
+	b := NewMemInt(20)
+	c := NewMemInt(10)
+
+	if a.Compare(b) != -1 {
+		t.Error("10 should be less than 20")
+	}
+	if b.Compare(a) != 1 {
+		t.Error("20 should be greater than 10")
+	}
+	if a.Compare(c) != 0 {
+		t.Error("10 should equal 10")
+	}
+}
+
+func testMemComparisonString(t *testing.T) {
+	t.Parallel()
+	a := NewMemStr("apple")
+	b := NewMemStr("banana")
+	c := NewMemStr("apple")
+
+	if a.Compare(b) != -1 {
+		t.Error("'apple' should be less than 'banana'")
+	}
+	if b.Compare(a) != 1 {
+		t.Error("'banana' should be greater than 'apple'")
+	}
+	if a.Compare(c) != 0 {
+		t.Error("'apple' should equal 'apple'")
+	}
+}
+
+func testMemComparisonNull(t *testing.T) {
+	t.Parallel()
+	a := NewMemNull()
+	b := NewMemNull()
+	c := NewMemInt(42)
+
+	if a.Compare(b) != 0 {
+		t.Error("NULL should equal NULL")
+	}
+	if a.Compare(c) != -1 {
+		t.Error("NULL should be less than any value")
+	}
+}
+
 func TestMemComparison(t *testing.T) {
 	t.Parallel()
-	t.Run("IntegerComparison", func(t *testing.T) {
-		t.Parallel()
-		a := NewMemInt(10)
-		b := NewMemInt(20)
-		c := NewMemInt(10)
-
-		if a.Compare(b) != -1 {
-			t.Error("10 should be less than 20")
-		}
-		if b.Compare(a) != 1 {
-			t.Error("20 should be greater than 10")
-		}
-		if a.Compare(c) != 0 {
-			t.Error("10 should equal 10")
-		}
-	})
-
-	t.Run("StringComparison", func(t *testing.T) {
-		t.Parallel()
-		a := NewMemStr("apple")
-		b := NewMemStr("banana")
-		c := NewMemStr("apple")
-
-		if a.Compare(b) != -1 {
-			t.Error("'apple' should be less than 'banana'")
-		}
-		if b.Compare(a) != 1 {
-			t.Error("'banana' should be greater than 'apple'")
-		}
-		if a.Compare(c) != 0 {
-			t.Error("'apple' should equal 'apple'")
-		}
-	})
-
-	t.Run("NullComparison", func(t *testing.T) {
-		t.Parallel()
-		a := NewMemNull()
-		b := NewMemNull()
-		c := NewMemInt(42)
-
-		if a.Compare(b) != 0 {
-			t.Error("NULL should equal NULL")
-		}
-		if a.Compare(c) != -1 {
-			t.Error("NULL should be less than any value")
-		}
-	})
+	t.Run("IntegerComparison", testMemComparisonInteger)
+	t.Run("StringComparison", testMemComparisonString)
+	t.Run("NullComparison", testMemComparisonNull)
 }
 
 func TestMemCopyMove(t *testing.T) {
@@ -302,94 +306,83 @@ func TestMemCopyMove(t *testing.T) {
 	})
 }
 
+func testVdbeSimpleProgram(t *testing.T) {
+	t.Parallel()
+	v := New()
+	v.AllocMemory(10)
+	v.AddOp(OpInteger, 42, 1, 0)
+	v.AddOp(OpHalt, 0, 0, 0)
+	if err := v.Run(); err != nil {
+		t.Fatalf("Execution failed: %v", err)
+	}
+	mem, _ := v.GetMem(1)
+	if mem.IntValue() != 42 {
+		t.Errorf("Expected 42, got %d", mem.IntValue())
+	}
+}
+
+func testVdbeArithmeticProgram(t *testing.T) {
+	t.Parallel()
+	v := New()
+	v.AllocMemory(10)
+	v.AddOp(OpInteger, 10, 1, 0)
+	v.AddOp(OpInteger, 20, 2, 0)
+	v.AddOp(OpAdd, 1, 2, 3)
+	v.AddOp(OpHalt, 0, 0, 0)
+	if err := v.Run(); err != nil {
+		t.Fatalf("Execution failed: %v", err)
+	}
+	mem, _ := v.GetMem(3)
+	if mem.IntValue() != 30 {
+		t.Errorf("Expected 30, got %d", mem.IntValue())
+	}
+}
+
+func testVdbeConditionalJump(t *testing.T) {
+	t.Parallel()
+	v := New()
+	v.AllocMemory(10)
+	v.AddOp(OpInteger, 1, 1, 0)
+	v.AddOp(OpIf, 1, 4, 0)
+	v.AddOp(OpInteger, 99, 2, 0)
+	v.AddOp(OpInteger, -1, 2, 0)
+	v.AddOp(OpInteger, 42, 2, 0)
+	v.AddOp(OpHalt, 0, 0, 0)
+	if err := v.Run(); err != nil {
+		t.Fatalf("Execution failed: %v", err)
+	}
+	mem, _ := v.GetMem(2)
+	if mem.IntValue() != 42 {
+		t.Errorf("Expected 42 (jump taken), got %d", mem.IntValue())
+	}
+}
+
+func testVdbeLoop(t *testing.T) {
+	t.Parallel()
+	v := New()
+	v.AllocMemory(10)
+	v.AddOp(OpInteger, 0, 1, 0)
+	v.AddOp(OpInteger, 10, 2, 0)
+	v.AddOp(OpInteger, 1, 3, 0)
+	v.AddOp(OpAdd, 1, 3, 1)
+	v.AddOp(OpLt, 1, 2, 4)
+	v.AddOp(OpIf, 4, 2, 0)
+	v.AddOp(OpHalt, 0, 0, 0)
+	if err := v.Run(); err != nil {
+		t.Fatalf("Execution failed: %v", err)
+	}
+	mem, _ := v.GetMem(1)
+	if mem.IntValue() != 10 {
+		t.Errorf("Expected 10, got %d", mem.IntValue())
+	}
+}
+
 func TestVdbeBasicExecution(t *testing.T) {
 	t.Parallel()
-	t.Run("SimpleProgram", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		v.AllocMemory(10)
-
-		// Program: r[1] = 42; Halt
-		v.AddOp(OpInteger, 42, 1, 0)
-		v.AddOp(OpHalt, 0, 0, 0)
-
-		if err := v.Run(); err != nil {
-			t.Fatalf("Execution failed: %v", err)
-		}
-
-		mem, _ := v.GetMem(1)
-		if mem.IntValue() != 42 {
-			t.Errorf("Expected 42, got %d", mem.IntValue())
-		}
-	})
-
-	t.Run("ArithmeticProgram", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		v.AllocMemory(10)
-
-		// Program: r[1] = 10; r[2] = 20; r[3] = r[1] + r[2]; Halt
-		v.AddOp(OpInteger, 10, 1, 0)
-		v.AddOp(OpInteger, 20, 2, 0)
-		v.AddOp(OpAdd, 1, 2, 3)
-		v.AddOp(OpHalt, 0, 0, 0)
-
-		if err := v.Run(); err != nil {
-			t.Fatalf("Execution failed: %v", err)
-		}
-
-		mem, _ := v.GetMem(3)
-		if mem.IntValue() != 30 {
-			t.Errorf("Expected 30, got %d", mem.IntValue())
-		}
-	})
-
-	t.Run("ConditionalJump", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		v.AllocMemory(10)
-
-		// Program: r[1] = 1; if r[1] goto 4; r[2] = 99; r[2] = 42; Halt
-		v.AddOp(OpInteger, 1, 1, 0)  // 0: r[1] = 1
-		v.AddOp(OpIf, 1, 4, 0)       // 1: if r[1] goto 4
-		v.AddOp(OpInteger, 99, 2, 0) // 2: r[2] = 99 (should skip)
-		v.AddOp(OpInteger, -1, 2, 0) // 3: r[2] = -1 (should skip)
-		v.AddOp(OpInteger, 42, 2, 0) // 4: r[2] = 42
-		v.AddOp(OpHalt, 0, 0, 0)     // 5: Halt
-
-		if err := v.Run(); err != nil {
-			t.Fatalf("Execution failed: %v", err)
-		}
-
-		mem, _ := v.GetMem(2)
-		if mem.IntValue() != 42 {
-			t.Errorf("Expected 42 (jump taken), got %d", mem.IntValue())
-		}
-	})
-
-	t.Run("Loop", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		v.AllocMemory(10)
-
-		// Program: r[1] = 0; r[2] = 10; r[1]++; r[4] = (r[1] < r[2]); if r[4] goto 2; Halt
-		v.AddOp(OpInteger, 0, 1, 0)  // 0: r[1] = 0 (counter)
-		v.AddOp(OpInteger, 10, 2, 0) // 1: r[2] = 10 (limit)
-		v.AddOp(OpInteger, 1, 3, 0)  // 2: r[3] = 1
-		v.AddOp(OpAdd, 1, 3, 1)      // 3: r[1] = r[1] + r[3] (increment)
-		v.AddOp(OpLt, 1, 2, 4)       // 4: r[4] = (r[1] < r[2])
-		v.AddOp(OpIf, 4, 2, 0)       // 5: if r[4] is true, goto 2
-		v.AddOp(OpHalt, 0, 0, 0)     // 6: Halt
-
-		if err := v.Run(); err != nil {
-			t.Fatalf("Execution failed: %v", err)
-		}
-
-		mem, _ := v.GetMem(1)
-		if mem.IntValue() != 10 {
-			t.Errorf("Expected 10, got %d", mem.IntValue())
-		}
-	})
+	t.Run("SimpleProgram", testVdbeSimpleProgram)
+	t.Run("ArithmeticProgram", testVdbeArithmeticProgram)
+	t.Run("ConditionalJump", testVdbeConditionalJump)
+	t.Run("Loop", testVdbeLoop)
 }
 
 func TestVdbeComparison(t *testing.T) {
@@ -539,6 +532,20 @@ func TestVdbeReset(t *testing.T) {
 	}
 }
 
+func verifyResultRowColumn(t *testing.T, row []*Mem, i int, expected interface{}) {
+	t.Helper()
+	switch exp := expected.(type) {
+	case int64:
+		if row[i].IntValue() != exp {
+			t.Errorf("Column %d: expected %d, got %d", i, exp, row[i].IntValue())
+		}
+	case string:
+		if row[i].StrValue() != exp {
+			t.Errorf("Column %d: expected '%s', got '%s'", i, exp, row[i].StrValue())
+		}
+	}
+}
+
 // Helper to verify result row state and content
 func verifyResultRow(t *testing.T, v *VDBE, expectedCols int, expectedValues []interface{}) {
 	t.Helper()
@@ -552,16 +559,7 @@ func verifyResultRow(t *testing.T, v *VDBE, expectedCols int, expectedValues []i
 		t.Fatalf("Expected %d columns, got %d", expectedCols, len(v.ResultRow))
 	}
 	for i, expected := range expectedValues {
-		switch exp := expected.(type) {
-		case int64:
-			if v.ResultRow[i].IntValue() != exp {
-				t.Errorf("Column %d: expected %d, got %d", i, exp, v.ResultRow[i].IntValue())
-			}
-		case string:
-			if v.ResultRow[i].StrValue() != exp {
-				t.Errorf("Column %d: expected '%s', got '%s'", i, exp, v.ResultRow[i].StrValue())
-			}
-		}
+		verifyResultRowColumn(t, v.ResultRow, i, expected)
 	}
 }
 
@@ -580,65 +578,68 @@ func stepAndVerifyRow(t *testing.T, v *VDBE, expectedValue int64) {
 	}
 }
 
+func testResultRowSingle(t *testing.T) {
+	t.Parallel()
+	v := New()
+	v.AllocMemory(10)
+
+	v.AddOp(OpInteger, 42, 1, 0)
+	v.AddOpWithP4Str(OpString8, 0, 2, 0, "hello")
+	v.AddOp(OpResultRow, 1, 2, 0)
+	v.AddOp(OpHalt, 0, 0, 0)
+
+	hasMore, err := v.Step()
+	if err != nil {
+		t.Fatalf("Step failed: %v", err)
+	}
+	if !hasMore {
+		t.Error("Expected more steps after ResultRow")
+	}
+
+	verifyResultRow(t, v, 2, []interface{}{int64(42), "hello"})
+
+	hasMore, err = v.Step()
+	if err != nil {
+		t.Fatalf("Second step failed: %v", err)
+	}
+	if hasMore {
+		t.Error("Expected no more steps after Halt")
+	}
+	if v.State != StateHalt {
+		t.Errorf("Expected StateHalt, got %v", v.State)
+	}
+}
+
+func testResultRowMultiple(t *testing.T) {
+	t.Parallel()
+	v := New()
+	v.AllocMemory(10)
+
+	v.AddOp(OpInteger, 1, 1, 0)
+	v.AddOp(OpResultRow, 1, 1, 0)
+	v.AddOp(OpInteger, 2, 1, 0)
+	v.AddOp(OpResultRow, 1, 1, 0)
+	v.AddOp(OpInteger, 3, 1, 0)
+	v.AddOp(OpResultRow, 1, 1, 0)
+	v.AddOp(OpHalt, 0, 0, 0)
+
+	stepAndVerifyRow(t, v, 1)
+	stepAndVerifyRow(t, v, 2)
+	stepAndVerifyRow(t, v, 3)
+
+	hasMore, err := v.Step()
+	if err != nil {
+		t.Fatalf("Step 4 failed: %v", err)
+	}
+	if hasMore || v.State != StateHalt {
+		t.Error("Expected StateHalt after processing all rows")
+	}
+}
+
 func TestResultRowHandling(t *testing.T) {
 	t.Parallel()
-	t.Run("SingleRowResult", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		v.AllocMemory(10)
-
-		v.AddOp(OpInteger, 42, 1, 0)
-		v.AddOpWithP4Str(OpString8, 0, 2, 0, "hello")
-		v.AddOp(OpResultRow, 1, 2, 0)
-		v.AddOp(OpHalt, 0, 0, 0)
-
-		hasMore, err := v.Step()
-		if err != nil {
-			t.Fatalf("Step failed: %v", err)
-		}
-		if !hasMore {
-			t.Error("Expected more steps after ResultRow")
-		}
-
-		verifyResultRow(t, v, 2, []interface{}{int64(42), "hello"})
-
-		hasMore, err = v.Step()
-		if err != nil {
-			t.Fatalf("Second step failed: %v", err)
-		}
-		if hasMore {
-			t.Error("Expected no more steps after Halt")
-		}
-		if v.State != StateHalt {
-			t.Errorf("Expected StateHalt, got %v", v.State)
-		}
-	})
-
-	t.Run("MultipleRowResults", func(t *testing.T) {
-		t.Parallel()
-		v := New()
-		v.AllocMemory(10)
-
-		v.AddOp(OpInteger, 1, 1, 0)
-		v.AddOp(OpResultRow, 1, 1, 0)
-		v.AddOp(OpInteger, 2, 1, 0)
-		v.AddOp(OpResultRow, 1, 1, 0)
-		v.AddOp(OpInteger, 3, 1, 0)
-		v.AddOp(OpResultRow, 1, 1, 0)
-		v.AddOp(OpHalt, 0, 0, 0)
-
-		stepAndVerifyRow(t, v, 1)
-		stepAndVerifyRow(t, v, 2)
-		stepAndVerifyRow(t, v, 3)
-
-		hasMore, err := v.Step()
-		if err != nil {
-			t.Fatalf("Step 4 failed: %v", err)
-		}
-		if hasMore || v.State != StateHalt {
-			t.Error("Expected StateHalt after processing all rows")
-		}
-	})
+	t.Run("SingleRowResult", testResultRowSingle)
+	t.Run("MultipleRowResults", testResultRowMultiple)
 }
 
 // contains is defined in exec_transaction_test.go

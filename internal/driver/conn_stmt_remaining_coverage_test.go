@@ -492,6 +492,28 @@ func TestConnStmtRemaining_WindowDenseRankTies(t *testing.T) {
 	}
 }
 
+// csrQueryRankPairs queries two int64 columns and returns all result rows.
+func csrQueryRankPairs(t *testing.T, db *sql.DB, query string) (ranks, denseRanks []int64) {
+	t.Helper()
+	sqlRows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	defer sqlRows.Close()
+	for sqlRows.Next() {
+		var r, d int64
+		if err := sqlRows.Scan(&r, &d); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		ranks = append(ranks, r)
+		denseRanks = append(denseRanks, d)
+	}
+	if err := sqlRows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return
+}
+
 // TestConnStmtRemaining_WindowRankVsDenseRank compares RANK and DENSE_RANK
 // side by side, confirming they diverge only on ties.
 func TestConnStmtRemaining_WindowRankVsDenseRank(t *testing.T) {
@@ -504,38 +526,20 @@ func TestConnStmtRemaining_WindowRankVsDenseRank(t *testing.T) {
 		"INSERT INTO ranks_tbl VALUES (30)",
 	)
 
-	type row struct{ rank, dense int64 }
-	var results []row
-
-	sqlRows, err := db.Query(
+	ranks, denseRanks := csrQueryRankPairs(t, db,
 		"SELECT RANK() OVER (ORDER BY v), DENSE_RANK() OVER (ORDER BY v) FROM ranks_tbl ORDER BY v")
-	if err != nil {
-		t.Fatalf("query: %v", err)
-	}
-	defer sqlRows.Close()
-	for sqlRows.Next() {
-		var r, d int64
-		if err := sqlRows.Scan(&r, &d); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		results = append(results, row{r, d})
-	}
-	if err := sqlRows.Err(); err != nil {
-		t.Fatalf("rows.Err: %v", err)
-	}
 
-	// Expected: rank=[1,2,2,4], dense_rank=[1,2,2,3]
 	wantRank := []int64{1, 2, 2, 4}
 	wantDense := []int64{1, 2, 2, 3}
-	if len(results) != 4 {
-		t.Fatalf("got %d rows, want 4", len(results))
+	if len(ranks) != 4 {
+		t.Fatalf("got %d rows, want 4", len(ranks))
 	}
-	for i, r := range results {
-		if r.rank != wantRank[i] {
-			t.Errorf("row %d rank = %d, want %d", i, r.rank, wantRank[i])
+	for i := range ranks {
+		if ranks[i] != wantRank[i] {
+			t.Errorf("row %d rank = %d, want %d", i, ranks[i], wantRank[i])
 		}
-		if r.dense != wantDense[i] {
-			t.Errorf("row %d dense_rank = %d, want %d", i, r.dense, wantDense[i])
+		if denseRanks[i] != wantDense[i] {
+			t.Errorf("row %d dense_rank = %d, want %d", i, denseRanks[i], wantDense[i])
 		}
 	}
 }

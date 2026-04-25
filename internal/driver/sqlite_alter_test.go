@@ -1171,19 +1171,24 @@ func TestAlterTableWithTriggers(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			db := setupMemoryDB(t)
-			defer db.Close()
-
-			for _, stmt := range tt.setup {
-				mustExec(t, db, stmt)
-			}
-
-			mustExec(t, db, tt.alter)
-
-			if tt.check != nil {
-				tt.check(t, db)
-			}
+			alterRunSimpleTestCase(t, tt.setup, tt.alter, tt.check)
 		})
+	}
+}
+
+func alterRunSimpleTestCase(t *testing.T, setup []string, alter string, check func(*testing.T, *sql.DB)) {
+	t.Helper()
+	db := setupMemoryDB(t)
+	defer db.Close()
+
+	for _, stmt := range setup {
+		mustExec(t, db, stmt)
+	}
+
+	mustExec(t, db, alter)
+
+	if check != nil {
+		check(t, db)
 	}
 }
 
@@ -1399,18 +1404,7 @@ func TestAlterTableWithForeignKeys(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			db := setupMemoryDB(t)
-			defer db.Close()
-
-			for _, stmt := range tt.setup {
-				mustExec(t, db, stmt)
-			}
-
-			mustExec(t, db, tt.alter)
-
-			if tt.check != nil {
-				tt.check(t, db)
-			}
+			alterRunSimpleTestCase(t, tt.setup, tt.alter, tt.check)
 		})
 	}
 }

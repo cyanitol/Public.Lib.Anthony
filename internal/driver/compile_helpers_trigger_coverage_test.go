@@ -286,6 +286,29 @@ func TestCompileHelpersJoinOrderByRowidAlias(t *testing.T) {
 // findColumnTableIndex — table-qualified column resolution in LEFT JOIN
 // ---------------------------------------------------------------------------
 
+// chLeftJoinRow holds a row from the left join query.
+type chLeftJoinRow struct {
+	pname string
+	cname sql.NullString
+}
+
+// chScanLeftJoinRows scans all rows from a left join query result.
+func chScanLeftJoinRows(t *testing.T, rows *sql.Rows) []chLeftJoinRow {
+	t.Helper()
+	var got []chLeftJoinRow
+	for rows.Next() {
+		var r chLeftJoinRow
+		if err := rows.Scan(&r.pname, &r.cname); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got = append(got, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return got
+}
+
 // TestCompileHelpersLeftJoinFindColumnTableIndex exercises findColumnTableIndex
 // by selecting table-qualified columns from a LEFT JOIN so the NULL-emission
 // path walks the table list to resolve column ownership.
@@ -308,21 +331,7 @@ func TestCompileHelpersLeftJoinFindColumnTableIndex(t *testing.T) {
 	}
 	defer rows.Close()
 
-	type row struct {
-		pname string
-		cname sql.NullString
-	}
-	var got []row
-	for rows.Next() {
-		var r row
-		if err := rows.Scan(&r.pname, &r.cname); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		got = append(got, r)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows.Err: %v", err)
-	}
+	got := chScanLeftJoinRows(t, rows)
 
 	// Alpha has 2 children, Beta and Gamma have none (NULL cname from LEFT JOIN).
 	if len(got) != 4 {
@@ -397,6 +406,53 @@ func TestCompileHelpersLeafRowSorterWithWhere(t *testing.T) {
 // findColumnCollation / resolveExprCollationMultiTable — GROUP BY with COLLATE
 // ---------------------------------------------------------------------------
 
+// chGroupRow3 holds a 3-column group-by result row.
+type chGroupRow3 struct {
+	name  string
+	cnt   int64
+	total int64
+}
+
+// chScanGroupRows3 scans rows with (string, int64, int64) columns.
+func chScanGroupRows3(t *testing.T, rows *sql.Rows) []chGroupRow3 {
+	t.Helper()
+	var got []chGroupRow3
+	for rows.Next() {
+		var r chGroupRow3
+		if err := rows.Scan(&r.name, &r.cnt, &r.total); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got = append(got, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return got
+}
+
+// chGroupRow2 holds a 2-column group-by result row.
+type chGroupRow2 struct {
+	name  string
+	total int64
+}
+
+// chScanGroupRows2 scans rows with (string, int64) columns.
+func chScanGroupRows2(t *testing.T, rows *sql.Rows) []chGroupRow2 {
+	t.Helper()
+	var got []chGroupRow2
+	for rows.Next() {
+		var r chGroupRow2
+		if err := rows.Scan(&r.name, &r.total); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got = append(got, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return got
+}
+
 // TestCompileHelpersJoinAggGroupByCollate exercises resolveExprCollationMultiTable
 // and findColumnCollation via a JOIN + GROUP BY with a COLLATE expression,
 // hitting the CollateExpr, ParenExpr and IdentExpr branches.
@@ -422,31 +478,16 @@ func TestCompileHelpersJoinAggGroupByCollate(t *testing.T) {
 	}
 	defer rows.Close()
 
-	type row struct {
-		cname string
-		cnt   int64
-		total int64
-	}
-	var got []row
-	for rows.Next() {
-		var r row
-		if err := rows.Scan(&r.cname, &r.cnt, &r.total); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		got = append(got, r)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows.Err: %v", err)
-	}
+	got := chScanGroupRows3(t, rows)
 
 	if len(got) != 2 {
 		t.Fatalf("expected 2 groups, got %d: %v", len(got), got)
 	}
-	if got[0].cname != "gadgets" || got[0].cnt != 1 || got[0].total != 30 {
-		t.Errorf("gadgets group: %+v", got[0])
-	}
-	if got[1].cname != "widgets" || got[1].cnt != 2 || got[1].total != 30 {
-		t.Errorf("widgets group: %+v", got[1])
+	want := []chGroupRow3{{"gadgets", 1, 30}, {"widgets", 2, 30}}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("group %d: got %+v, want %+v", i, got[i], w)
+		}
 	}
 }
 
@@ -463,7 +504,6 @@ func TestCompileHelpersJoinAggGroupByColumnCollation(t *testing.T) {
 	chExec(t, db, "INSERT INTO scores VALUES(2,1,10)")
 	chExec(t, db, "INSERT INTO scores VALUES(3,2,7)")
 
-	// GROUP BY unqualified column that has COLLATE NOCASE from the teams table.
 	rows, err := db.Query(
 		`SELECT tname, SUM(pts) FROM teams INNER JOIN scores ON teams.tid = scores.tid GROUP BY tname ORDER BY tname`,
 	)
@@ -472,29 +512,15 @@ func TestCompileHelpersJoinAggGroupByColumnCollation(t *testing.T) {
 	}
 	defer rows.Close()
 
-	type row struct {
-		tname string
-		total int64
-	}
-	var got []row
-	for rows.Next() {
-		var r row
-		if err := rows.Scan(&r.tname, &r.total); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		got = append(got, r)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows.Err: %v", err)
-	}
+	got := chScanGroupRows2(t, rows)
 
 	if len(got) != 2 {
 		t.Fatalf("expected 2 groups, got %d", len(got))
 	}
-	if got[0].tname != "Alpha" || got[0].total != 15 {
+	if got[0].name != "Alpha" || got[0].total != 15 {
 		t.Errorf("Alpha: %+v", got[0])
 	}
-	if got[1].tname != "Beta" || got[1].total != 7 {
+	if got[1].name != "Beta" || got[1].total != 7 {
 		t.Errorf("Beta: %+v", got[1])
 	}
 }
@@ -512,7 +538,6 @@ func TestCompileHelpersJoinAggGroupByTableQualifiedCollation(t *testing.T) {
 	chExec(t, db, "INSERT INTO items VALUES(2,2,7)")
 	chExec(t, db, "INSERT INTO items VALUES(3,1,2)")
 
-	// GROUP BY with table-qualified column exercises the ident.Table != "" branch.
 	rows, err := db.Query(
 		`SELECT brands.bname, SUM(items.qty) FROM brands INNER JOIN items ON brands.bid = items.bid GROUP BY brands.bname ORDER BY brands.bname`,
 	)
@@ -521,29 +546,15 @@ func TestCompileHelpersJoinAggGroupByTableQualifiedCollation(t *testing.T) {
 	}
 	defer rows.Close()
 
-	type row struct {
-		bname string
-		total int64
-	}
-	var got []row
-	for rows.Next() {
-		var r row
-		if err := rows.Scan(&r.bname, &r.total); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		got = append(got, r)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows.Err: %v", err)
-	}
+	got := chScanGroupRows2(t, rows)
 
 	if len(got) != 2 {
 		t.Fatalf("expected 2 groups, got %d", len(got))
 	}
-	if got[0].bname != "Acme" || got[0].total != 5 {
+	if got[0].name != "Acme" || got[0].total != 5 {
 		t.Errorf("Acme: %+v", got[0])
 	}
-	if got[1].bname != "Bravo" || got[1].total != 7 {
+	if got[1].name != "Bravo" || got[1].total != 7 {
 		t.Errorf("Bravo: %+v", got[1])
 	}
 }

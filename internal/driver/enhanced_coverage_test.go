@@ -309,28 +309,22 @@ func TestInsertFirstRowCoverage(t *testing.T) {
 	}
 }
 
-// TestSubqueryCompilationCoverage tests subquery compilation functions
-func TestSubqueryCompilationCoverage(t *testing.T) {
+// subqueryTestConn opens a connection and populates a test table for subquery tests.
+func subqueryTestConn(t *testing.T) *Conn {
+	t.Helper()
 	dbFile := t.TempDir() + "/test_subquery_comp.db"
-
 	d := &Driver{}
 	conn, err := d.Open(dbFile)
 	if err != nil {
 		t.Fatalf("failed to open connection: %v", err)
 	}
-	defer conn.Close()
-
 	c := conn.(*Conn)
-
-	// Setup
-	setupSQL := []string{
+	for _, q := range []string{
 		"CREATE TABLE test (id INTEGER, val INTEGER)",
 		"INSERT INTO test VALUES (1, 100)",
 		"INSERT INTO test VALUES (2, 200)",
-	}
-
-	for _, sql := range setupSQL {
-		stmt, err := c.PrepareContext(context.Background(), sql)
+	} {
+		stmt, err := c.PrepareContext(context.Background(), q)
 		if err != nil {
 			t.Fatalf("failed to prepare setup: %v", err)
 		}
@@ -340,22 +334,25 @@ func TestSubqueryCompilationCoverage(t *testing.T) {
 			t.Fatalf("failed to execute setup: %v", err)
 		}
 	}
+	return c
+}
+
+// TestSubqueryCompilationCoverage tests subquery compilation functions
+func TestSubqueryCompilationCoverage(t *testing.T) {
+	c := subqueryTestConn(t)
+	defer c.Close()
 
 	t.Run("compileScalarSubquery", func(t *testing.T) {
 		s := &Stmt{conn: c}
 		vm := vdbe.New()
-
 		subquery := &parser.SelectStmt{
 			Columns: []parser.ResultColumn{
 				{Expr: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "42"}},
 			},
 		}
-
-		err := s.compileScalarSubquery(vm, subquery, 1, nil)
-		if err != nil {
+		if err := s.compileScalarSubquery(vm, subquery, 1, nil); err != nil {
 			t.Errorf("compileScalarSubquery() error = %v", err)
 		}
-
 		if len(vm.Program) == 0 {
 			t.Error("compileScalarSubquery() should add instructions")
 		}
@@ -364,25 +361,20 @@ func TestSubqueryCompilationCoverage(t *testing.T) {
 	t.Run("compileExistsSubquery", func(t *testing.T) {
 		s := &Stmt{conn: c}
 		vm := vdbe.New()
-
 		subquery := &parser.SelectStmt{
 			Columns: []parser.ResultColumn{
 				{Expr: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"}},
 			},
 		}
-
-		err := s.compileExistsSubquery(vm, subquery, 1, nil)
-		if err != nil {
+		if err := s.compileExistsSubquery(vm, subquery, 1, nil); err != nil {
 			t.Errorf("compileExistsSubquery() error = %v", err)
 		}
-
 		if len(vm.Program) == 0 {
 			t.Error("compileExistsSubquery() should add instructions")
 		}
 	})
 
 	t.Run("compileInSubquery with nil generator", func(t *testing.T) {
-		// compileInSubquery with nil generator should panic or return error
 		defer func() {
 			if r := recover(); r != nil {
 				t.Logf("compileInSubquery panicked as expected with nil generator: %v", r)

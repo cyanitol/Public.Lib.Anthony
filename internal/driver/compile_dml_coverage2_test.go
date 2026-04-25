@@ -3,6 +3,7 @@ package driver
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 )
 
@@ -451,7 +452,7 @@ func TestCompileDML2_CompileVariableExpr(t *testing.T) {
 func splitSemiCov2(s string) []string {
 	var out []string
 	for _, part := range splitBySemicolon(s) {
-		if trimSpace(part) != "" {
+		if strings.TrimSpace(part) != "" {
 			out = append(out, part)
 		}
 	}
@@ -473,15 +474,7 @@ func splitBySemicolon(s string) []string {
 }
 
 // trimSpace trims leading/trailing ASCII whitespace from s.
-func trimSpace(s string) string {
-	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t' || s[0] == '\n' || s[0] == '\r') {
-		s = s[1:]
-	}
-	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\t' || s[len(s)-1] == '\n' || s[len(s)-1] == '\r') {
-		s = s[:len(s)-1]
-	}
-	return s
-}
+func trimSpace(s string) string { return strings.TrimSpace(s) }
 
 // ============================================================================
 // replaceExcludedRefs

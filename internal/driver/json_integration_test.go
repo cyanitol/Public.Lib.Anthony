@@ -280,58 +280,63 @@ func TestJSONFunctionsInTable(t *testing.T) {
 	})
 }
 
-// TestJSONFunctionsComplex tests more complex JSON operations
-func TestJSONFunctionsComplex(t *testing.T) {
+// openJSONComplexDB opens a temporary database for complex JSON tests.
+func openJSONComplexDB(t *testing.T) *sql.DB {
+	t.Helper()
 	db, err := sql.Open("sqlite_internal", t.TempDir()+"/test_json_complex.db")
 	if err != nil {
 		t.Fatal(err)
 	}
+	return db
+}
+
+// TestJSONFunctionsComplex_NestedObjectExtraction tests nested object extraction.
+func TestJSONFunctionsComplex_NestedObjectExtraction(t *testing.T) {
+	db := openJSONComplexDB(t)
 	defer db.Close()
 
-	t.Run("nested object extraction", func(t *testing.T) {
-		query := `SELECT json_extract('{"user":{"profile":{"email":"test@example.com"}}}', '$.user.profile.email')`
-		var email string
-		err := db.QueryRow(query).Scan(&email)
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
+	query := `SELECT json_extract('{"user":{"profile":{"email":"test@example.com"}}}', '$.user.profile.email')`
+	var email string
+	if err := db.QueryRow(query).Scan(&email); err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if email != "test@example.com" {
+		t.Errorf("expected test@example.com, got %s", email)
+	}
+}
 
-		if email != "test@example.com" {
-			t.Errorf("expected test@example.com, got %s", email)
-		}
-	})
+// TestJSONFunctionsComplex_ArrayWithinObject tests array extraction within objects.
+func TestJSONFunctionsComplex_ArrayWithinObject(t *testing.T) {
+	db := openJSONComplexDB(t)
+	defer db.Close()
 
-	t.Run("array within object", func(t *testing.T) {
-		query := `SELECT json_extract('{"items":[10,20,30]}', '$.items[1]')`
-		var value int64
-		err := db.QueryRow(query).Scan(&value)
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
+	query := `SELECT json_extract('{"items":[10,20,30]}', '$.items[1]')`
+	var value int64
+	if err := db.QueryRow(query).Scan(&value); err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if value != 20 {
+		t.Errorf("expected 20, got %d", value)
+	}
+}
 
-		if value != 20 {
-			t.Errorf("expected 20, got %d", value)
-		}
-	})
+// TestJSONFunctionsComplex_CreateComplexObject tests creating a complex JSON object.
+func TestJSONFunctionsComplex_CreateComplexObject(t *testing.T) {
+	db := openJSONComplexDB(t)
+	defer db.Close()
 
-	t.Run("create complex object", func(t *testing.T) {
-		query := `SELECT json_object('id', 1, 'items', json_array(1, 2, 3), 'active', 1)`
-		var result string
-		err := db.QueryRow(query).Scan(&result)
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
+	query := `SELECT json_object('id', 1, 'items', json_array(1, 2, 3), 'active', 1)`
+	var result string
+	if err := db.QueryRow(query).Scan(&result); err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
 
-		// Verify it's valid JSON
-		valid_query := fmt.Sprintf(`SELECT json_valid('%s')`, result)
-		var valid int64
-		err = db.QueryRow(valid_query).Scan(&valid)
-		if err != nil {
-			t.Fatalf("validation query failed: %v", err)
-		}
-
-		if valid != 1 {
-			t.Errorf("expected valid JSON, got result: %s", result)
-		}
-	})
+	validQuery := fmt.Sprintf(`SELECT json_valid('%s')`, result)
+	var valid int64
+	if err := db.QueryRow(validQuery).Scan(&valid); err != nil {
+		t.Fatalf("validation query failed: %v", err)
+	}
+	if valid != 1 {
+		t.Errorf("expected valid JSON, got result: %s", result)
+	}
 }

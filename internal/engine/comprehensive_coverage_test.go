@@ -11,6 +11,35 @@ import (
 	"github.com/cyanitol/Public.Lib.Anthony/internal/vdbe"
 )
 
+// setupDBWithStatements opens a database and executes setup SQL statements.
+func setupDBWithStatements(t *testing.T, stmts []string) *Engine {
+	t.Helper()
+	tmpDir := t.TempDir()
+	db, err := Open(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	for _, sql := range stmts {
+		if _, err := db.Execute(sql); err != nil {
+			t.Fatalf("Failed to execute setup: %v", err)
+		}
+	}
+	return db
+}
+
+// assertExecError executes sql and checks whether an error is expected.
+func assertExecError(t *testing.T, db *Engine, sql string, wantError bool) {
+	t.Helper()
+	_, err := db.Execute(sql)
+	if wantError && err == nil {
+		t.Error("Expected error but got none")
+	}
+	if !wantError && err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
 // TestCompilerMultiTableQueries tests multi-table query compilation
 func TestCompilerMultiTableQueries(t *testing.T) {
 	tests := []struct {
@@ -41,26 +70,8 @@ func TestCompilerMultiTableQueries(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			db, err := Open(tmpDir + "/test.db")
-			if err != nil {
-				t.Fatalf("Failed to open database: %v", err)
-			}
-			defer db.Close()
-
-			for _, setupSQL := range tt.setup {
-				if _, err := db.Execute(setupSQL); err != nil {
-					t.Fatalf("Failed to execute setup: %v", err)
-				}
-			}
-
-			_, err = db.Execute(tt.query)
-			if tt.wantError && err == nil {
-				t.Error("Expected error but got none")
-			}
-			if !tt.wantError && err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
+			db := setupDBWithStatements(t, tt.setup)
+			assertExecError(t, db, tt.query, tt.wantError)
 		})
 	}
 }
@@ -389,26 +400,31 @@ func TestCompileCreateTableErrors(t *testing.T) {
 	}
 }
 
+// setupIndexTestDB creates a database with a test table and an existing index.
+func setupIndexTestDB(t *testing.T) *Engine {
+	t.Helper()
+	db := setupDBWithStatements(t, []string{
+		"CREATE TABLE test (id INTEGER, name TEXT)",
+		"CREATE INDEX idx_existing ON test (id)",
+	})
+	return db
+}
+
+// assertCompileIndexError checks whether CompileCreateIndex returns an error as expected.
+func assertCompileIndexError(t *testing.T, compiler *Compiler, stmt *parser.CreateIndexStmt, wantError bool) {
+	t.Helper()
+	_, err := compiler.CompileCreateIndex(stmt)
+	if wantError && err == nil {
+		t.Error("Expected error but got none")
+	}
+	if !wantError && err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
 // TestCompileCreateIndexErrors tests error cases in CREATE INDEX
 func TestCompileCreateIndexErrors(t *testing.T) {
-	tmpDir := t.TempDir()
-	db, err := Open(tmpDir + "/test.db")
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
-	}
-	defer db.Close()
-
-	// Create table and index
-	_, err = db.Execute("CREATE TABLE test (id INTEGER, name TEXT)")
-	if err != nil {
-		t.Fatalf("Failed to create table: %v", err)
-	}
-
-	_, err = db.Execute("CREATE INDEX idx_existing ON test (id)")
-	if err != nil {
-		t.Fatalf("Failed to create index: %v", err)
-	}
-
+	db := setupIndexTestDB(t)
 	compiler := NewCompiler(db)
 
 	tests := []struct {
@@ -447,13 +463,7 @@ func TestCompileCreateIndexErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := compiler.CompileCreateIndex(tt.stmt)
-			if tt.wantError && err == nil {
-				t.Error("Expected error but got none")
-			}
-			if !tt.wantError && err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
+			assertCompileIndexError(t, compiler, tt.stmt, tt.wantError)
 		})
 	}
 }

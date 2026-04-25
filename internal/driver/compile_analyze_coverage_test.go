@@ -91,6 +91,41 @@ func TestCompileAnalyzeEmptyTable(t *testing.T) {
 
 // TestCompileAnalyzeManyRowsMultipleIndexes verifies ANALYZE on a table with
 // many rows and multiple indexes populates sqlite_stat1 for each index.
+// analyzeInsertRows inserts n rows into the given table using the provided value function.
+func analyzeInsertRows(t *testing.T, db *sql.DB, n int, sql string, argsFn func(i int) []interface{}) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		if _, err := db.Exec(sql, argsFn(i)...); err != nil {
+			t.Fatalf("insert row %d: %v", i, err)
+		}
+	}
+}
+
+// analyzeCountIndexStats queries index stats and returns the count, verifying each stat starts with the given prefix.
+func analyzeCountIndexStats(t *testing.T, db *sql.DB, tbl, prefix string) int {
+	t.Helper()
+	rows, err := db.Query("SELECT idx, stat FROM sqlite_stat1 WHERE tbl=? AND idx IS NOT NULL", tbl)
+	if err != nil {
+		t.Fatalf("query index stats: %v", err)
+	}
+	defer rows.Close()
+	var count int
+	for rows.Next() {
+		var idx, stat string
+		if err := rows.Scan(&idx, &stat); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if !strings.HasPrefix(stat, prefix) {
+			t.Errorf("index %q stat %q should start with %q", idx, stat, prefix)
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return count
+}
+
 func TestCompileAnalyzeManyRowsMultipleIndexes(t *testing.T) {
 	db := openAnalyzeDB(t)
 	defer db.Close()
@@ -102,41 +137,18 @@ func TestCompileAnalyzeManyRowsMultipleIndexes(t *testing.T) {
 		"CREATE INDEX mi_cat_val ON multi_idx(cat, val)",
 	)
 
-	// Insert 30 rows with 3 distinct categories.
-	for i := 0; i < 30; i++ {
-		if _, err := db.Exec("INSERT INTO multi_idx VALUES(?, ?, ?)", i, i%3, "v"); err != nil {
-			t.Fatalf("insert row %d: %v", i, err)
-		}
-	}
+	analyzeInsertRows(t, db, 30, "INSERT INTO multi_idx VALUES(?, ?, ?)", func(i int) []interface{} {
+		return []interface{}{i, i % 3, "v"}
+	})
 
 	analyzeExec(t, db, "ANALYZE multi_idx")
 
-	// Expect: 1 table-level row + 3 index rows = 4 total.
 	cnt := queryInt64(t, db, "SELECT COUNT(*) FROM sqlite_stat1 WHERE tbl='multi_idx'")
 	if cnt != 4 {
 		t.Errorf("expected 4 stat rows (1 table + 3 indexes), got %d", cnt)
 	}
 
-	// Each index stat string should start with "30" (total row count).
-	rows, err := db.Query("SELECT idx, stat FROM sqlite_stat1 WHERE tbl='multi_idx' AND idx IS NOT NULL")
-	if err != nil {
-		t.Fatalf("query index stats: %v", err)
-	}
-	defer rows.Close()
-	idxCount := 0
-	for rows.Next() {
-		var idx, stat string
-		if err := rows.Scan(&idx, &stat); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		if !strings.HasPrefix(stat, "30") {
-			t.Errorf("index %q stat %q should start with row count 30", idx, stat)
-		}
-		idxCount++
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows.Err: %v", err)
-	}
+	idxCount := analyzeCountIndexStats(t, db, "multi_idx", "30")
 	if idxCount != 3 {
 		t.Errorf("expected 3 index stat rows, got %d", idxCount)
 	}

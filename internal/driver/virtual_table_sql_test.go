@@ -7,71 +7,10 @@ import (
 	"testing"
 )
 
-// TestCreateVirtualTableFTS5 tests creating an FTS5 virtual table via SQL.
-func TestCreateVirtualTableFTS5(t *testing.T) {
-	db, err := sql.Open(DriverName, ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
-
-	// Test CREATE VIRTUAL TABLE with FTS5
-	_, err = db.Exec("CREATE VIRTUAL TABLE t1 USING fts5(content)")
-	if err != nil {
-		t.Fatalf("Failed to create FTS5 table: %v", err)
-	}
-
-	// Verify table was created by checking schema directly
-	conn, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatalf("Failed to get connection: %v", err)
-	}
-	defer conn.Close()
-
-	err = conn.Raw(func(driverConn interface{}) error {
-		c, ok := driverConn.(*Conn)
-		if !ok {
-			return nil // Skip if we can't access driver connection
-		}
-
-		// Check if table exists in schema
-		table, exists := c.schema.GetTable("t1")
-		if !exists {
-			t.Fatal("Table 't1' not found in schema")
-		}
-
-		// Verify it's a virtual table
-		if !table.IsVirtual {
-			t.Error("Table 't1' is not marked as virtual")
-		}
-
-		// Verify module name
-		if table.Module != "fts5" {
-			t.Errorf("Expected module 'fts5', got %q", table.Module)
-		}
-
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("Schema verification failed: %v", err)
-	}
-}
-
-// TestCreateVirtualTableRTree tests creating an RTree virtual table via SQL.
-func TestCreateVirtualTableRTree(t *testing.T) {
-	db, err := sql.Open(DriverName, ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
-
-	// Test CREATE VIRTUAL TABLE with RTree
-	_, err = db.Exec("CREATE VIRTUAL TABLE rt1 USING rtree(id, minx, maxx, miny, maxy)")
-	if err != nil {
-		t.Fatalf("Failed to create RTree table: %v", err)
-	}
-
-	// Verify table was created by checking schema directly
+// verifyVirtualTable checks that the named table exists in the schema,
+// is marked virtual, and uses the expected module.
+func verifyVirtualTable(t *testing.T, db *sql.DB, tableName, expectedModule string) {
+	t.Helper()
 	conn, err := db.Conn(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to get connection: %v", err)
@@ -83,25 +22,53 @@ func TestCreateVirtualTableRTree(t *testing.T) {
 		if !ok {
 			return nil
 		}
-
-		table, exists := c.schema.GetTable("rt1")
+		table, exists := c.schema.GetTable(tableName)
 		if !exists {
-			t.Fatal("Table 'rt1' not found in schema")
+			t.Fatalf("Table %q not found in schema", tableName)
 		}
-
 		if !table.IsVirtual {
-			t.Error("Table 'rt1' is not marked as virtual")
+			t.Errorf("Table %q is not marked as virtual", tableName)
 		}
-
-		if table.Module != "rtree" {
-			t.Errorf("Expected module 'rtree', got %q", table.Module)
+		if table.Module != expectedModule {
+			t.Errorf("Expected module %q, got %q", expectedModule, table.Module)
 		}
-
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("Schema verification failed: %v", err)
 	}
+}
+
+// TestCreateVirtualTableFTS5 tests creating an FTS5 virtual table via SQL.
+func TestCreateVirtualTableFTS5(t *testing.T) {
+	db, err := sql.Open(DriverName, ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec("CREATE VIRTUAL TABLE t1 USING fts5(content)")
+	if err != nil {
+		t.Fatalf("Failed to create FTS5 table: %v", err)
+	}
+
+	verifyVirtualTable(t, db, "t1", "fts5")
+}
+
+// TestCreateVirtualTableRTree tests creating an RTree virtual table via SQL.
+func TestCreateVirtualTableRTree(t *testing.T) {
+	db, err := sql.Open(DriverName, ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec("CREATE VIRTUAL TABLE rt1 USING rtree(id, minx, maxx, miny, maxy)")
+	if err != nil {
+		t.Fatalf("Failed to create RTree table: %v", err)
+	}
+
+	verifyVirtualTable(t, db, "rt1", "rtree")
 }
 
 // TestCreateVirtualTableIfNotExists tests IF NOT EXISTS clause.

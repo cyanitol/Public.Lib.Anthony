@@ -420,33 +420,26 @@ func TestCompileVtab2Coverage_EmitInterfaceValue_Nil(t *testing.T) {
 
 // TestCompileVtab2Coverage_ToFloat64Value_Float64 exercises the float64 branch
 // of toFloat64Value via a REAL FK parent column.
-func TestCompileVtab2Coverage_ToFloat64Value_Float64(t *testing.T) {
-	path := t.TempDir() + "/tf64.db"
+// vtab2OpenFKDB opens a DB with foreign keys enabled and creates parent/child tables.
+func vtab2OpenFKDB(t *testing.T, path string, parentDDL, childDDL, parentInsert, childInsert string) *sql.DB {
+	t.Helper()
 	db, err := sql.Open("sqlite_internal", path)
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
+	vtab2Exec(t, db, "PRAGMA foreign_keys = ON")
+	vtab2Exec(t, db, parentDDL)
+	vtab2Exec(t, db, childDDL)
+	vtab2Exec(t, db, parentInsert)
+	vtab2Exec(t, db, childInsert)
+	return db
+}
 
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		t.Fatalf("pragma: %v", err)
-	}
-	if _, err := db.Exec("CREATE TABLE tf64_p (score REAL PRIMARY KEY)"); err != nil {
-		t.Fatalf("create parent: %v", err)
-	}
-	if _, err := db.Exec("CREATE TABLE tf64_c (id INTEGER, score REAL REFERENCES tf64_p(score))"); err != nil {
-		t.Fatalf("create child: %v", err)
-	}
-	if _, err := db.Exec("INSERT INTO tf64_p VALUES(3.14)"); err != nil {
-		t.Fatalf("insert parent: %v", err)
-	}
-	// The FK check uses compareAfterAffinityWithCollation → toFloat64Value (float64 branch).
-	if _, err := db.Exec("INSERT INTO tf64_c VALUES(1, 3.14)"); err != nil {
-		t.Fatalf("insert child: %v", err)
-	}
-
-	// PRAGMA foreign_key_check exercises the FK check path.
+// vtab2AssertNoFKViolations runs PRAGMA foreign_key_check and asserts 0 violations.
+func vtab2AssertNoFKViolations(t *testing.T, db *sql.DB) {
+	t.Helper()
 	rows, err := db.Query("PRAGMA foreign_key_check")
 	if err != nil {
 		t.Fatalf("fk check: %v", err)
@@ -461,46 +454,24 @@ func TestCompileVtab2Coverage_ToFloat64Value_Float64(t *testing.T) {
 	}
 }
 
+func TestCompileVtab2Coverage_ToFloat64Value_Float64(t *testing.T) {
+	db := vtab2OpenFKDB(t, t.TempDir()+"/tf64.db",
+		"CREATE TABLE tf64_p (score REAL PRIMARY KEY)",
+		"CREATE TABLE tf64_c (id INTEGER, score REAL REFERENCES tf64_p(score))",
+		"INSERT INTO tf64_p VALUES(3.14)",
+		"INSERT INTO tf64_c VALUES(1, 3.14)")
+	vtab2AssertNoFKViolations(t, db)
+}
+
 // TestCompileVtab2Coverage_ToFloat64Value_Int64 exercises the int64 branch of
 // toFloat64Value via an INTEGER FK parent column.
 func TestCompileVtab2Coverage_ToFloat64Value_Int64(t *testing.T) {
-	path := t.TempDir() + "/ti64.db"
-	db, err := sql.Open("sqlite_internal", path)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { db.Close() })
-
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		t.Fatalf("pragma: %v", err)
-	}
-	if _, err := db.Exec("CREATE TABLE ti64_p (id INTEGER PRIMARY KEY)"); err != nil {
-		t.Fatalf("create parent: %v", err)
-	}
-	if _, err := db.Exec("CREATE TABLE ti64_c (id INTEGER, pid INTEGER REFERENCES ti64_p(id))"); err != nil {
-		t.Fatalf("create child: %v", err)
-	}
-	if _, err := db.Exec("INSERT INTO ti64_p VALUES(42)"); err != nil {
-		t.Fatalf("insert parent: %v", err)
-	}
-	if _, err := db.Exec("INSERT INTO ti64_c VALUES(1, 42)"); err != nil {
-		t.Fatalf("insert child: %v", err)
-	}
-
-	// PRAGMA foreign_key_check exercises toFloat64Value (int64 branch).
-	rows, err := db.Query("PRAGMA foreign_key_check")
-	if err != nil {
-		t.Fatalf("fk check: %v", err)
-	}
-	defer rows.Close()
-	var n int
-	for rows.Next() {
-		n++
-	}
-	if n != 0 {
-		t.Errorf("expected 0 FK violations, got %d", n)
-	}
+	db := vtab2OpenFKDB(t, t.TempDir()+"/ti64.db",
+		"CREATE TABLE ti64_p (id INTEGER PRIMARY KEY)",
+		"CREATE TABLE ti64_c (id INTEGER, pid INTEGER REFERENCES ti64_p(id))",
+		"INSERT INTO ti64_p VALUES(42)",
+		"INSERT INTO ti64_c VALUES(1, 42)")
+	vtab2AssertNoFKViolations(t, db)
 }
 
 // ============================================================================

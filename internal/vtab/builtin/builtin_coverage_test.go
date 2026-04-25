@@ -40,46 +40,52 @@ func buildTestSchema() *schema.Schema {
 	return sch
 }
 
-// TestSQLiteMasterLoadSchemaRows_WithRealSchema covers the *schema.Schema
-// branch inside loadSchemaRows (tables, indexes, views, triggers paths).
-func TestSQLiteMasterLoadSchemaRows_WithRealSchema(t *testing.T) {
-	t.Parallel()
-	sch := buildTestSchema()
-
+// openMasterCursor creates a SQLiteMasterCursor connected to the given schema.
+func openMasterCursor(t *testing.T, sch *schema.Schema) *SQLiteMasterCursor {
+	t.Helper()
 	module := NewSQLiteMasterModule()
 	vtable, _, err := module.Connect(sch, "sqlite_master", "main", "sqlite_master", nil)
 	if err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
-
 	cursor, err := vtable.Open()
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	defer cursor.Close()
+	t.Cleanup(func() { cursor.Close() })
+	return cursor.(*SQLiteMasterCursor)
+}
 
-	masterCursor := cursor.(*SQLiteMasterCursor)
+// verifyMasterRow checks a single cursor row: its rowid and all five columns.
+func verifyMasterRow(t *testing.T, mc *SQLiteMasterCursor, wantRowid int) {
+	t.Helper()
+	rowid, err := mc.Rowid()
+	if err != nil {
+		t.Errorf("Rowid failed: %v", err)
+	}
+	if rowid != int64(wantRowid) {
+		t.Errorf("unexpected rowid: want %d got %d", wantRowid, rowid)
+	}
+	for col := 0; col <= 4; col++ {
+		if _, err := mc.Column(col); err != nil {
+			t.Errorf("Column(%d) failed: %v", col, err)
+		}
+	}
+}
 
-	// No filter: should return all four schema objects.
+// TestSQLiteMasterLoadSchemaRows_WithRealSchema covers the *schema.Schema
+// branch inside loadSchemaRows (tables, indexes, views, triggers paths).
+func TestSQLiteMasterLoadSchemaRows_WithRealSchema(t *testing.T) {
+	t.Parallel()
+	masterCursor := openMasterCursor(t, buildTestSchema())
+
 	if err := masterCursor.Filter(0, "", nil); err != nil {
 		t.Fatalf("Filter failed: %v", err)
 	}
 
 	rowCount := 0
 	for !masterCursor.EOF() {
-		rowid, err := masterCursor.Rowid()
-		if err != nil {
-			t.Errorf("Rowid failed: %v", err)
-		}
-		if rowid != int64(rowCount) {
-			t.Errorf("unexpected rowid: want %d got %d", rowCount, rowid)
-		}
-
-		for col := 0; col <= 4; col++ {
-			if _, err := masterCursor.Column(col); err != nil {
-				t.Errorf("Column(%d) failed: %v", col, err)
-			}
-		}
+		verifyMasterRow(t, masterCursor, rowCount)
 		rowCount++
 		if err := masterCursor.Next(); err != nil {
 			t.Errorf("Next failed: %v", err)

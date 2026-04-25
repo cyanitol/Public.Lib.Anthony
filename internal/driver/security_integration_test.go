@@ -60,62 +60,61 @@ func TestAttachDatabasePathTraversal(t *testing.T) {
 	}
 }
 
-// TestVacuumIntoPathTraversal verifies that VACUUM INTO blocks path traversal attacks
-func TestVacuumIntoPathTraversal(t *testing.T) {
-	// Create a temporary directory for testing
+// openSecurityTestDB creates a temp database with a test table for security tests.
+func openSecurityTestDB(t *testing.T) *sql.DB {
+	t.Helper()
 	tmpDir, err := os.MkdirTemp("", "security_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
 
-	// Create main database
 	mainDB := filepath.Join(tmpDir, "main.db")
 	db, err := sql.Open(DriverName, mainDB)
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer db.Close()
-
-	// Create a simple table
-	_, err = db.Exec("CREATE TABLE test (id INTEGER, value TEXT)")
-	if err != nil {
+	if _, err := db.Exec("CREATE TABLE test (id INTEGER, value TEXT)"); err != nil {
 		t.Fatalf("Failed to create table: %v", err)
 	}
-
-	_, err = db.Exec("INSERT INTO test (id, value) VALUES (1, 'hello')")
-	if err != nil {
+	if _, err := db.Exec("INSERT INTO test (id, value) VALUES (1, 'hello')"); err != nil {
 		t.Fatalf("Failed to insert data: %v", err)
 	}
+	return db
+}
 
-	// Test 1: Attempt path traversal with VACUUM INTO
-	_, err = db.Exec("VACUUM INTO '../../../tmp/attack.db'")
-	if err == nil {
-		t.Error("Expected VACUUM INTO to block path traversal, but it succeeded")
-	}
+// TestVacuumIntoPathTraversal verifies that VACUUM INTO blocks path traversal attacks
+func TestVacuumIntoPathTraversal(t *testing.T) {
+	db := openSecurityTestDB(t)
+	defer db.Close()
 
-	// Test 2: Attempt null byte injection
-	// Note: The null byte in the SQL string might be handled by the parser
-	testPath := "test\x00.db"
-	query := "VACUUM INTO ?"
-	_, err = db.Exec(query, testPath)
-	if err == nil {
-		t.Error("Expected VACUUM INTO to block null byte injection, but it succeeded")
-	} else {
-		t.Logf("VACUUM INTO null byte test correctly blocked: %v", err)
-	}
+	t.Run("path_traversal", func(t *testing.T) {
+		_, err := db.Exec("VACUUM INTO '../../../tmp/attack.db'")
+		if err == nil {
+			t.Error("Expected VACUUM INTO to block path traversal, but it succeeded")
+		}
+	})
 
-	// Test 3: Attempt absolute path
-	_, err = db.Exec("VACUUM INTO '/tmp/attack.db'")
-	if err == nil {
-		t.Error("Expected VACUUM INTO to block absolute path, but it succeeded")
-	}
+	t.Run("null_byte_injection", func(t *testing.T) {
+		_, err := db.Exec("VACUUM INTO ?", "test\x00.db")
+		if err == nil {
+			t.Error("Expected VACUUM INTO to block null byte injection, but it succeeded")
+		}
+	})
 
-	// Test 4: Valid relative path should work
-	_, err = db.Exec("VACUUM INTO 'backup.db'")
-	if err != nil {
-		t.Logf("VACUUM INTO with valid path returned error: %v (this may be expected due to sandbox configuration)", err)
-	}
+	t.Run("absolute_path", func(t *testing.T) {
+		_, err := db.Exec("VACUUM INTO '/tmp/attack.db'")
+		if err == nil {
+			t.Error("Expected VACUUM INTO to block absolute path, but it succeeded")
+		}
+	})
+
+	t.Run("valid_relative_path", func(t *testing.T) {
+		_, err := db.Exec("VACUUM INTO 'backup.db'")
+		if err != nil {
+			t.Logf("VACUUM INTO with valid path returned error: %v (this may be expected due to sandbox configuration)", err)
+		}
+	})
 }
 
 // TestSecurityConfigDefaults verifies that security config is properly initialized

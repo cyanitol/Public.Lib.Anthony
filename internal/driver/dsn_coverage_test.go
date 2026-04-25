@@ -93,7 +93,8 @@ func TestDSNCoverage_parseQueryParameters_BoolsAndStrings(t *testing.T) {
 
 // TestDSNCoverage_parseParameter_altKeys uses alternate key spellings to cover
 // additional branches in parseStringParameter and parseNumericParameter.
-func TestDSNCoverage_parseParameter_altKeys(t *testing.T) {
+func dsnCoverageParseAltKeys(t *testing.T) *driver.DriverConfig {
+	t.Helper()
 	dsn := "file.db?journalmode=wal&sync=full&cachesize=512" +
 		"&pagesize=8192&walautocheckpoint=500&maxpagecount=10000" +
 		"&busytimeout=3000&querytimeout=1500" +
@@ -104,8 +105,11 @@ func TestDSNCoverage_parseParameter_altKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseDSN (alt keys) error: %v", err)
 	}
+	return parsed.Config
+}
 
-	cfg := parsed.Config
+func TestDSNCoverage_parseParameter_altKeys_PagerNumerics(t *testing.T) {
+	cfg := dsnCoverageParseAltKeys(t)
 	if cfg.Pager.JournalMode != "wal" {
 		t.Errorf("JournalMode want wal, got %s", cfg.Pager.JournalMode)
 	}
@@ -118,12 +122,20 @@ func TestDSNCoverage_parseParameter_altKeys(t *testing.T) {
 	if cfg.Pager.PageSize != 8192 {
 		t.Errorf("PageSize want 8192, got %d", cfg.Pager.PageSize)
 	}
+}
+
+func TestDSNCoverage_parseParameter_altKeys_Timeouts(t *testing.T) {
+	cfg := dsnCoverageParseAltKeys(t)
 	if cfg.Pager.BusyTimeout != 3000*time.Millisecond {
 		t.Errorf("BusyTimeout want 3s, got %v", cfg.Pager.BusyTimeout)
 	}
 	if cfg.QueryTimeout != 1500*time.Millisecond {
 		t.Errorf("QueryTimeout want 1.5s, got %v", cfg.QueryTimeout)
 	}
+}
+
+func TestDSNCoverage_parseParameter_altKeys_Bools(t *testing.T) {
+	cfg := dsnCoverageParseAltKeys(t)
 	if !cfg.EnableForeignKeys {
 		t.Error("EnableForeignKeys want true")
 	}

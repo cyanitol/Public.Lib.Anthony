@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"database/sql"
 	"fmt"
+	"hash"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,7 +30,16 @@ func dbChecksum(t *testing.T, db *sql.DB) string {
 	t.Helper()
 	h := md5.New()
 
-	// Get all table names
+	tables := dbListTables(t, db)
+	for _, table := range tables {
+		dbChecksumTable(h, db, table)
+	}
+
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func dbListTables(t *testing.T, db *sql.DB) []string {
+	t.Helper()
 	rows, err := db.Query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
 	if err != nil {
 		t.Fatalf("failed to query tables: %v", err)
@@ -44,29 +54,27 @@ func dbChecksum(t *testing.T, db *sql.DB) string {
 		}
 		tables = append(tables, name)
 	}
+	return tables
+}
 
-	// Calculate checksum of all table contents
-	for _, table := range tables {
-		tableRows, err := db.Query(fmt.Sprintf("SELECT * FROM %s ORDER BY rowid", table))
-		if err != nil {
-			continue // Skip tables with issues
-		}
-		cols, _ := tableRows.Columns()
-		for tableRows.Next() {
-			values := make([]interface{}, len(cols))
-			valuePtrs := make([]interface{}, len(cols))
-			for i := range values {
-				valuePtrs[i] = &values[i]
-			}
-			tableRows.Scan(valuePtrs...)
-			for _, v := range values {
-				fmt.Fprintf(h, "%v", v)
-			}
-		}
-		tableRows.Close()
+func dbChecksumTable(h hash.Hash, db *sql.DB, table string) {
+	tableRows, err := db.Query(fmt.Sprintf("SELECT * FROM %s ORDER BY rowid", table))
+	if err != nil {
+		return // Skip tables with issues
 	}
-
-	return fmt.Sprintf("%x", h.Sum(nil))
+	defer tableRows.Close()
+	cols, _ := tableRows.Columns()
+	for tableRows.Next() {
+		values := make([]interface{}, len(cols))
+		valuePtrs := make([]interface{}, len(cols))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		tableRows.Scan(valuePtrs...)
+		for _, v := range values {
+			fmt.Fprintf(h, "%v", v)
+		}
+	}
 }
 
 // TestVacuum_Basic tests basic VACUUM operation (vacuum.test 1.1-1.3)
@@ -362,40 +370,34 @@ func TestVacuum_ComplexTableNames(t *testing.T) {
 
 // TestVacuum_WithBlobs tests VACUUM preserves blobs (vacuum.test 6.3-6.4)
 func TestVacuum_WithBlobs(t *testing.T) {
-
 	db, _ := setupVacuumTestDB(t)
 	defer db.Close()
 
-	_, err := db.Exec(`CREATE TABLE t1(a BLOB, b TEXT)`)
-	if err != nil {
-		t.Fatalf("failed to create table: %v", err)
-	}
+	vacuumExecOrFatal(t, db, `CREATE TABLE t1(a BLOB, b TEXT)`)
 
 	blobData := []byte{0x00, 0x11, 0x22, 0x33}
-	_, err = db.Exec(`INSERT INTO t1 VALUES(?, NULL)`, blobData)
-	if err != nil {
+	if _, err := db.Exec(`INSERT INTO t1 VALUES(?, NULL)`, blobData); err != nil {
 		t.Fatalf("failed to insert blob: %v", err)
 	}
 
-	// VACUUM
-	_, err = db.Exec("VACUUM")
-	if err != nil {
-		t.Fatalf("VACUUM failed: %v", err)
-	}
+	vacuumExecOrFatal(t, db, "VACUUM")
 
-	// Verify blob preserved
 	var retrieved []byte
-	err = db.QueryRow(`SELECT a FROM t1`).Scan(&retrieved)
-	if err != nil {
+	if err := db.QueryRow(`SELECT a FROM t1`).Scan(&retrieved); err != nil {
 		t.Fatalf("query after VACUUM failed: %v", err)
 	}
 
-	if len(retrieved) != len(blobData) {
-		t.Errorf("blob length changed: got %d, want %d", len(retrieved), len(blobData))
+	vacuumAssertBlobEqual(t, retrieved, blobData)
+}
+
+func vacuumAssertBlobEqual(t *testing.T, got, want []byte) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Errorf("blob length changed: got %d, want %d", len(got), len(want))
 	}
-	for i := range blobData {
-		if i < len(retrieved) && retrieved[i] != blobData[i] {
-			t.Errorf("blob data corrupted at position %d: got %x, want %x", i, retrieved[i], blobData[i])
+	for i := range want {
+		if i < len(got) && got[i] != want[i] {
+			t.Errorf("blob data corrupted at position %d: got %x, want %x", i, got[i], want[i])
 		}
 	}
 }
@@ -877,50 +879,29 @@ func TestVacuum_PreservesTriggers(t *testing.T) {
 	db, _ := setupVacuumTestDB(t)
 	defer db.Close()
 
-	// Create table and trigger
-	_, err := db.Exec(`
+	vacuumExecOrFatal(t, db, `
 		CREATE TABLE t1(a INTEGER);
 		CREATE TABLE t2(b INTEGER);
 		CREATE TRIGGER r1 AFTER INSERT ON t1 BEGIN INSERT INTO t2 VALUES(NEW.a * 10); END;
 	`)
-	if err != nil {
-		t.Fatalf("failed to setup: %v", err)
-	}
 
-	// Test trigger before VACUUM
-	_, err = db.Exec("INSERT INTO t1 VALUES(5)")
-	if err != nil {
-		t.Fatalf("insert before VACUUM failed: %v", err)
-	}
+	vacuumExecOrFatal(t, db, "INSERT INTO t1 VALUES(5)")
+	vacuumAssertInt(t, db, "SELECT b FROM t2", 50, "trigger before VACUUM")
 
-	var val int
-	err = db.QueryRow("SELECT b FROM t2").Scan(&val)
-	if err != nil {
-		t.Fatalf("query t2 before VACUUM failed: %v", err)
-	}
-	if val != 50 {
-		t.Errorf("trigger before VACUUM failed: got %d, want 50", val)
-	}
+	vacuumExecOrFatal(t, db, "VACUUM")
 
-	// VACUUM
-	_, err = db.Exec("VACUUM")
-	if err != nil {
-		t.Fatalf("VACUUM failed: %v", err)
-	}
+	vacuumExecOrFatal(t, db, "INSERT INTO t1 VALUES(7)")
+	vacuumAssertInt(t, db, "SELECT COUNT(*) FROM t2 WHERE b = 70", 1, "trigger after VACUUM")
+}
 
-	// Test trigger after VACUUM
-	_, err = db.Exec("INSERT INTO t1 VALUES(7)")
-	if err != nil {
-		t.Fatalf("insert after VACUUM failed: %v", err)
+func vacuumAssertInt(t *testing.T, db *sql.DB, query string, want int, label string) {
+	t.Helper()
+	var got int
+	if err := db.QueryRow(query).Scan(&got); err != nil {
+		t.Fatalf("%s query failed: %v", label, err)
 	}
-
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM t2 WHERE b = 70").Scan(&count)
-	if err != nil {
-		t.Fatalf("query t2 after VACUUM failed: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("trigger after VACUUM failed: count=%d", count)
+	if got != want {
+		t.Errorf("%s: got %d, want %d", label, got, want)
 	}
 }
 
@@ -1315,42 +1296,36 @@ func TestVacuum_TempDatabase(t *testing.T) {
 
 // TestVacuum_WithCollation tests VACUUM with custom collation (vacuum2.test 6.0-6.3)
 func TestVacuum_WithCollation(t *testing.T) {
-
 	db, _ := setupVacuumTestDB(t)
 	defer db.Close()
 
-	// Create table with default collation
-	_, err := db.Exec(`
+	vacuumExecOrFatal(t, db, `
 		CREATE TABLE t1(x TEXT PRIMARY KEY, y TEXT);
 		INSERT INTO t1 VALUES('aaa', 'one');
 		INSERT INTO t1 VALUES('bbb', 'two');
 		INSERT INTO t1 VALUES('ccc', 'three');
 	`)
-	if err != nil {
-		t.Fatalf("failed to setup: %v", err)
-	}
 
 	checksumBefore := dbChecksum(t, db)
 
-	// VACUUM should preserve collation
-	_, err = db.Exec("VACUUM")
-	if err != nil {
-		t.Fatalf("VACUUM failed: %v", err)
-	}
+	vacuumExecOrFatal(t, db, "VACUUM")
 
 	checksumAfter := dbChecksum(t, db)
 	if checksumBefore != checksumAfter {
 		t.Errorf("data changed after VACUUM")
 	}
 
-	// Verify ordering preserved
-	rows, err := db.Query("SELECT x FROM t1 ORDER BY x")
+	vacuumAssertOrdering(t, db, "SELECT x FROM t1 ORDER BY x", []string{"aaa", "bbb", "ccc"})
+}
+
+func vacuumAssertOrdering(t *testing.T, db *sql.DB, query string, expected []string) {
+	t.Helper()
+	rows, err := db.Query(query)
 	if err != nil {
-		t.Fatalf("query after VACUUM failed: %v", err)
+		t.Fatalf("query failed: %v", err)
 	}
 	defer rows.Close()
 
-	expected := []string{"aaa", "bbb", "ccc"}
 	i := 0
 	for rows.Next() {
 		var x string

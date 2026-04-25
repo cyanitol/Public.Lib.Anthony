@@ -4167,6 +4167,19 @@ func findFirstLeafEntry(root *Node) *Entry {
 	return nil
 }
 
+// verifyParentPointers checks that all children of a non-leaf root point back to root.
+func verifyParentPointers(t *testing.T, root *Node) {
+	t.Helper()
+	if root == nil || root.Count() == 0 || root.IsLeaf {
+		return
+	}
+	for _, e := range root.Entries {
+		if e.Child.Parent != root {
+			t.Error("Parent pointer not updated correctly after underflow")
+		}
+	}
+}
+
 func TestHandleUnderflowRecursive(t *testing.T) {
 	t.Parallel()
 	root := NewLeafNode()
@@ -4186,13 +4199,7 @@ func TestHandleUnderflowRecursive(t *testing.T) {
 		}
 	}
 
-	if root != nil && root.Count() > 0 && !root.IsLeaf {
-		for _, e := range root.Entries {
-			if e.Child.Parent != root {
-				t.Error("Parent pointer not updated correctly after underflow")
-			}
-		}
-	}
+	verifyParentPointers(t, root)
 }
 
 // TestStrBulkLoadEdgeCases tests STR bulk loading edge cases.
@@ -4748,45 +4755,35 @@ func TestParseCoordinateAllTypes(t *testing.T) {
 	module := NewRTreeModule()
 	table, _, _ := module.Create(nil, "rtree", "main", "test",
 		[]string{"id", "minX", "maxX", "minY", "maxY"})
-	rtree := table.(*RTree)
+	rt := table.(*RTree)
 
-	// Test int64
-	coord, err := rtree.parseCoordinate(int64(42), 0)
-	if err != nil {
-		t.Errorf("Failed to parse int64: %v", err)
+	tests := []struct {
+		name    string
+		input   interface{}
+		want    float64
+		wantErr bool
+	}{
+		{"int64", int64(42), 42.0, false},
+		{"float64", 3.14, 3.14, false},
+		{"string", "2.5", 2.5, false},
+		{"invalid_string", "invalid", 0, true},
+		{"unsupported_type", []int{1, 2}, 0, true},
 	}
-	if coord != 42.0 {
-		t.Errorf("Expected 42.0, got %f", coord)
-	}
-
-	// Test float64
-	coord, err = rtree.parseCoordinate(3.14, 0)
-	if err != nil {
-		t.Errorf("Failed to parse float64: %v", err)
-	}
-	if coord != 3.14 {
-		t.Errorf("Expected 3.14, got %f", coord)
-	}
-
-	// Test string
-	coord, err = rtree.parseCoordinate("2.5", 0)
-	if err != nil {
-		t.Errorf("Failed to parse string: %v", err)
-	}
-	if coord != 2.5 {
-		t.Errorf("Expected 2.5, got %f", coord)
-	}
-
-	// Test invalid string
-	_, err = rtree.parseCoordinate("invalid", 0)
-	if err == nil {
-		t.Error("Expected error for invalid string")
-	}
-
-	// Test unsupported type
-	_, err = rtree.parseCoordinate([]int{1, 2}, 0)
-	if err == nil {
-		t.Error("Expected error for unsupported type")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			coord, err := rt.parseCoordinate(tt.input, 0)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("Expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			} else if coord != tt.want {
+				t.Errorf("Expected %f, got %f", tt.want, coord)
+			}
+		})
 	}
 }
 

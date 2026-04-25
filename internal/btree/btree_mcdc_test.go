@@ -907,79 +907,58 @@ func TestMCDC_DetermineParentCellToRemove(t *testing.T) {
 //   Row 3: A=F, B=F → proceeds with cell replacement
 // ---------------------------------------------------------------------------
 
-func TestMCDC_ReplaceSeparatorCell_BoundsCheck(t *testing.T) {
+// buildParentPageForBoundsCheck builds a parent btree page with cells
+// by inserting rows to force a split.
+func buildParentPageForBoundsCheck(t *testing.T) *BtreePage {
+	t.Helper()
+	bt := NewBtree(4096)
+	rootPage, err := bt.CreateTable()
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+	cursor := NewCursor(bt, rootPage)
+	for i := int64(1); i <= 50; i++ {
+		payload := make([]byte, 80)
+		cursor.Insert(i, payload)
+	}
+	pageData, err := bt.GetPage(cursor.RootPage)
+	if err != nil {
+		t.Fatalf("GetPage: %v", err)
+	}
+	page, err := NewBtreePage(cursor.RootPage, pageData, bt.UsableSize)
+	if err != nil {
+		t.Fatalf("NewBtreePage: %v", err)
+	}
+	return page
+}
+
+func TestMCDC_ReplaceSeparatorCell_BoundsCheck_NegativeIndex(t *testing.T) {
 	t.Parallel()
-
-	// Build a parent btree page that has exactly one cell so we can exercise the bounds.
-	buildParentPage := func(t *testing.T) *BtreePage {
-		t.Helper()
-		bt := NewBtree(4096)
-		rootPage, err := bt.CreateTable()
-		if err != nil {
-			t.Fatalf("CreateTable: %v", err)
-		}
-		// Insert a few rows to force a split so we get an interior root.
-		cursor := NewCursor(bt, rootPage)
-		for i := int64(1); i <= 50; i++ {
-			payload := make([]byte, 80)
-			cursor.Insert(i, payload)
-		}
-		// The root may now be interior; grab the current root page as a BtreePage.
-		pageData, err := bt.GetPage(cursor.RootPage)
-		if err != nil {
-			t.Fatalf("GetPage: %v", err)
-		}
-		page, err := NewBtreePage(cursor.RootPage, pageData, bt.UsableSize)
-		if err != nil {
-			t.Fatalf("NewBtreePage: %v", err)
-		}
-		return page
+	c := &BtCursor{Btree: NewBtree(4096)}
+	page := buildParentPageForBoundsCheck(t)
+	// A=T: separatorIndex < 0 → early return nil
+	if err := c.replaceSeparatorCell(page, -1, 1, 1); err != nil {
+		t.Errorf("replaceSeparatorCell() unexpected error = %v", err)
 	}
+}
 
-	tests := []struct {
-		name           string
-		separatorIndex int
-		wantErr        bool
-	}{
-		{
-			// A=T: separatorIndex < 0 → early return nil
-			name:           "A=T B=F negativeIndex: returns nil early",
-			separatorIndex: -1,
-			wantErr:        false,
-		},
-		{
-			// A=F, B=T: separatorIndex >= NumCells → early return nil
-			name:           "A=F B=T indexTooLarge: returns nil early",
-			separatorIndex: 10000,
-			wantErr:        false,
-		},
-		{
-			// A=F, B=F: valid index → attempts replacement (may succeed or fail based on page state)
-			// We test only that it does NOT early-return nil; test just asserts no panic.
-			name:           "A=F B=F validIndex: attempts replacement",
-			separatorIndex: 0,
-			wantErr:        false, // Either succeeds or returns an op error; not a bounds-check bail
-		},
+func TestMCDC_ReplaceSeparatorCell_BoundsCheck_IndexTooLarge(t *testing.T) {
+	t.Parallel()
+	c := &BtCursor{Btree: NewBtree(4096)}
+	page := buildParentPageForBoundsCheck(t)
+	// A=F, B=T: separatorIndex >= NumCells → early return nil
+	if err := c.replaceSeparatorCell(page, 10000, 1, 1); err != nil {
+		t.Errorf("replaceSeparatorCell() unexpected error = %v", err)
 	}
+}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			c := &BtCursor{Btree: NewBtree(4096)}
-			page := buildParentPage(t)
-			err := c.replaceSeparatorCell(page, tt.separatorIndex, 1, 1)
-			if tt.separatorIndex < 0 || tt.separatorIndex >= int(page.Header.NumCells) {
-				// Bounds-check early return: always nil
-				if err != nil {
-					t.Errorf("replaceSeparatorCell() unexpected error = %v", err)
-				}
-			}
-			// For valid index case we allow any error from the actual replacement attempt;
-			// we just want to confirm no panic and the bounds check didn't fire.
-			_ = err
-		})
-	}
+func TestMCDC_ReplaceSeparatorCell_BoundsCheck_ValidIndex(t *testing.T) {
+	t.Parallel()
+	c := &BtCursor{Btree: NewBtree(4096)}
+	page := buildParentPageForBoundsCheck(t)
+	// A=F, B=F: valid index → attempts replacement (may succeed or fail).
+	// We just confirm no panic and the bounds check didn't fire.
+	_ = c.replaceSeparatorCell(page, 0, 1, 1)
 }
 
 // ---------------------------------------------------------------------------

@@ -249,6 +249,20 @@ func parseWindowFunc(t *testing.T, sql string) *FunctionExpr {
 	return funcExpr
 }
 
+// assertWindowOver checks common Over clause fields.
+func assertWindowOver(t *testing.T, over *WindowSpec, wantPartitions, wantOrders int) {
+	t.Helper()
+	if over == nil {
+		t.Fatal("Expected Over clause to be non-nil")
+	}
+	if len(over.PartitionBy) != wantPartitions {
+		t.Errorf("Expected %d partition by expression(s), got %d", wantPartitions, len(over.PartitionBy))
+	}
+	if len(over.OrderBy) != wantOrders {
+		t.Errorf("Expected %d order by term(s), got %d", wantOrders, len(over.OrderBy))
+	}
+}
+
 // TestWindowFunctionAST tests that window functions create correct AST structures
 func TestWindowFunctionAST(t *testing.T) {
 	t.Parallel()
@@ -259,15 +273,7 @@ func TestWindowFunctionAST(t *testing.T) {
 	if funcExpr.Name != "SUM" {
 		t.Errorf("Expected function name SUM, got %s", funcExpr.Name)
 	}
-	if funcExpr.Over == nil {
-		t.Fatal("Expected Over clause to be non-nil")
-	}
-	if len(funcExpr.Over.PartitionBy) != 1 {
-		t.Errorf("Expected 1 partition by expression, got %d", len(funcExpr.Over.PartitionBy))
-	}
-	if len(funcExpr.Over.OrderBy) != 1 {
-		t.Errorf("Expected 1 order by term, got %d", len(funcExpr.Over.OrderBy))
-	}
+	assertWindowOver(t, funcExpr.Over, 1, 1)
 	if funcExpr.Over.Frame == nil {
 		t.Fatal("Expected Frame to be non-nil")
 	}

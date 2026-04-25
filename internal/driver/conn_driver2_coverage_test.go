@@ -179,6 +179,19 @@ func TestConnDriver2Coverage_MemoryPagerProviderMarkDirtySuccess(t *testing.T) {
 // connection, creates a table, inserts a row, and queries it back.  This
 // exercises the full chain: createMemoryConnection → openDatabase →
 // ensureMasterPage → memoryPagerProvider.MarkDirty.
+// connDriver2ExecStmt prepares and executes a SQL statement on a Conn.
+func connDriver2ExecStmt(t *testing.T, c *Conn, sql string) {
+	t.Helper()
+	stmt, err := c.Prepare(sql)
+	if err != nil {
+		t.Fatalf("Prepare %q: %v", sql, err)
+	}
+	if _, err := stmt.Exec(nil); err != nil {
+		t.Fatalf("Exec %q: %v", sql, err)
+	}
+	stmt.Close()
+}
+
 func TestConnDriver2Coverage_MemoryDBSchemaIntegration(t *testing.T) {
 	d := &Driver{}
 	raw, err := d.Open(":memory:")
@@ -189,23 +202,8 @@ func TestConnDriver2Coverage_MemoryDBSchemaIntegration(t *testing.T) {
 
 	c := raw.(*Conn)
 
-	createStmt, err := c.Prepare("CREATE TABLE cov2(id INTEGER PRIMARY KEY, val TEXT)")
-	if err != nil {
-		t.Fatalf("Prepare CREATE TABLE: %v", err)
-	}
-	if _, err := createStmt.Exec(nil); err != nil {
-		t.Fatalf("Exec CREATE TABLE: %v", err)
-	}
-	createStmt.Close()
-
-	insStmt, err := c.Prepare("INSERT INTO cov2 VALUES (1, 'hello')")
-	if err != nil {
-		t.Fatalf("Prepare INSERT: %v", err)
-	}
-	if _, err := insStmt.Exec(nil); err != nil {
-		t.Fatalf("Exec INSERT: %v", err)
-	}
-	insStmt.Close()
+	connDriver2ExecStmt(t, c, "CREATE TABLE cov2(id INTEGER PRIMARY KEY, val TEXT)")
+	connDriver2ExecStmt(t, c, "INSERT INTO cov2 VALUES (1, 'hello')")
 
 	selStmt, err := c.Prepare("SELECT val FROM cov2 WHERE id = 1")
 	if err != nil {

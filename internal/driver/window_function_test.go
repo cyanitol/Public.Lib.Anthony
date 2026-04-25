@@ -65,23 +65,8 @@ func TestWindowFunctionRowNumber(t *testing.T) {
 }
 
 // TestWindowFunctionRowNumberWithColumns tests row_number() alongside regular columns
-func TestWindowFunctionRowNumberWithColumns(t *testing.T) {
-	db := windowFuncSetupDB(t,
-		"CREATE TABLE products (id INTEGER, name TEXT, price REAL)",
-		[]string{
-			"INSERT INTO products (id, name, price) VALUES (10, 'Widget', 9.99)",
-			"INSERT INTO products (id, name, price) VALUES (20, 'Gadget', 19.99)",
-			"INSERT INTO products (id, name, price) VALUES (30, 'Doohickey', 14.99)",
-		})
-	defer db.Close()
-
-	rows, err := db.Query("SELECT name, row_number() OVER (ORDER BY id) FROM products")
-	if err != nil {
-		t.Fatalf("Failed to execute window function query: %v", err)
-	}
-	defer rows.Close()
-
-	names := []string{"Widget", "Gadget", "Doohickey"}
+func windowFuncVerifyNameAndRowNum(t *testing.T, rows *sql.Rows, names []string) {
+	t.Helper()
 	i := 0
 	for rows.Next() {
 		var name string
@@ -105,4 +90,23 @@ func TestWindowFunctionRowNumberWithColumns(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("Error iterating rows: %v", err)
 	}
+}
+
+func TestWindowFunctionRowNumberWithColumns(t *testing.T) {
+	db := windowFuncSetupDB(t,
+		"CREATE TABLE products (id INTEGER, name TEXT, price REAL)",
+		[]string{
+			"INSERT INTO products (id, name, price) VALUES (10, 'Widget', 9.99)",
+			"INSERT INTO products (id, name, price) VALUES (20, 'Gadget', 19.99)",
+			"INSERT INTO products (id, name, price) VALUES (30, 'Doohickey', 14.99)",
+		})
+	defer db.Close()
+
+	rows, err := db.Query("SELECT name, row_number() OVER (ORDER BY id) FROM products")
+	if err != nil {
+		t.Fatalf("Failed to execute window function query: %v", err)
+	}
+	defer rows.Close()
+
+	windowFuncVerifyNameAndRowNum(t, rows, []string{"Widget", "Gadget", "Doohickey"})
 }

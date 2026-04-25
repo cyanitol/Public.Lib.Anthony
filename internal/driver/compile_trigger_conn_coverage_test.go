@@ -253,6 +253,19 @@ func TestCompileTriggerConn_EnsureMasterPageAfterTable(t *testing.T) {
 // or direct ConnRowReader construction from a live Conn.
 // ============================================================================
 
+// trigConnExecStmt prepares and executes a SQL statement on a Conn.
+func trigConnExecStmt(t *testing.T, c *Conn, sql string) {
+	t.Helper()
+	stmt, err := c.Prepare(sql)
+	if err != nil {
+		t.Fatalf("prepare %q: %v", sql, err)
+	}
+	if _, err := stmt.Exec(nil); err != nil {
+		t.Fatalf("exec %q: %v", sql, err)
+	}
+	stmt.Close()
+}
+
 func TestCompileTriggerConn_RowExists(t *testing.T) {
 	t.Parallel()
 	drv := &Driver{}
@@ -264,24 +277,8 @@ func TestCompileTriggerConn_RowExists(t *testing.T) {
 
 	c := conn.(*Conn)
 
-	// Create a table and insert a row so RowExists has something to find.
-	stmt, err := c.Prepare("CREATE TABLE t(id INTEGER PRIMARY KEY, val TEXT)")
-	if err != nil {
-		t.Fatalf("prepare create: %v", err)
-	}
-	if _, err := stmt.Exec(nil); err != nil {
-		t.Fatalf("exec create: %v", err)
-	}
-	stmt.Close()
-
-	stmt, err = c.Prepare("INSERT INTO t VALUES(1, 'hello')")
-	if err != nil {
-		t.Fatalf("prepare insert: %v", err)
-	}
-	if _, err := stmt.Exec(nil); err != nil {
-		t.Fatalf("exec insert: %v", err)
-	}
-	stmt.Close()
+	trigConnExecStmt(t, c, "CREATE TABLE t(id INTEGER PRIMARY KEY, val TEXT)")
+	trigConnExecStmt(t, c, "INSERT INTO t VALUES(1, 'hello')")
 
 	rr := &ConnRowReader{conn: c}
 

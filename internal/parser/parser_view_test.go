@@ -226,70 +226,26 @@ func TestParseDropView(t *testing.T) {
 	testParseDropViewErrors(t)
 }
 
+// assertDropView parses a DROP VIEW statement and checks name and IfExists fields.
+func assertDropView(t *testing.T, label, sql, wantName string, wantIfExists bool) {
+	t.Helper()
+	runDropViewSubtest(t, label, sql, func(t *testing.T, stmt *DropViewStmt) {
+		if stmt.Name != wantName {
+			t.Errorf("expected view name %q, got %q", wantName, stmt.Name)
+		}
+		if stmt.IfExists != wantIfExists {
+			t.Errorf("expected IfExists=%v, got %v", wantIfExists, stmt.IfExists)
+		}
+	})
+}
+
 func testParseDropViewSuccess(t *testing.T) {
 	t.Helper()
-	tests := []struct {
-		name  string
-		sql   string
-		check func(*testing.T, *DropViewStmt)
-	}{
-		{
-			name: "simple drop view",
-			sql:  "DROP VIEW v",
-			check: func(t *testing.T, stmt *DropViewStmt) {
-				if stmt.Name != "v" {
-					t.Errorf("expected view name 'v', got %q", stmt.Name)
-				}
-				if stmt.IfExists {
-					t.Error("expected IfExists to be false")
-				}
-			},
-		},
-		{
-			name: "drop view with IF EXISTS",
-			sql:  "DROP VIEW IF EXISTS v",
-			check: func(t *testing.T, stmt *DropViewStmt) {
-				if stmt.Name != "v" {
-					t.Errorf("expected view name 'v', got %q", stmt.Name)
-				}
-				if !stmt.IfExists {
-					t.Error("expected IfExists to be true")
-				}
-			},
-		},
-		{
-			name: "drop view with complex name",
-			sql:  "DROP VIEW user_orders_view",
-			check: func(t *testing.T, stmt *DropViewStmt) {
-				if stmt.Name != "user_orders_view" {
-					t.Errorf("expected view name 'user_orders_view', got %q", stmt.Name)
-				}
-			},
-		},
-		{
-			name: "quoted view name",
-			sql:  `DROP VIEW "my view"`,
-			check: func(t *testing.T, stmt *DropViewStmt) {
-				if stmt.Name != "my view" {
-					t.Errorf("expected view name 'my view', got %q", stmt.Name)
-				}
-			},
-		},
-		{
-			name: "backtick quoted view name",
-			sql:  "DROP VIEW `my_view`",
-			check: func(t *testing.T, stmt *DropViewStmt) {
-				if stmt.Name != "my_view" {
-					t.Errorf("expected view name 'my_view', got %q", stmt.Name)
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		runDropViewSubtest(t, tt.name, tt.sql, tt.check)
-	}
+	assertDropView(t, "simple drop view", "DROP VIEW v", "v", false)
+	assertDropView(t, "drop view with IF EXISTS", "DROP VIEW IF EXISTS v", "v", true)
+	assertDropView(t, "drop view with complex name", "DROP VIEW user_orders_view", "user_orders_view", false)
+	assertDropView(t, "quoted view name", `DROP VIEW "my view"`, "my view", false)
+	assertDropView(t, "backtick quoted view name", "DROP VIEW `my_view`", "my_view", false)
 }
 
 func testParseDropViewErrors(t *testing.T) {

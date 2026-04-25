@@ -2,6 +2,7 @@
 package driver
 
 import (
+	"database/sql"
 	"testing"
 )
 
@@ -301,33 +302,39 @@ func TestMCDC_IsPragmaCountStar(t *testing.T) {
 			for _, s := range splitSemicolon(tt.setup) {
 				mustExec(t, db, s)
 			}
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
-			}
-			defer rows.Close()
-			var count int
-			for rows.Next() {
-				count++
-				// drain columns
-				cols, _ := rows.Columns()
-				vals := make([]interface{}, len(cols))
-				ptrs := make([]interface{}, len(cols))
-				for i := range vals {
-					ptrs[i] = &vals[i]
-				}
-				if err := rows.Scan(ptrs...); err != nil {
-					t.Fatalf("scan: %v", err)
-				}
-			}
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows.Err: %v", err)
-			}
+			count := countRowsDrain(t, db, tt.query)
 			if count != tt.wantCount {
 				t.Errorf("got %d rows, want %d", count, tt.wantCount)
 			}
 		})
 	}
+}
+
+// countRowsDrain runs a query, scans and drains all columns per row, and returns the row count.
+func countRowsDrain(t *testing.T, db interface{ Query(string, ...interface{}) (*sql.Rows, error) }, query string) int {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+	var count int
+	for rows.Next() {
+		count++
+		cols, _ := rows.Columns()
+		vals := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return count
 }
 
 // ============================================================================
@@ -1240,6 +1247,18 @@ func TestMCDC_ConvertUint64_OverflowGuard(t *testing.T) {
 //   Case A && !B: int8/int16/int32 → signed path
 // ============================================================================
 
+// assertConvertValue calls vc.ConvertValue and checks the result against want.
+func assertConvertValue(t *testing.T, vc ValueConverter, input interface{}, want interface{}) {
+	t.Helper()
+	got, err := vc.ConvertValue(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != want {
+		t.Errorf("got %v (%T), want %v (%T)", got, got, want, want)
+	}
+}
+
 func TestMCDC_ConvertToInt64_KindBranches(t *testing.T) {
 	t.Parallel()
 
@@ -1248,56 +1267,29 @@ func TestMCDC_ConvertToInt64_KindBranches(t *testing.T) {
 	// A=F: string is not in int64Kinds → unsupported type error
 	t.Run("A=F: string not in int64Kinds", func(t *testing.T) {
 		t.Parallel()
-		_, err := vc.ConvertValue("hello")
-		// string is a native driver value so it succeeds, not an error
-		// we test int8 explicitly
 		var v int8 = 5
-		got, err := vc.ConvertValue(v)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got != int64(5) {
-			t.Errorf("int8: got %v, want int64(5)", got)
-		}
+		assertConvertValue(t, vc, v, int64(5))
 	})
 
 	// A=T && B=T: uint8 → unsigned path
 	t.Run("A=T B=T: uint8 uses unsigned path", func(t *testing.T) {
 		t.Parallel()
 		var v uint8 = 200
-		got, err := vc.ConvertValue(v)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got != int64(200) {
-			t.Errorf("uint8: got %v, want int64(200)", got)
-		}
+		assertConvertValue(t, vc, v, int64(200))
 	})
 
 	// A=T && B=T: uint32 → unsigned path
 	t.Run("A=T B=T: uint32 uses unsigned path", func(t *testing.T) {
 		t.Parallel()
 		var v uint32 = 100000
-		got, err := vc.ConvertValue(v)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got != int64(100000) {
-			t.Errorf("uint32: got %v, want int64(100000)", got)
-		}
+		assertConvertValue(t, vc, v, int64(100000))
 	})
 
 	// A=T && B=F: int32 → signed path
 	t.Run("A=T B=F: int32 uses signed path", func(t *testing.T) {
 		t.Parallel()
 		var v int32 = -1234
-		got, err := vc.ConvertValue(v)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got != int64(-1234) {
-			t.Errorf("int32: got %v, want int64(-1234)", got)
-		}
+		assertConvertValue(t, vc, v, int64(-1234))
 	})
 
 	// A=F: float64 is native; check a truly unsupported type → error
@@ -1346,39 +1338,20 @@ func TestMCDC_ConvertValue_NilAndNativeGuards(t *testing.T) {
 	// A=F && B=T: int64 is native → returned as-is
 	t.Run("A=F B=T: int64 is native driver value", func(t *testing.T) {
 		t.Parallel()
-		var v int64 = 12345
-		got, err := vc.ConvertValue(v)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got != int64(12345) {
-			t.Errorf("got %v, want int64(12345)", got)
-		}
+		assertConvertValue(t, vc, int64(12345), int64(12345))
 	})
 
 	// A=F && B=T: string is native
 	t.Run("A=F B=T: string is native driver value", func(t *testing.T) {
 		t.Parallel()
-		got, err := vc.ConvertValue("test")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got != "test" {
-			t.Errorf("got %v, want %q", got, "test")
-		}
+		assertConvertValue(t, vc, "test", "test")
 	})
 
 	// A=F && B=F: int16 is not native → converted to int64
 	t.Run("A=F B=F: int16 not native, converted to int64", func(t *testing.T) {
 		t.Parallel()
 		var v int16 = 256
-		got, err := vc.ConvertValue(v)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got != int64(256) {
-			t.Errorf("got %v, want int64(256)", got)
-		}
+		assertConvertValue(t, vc, v, int64(256))
 	})
 
 	// A=F && B=F: float32 → converted to float64
@@ -1593,36 +1566,43 @@ func TestMCDC_ResolvePragmaColumns_StarGuard(t *testing.T) {
 			for _, s := range splitSemicolon(tt.setup) {
 				mustExec(t, db, s)
 			}
-			rows, err := db.Query(tt.query)
-			if err != nil {
-				t.Fatalf("query failed: %v", err)
+			gotCols, gotRows := queryColAndRowCount(t, db, tt.query)
+			if gotCols != tt.wantCols {
+				t.Errorf("got %d columns, want %d", gotCols, tt.wantCols)
 			}
-			defer rows.Close()
-			cols, err := rows.Columns()
-			if err != nil {
-				t.Fatalf("columns: %v", err)
-			}
-			if len(cols) != tt.wantCols {
-				t.Errorf("got %d columns, want %d", len(cols), tt.wantCols)
-			}
-			var rowCount int
-			for rows.Next() {
-				rowCount++
-				vals := make([]interface{}, len(cols))
-				ptrs := make([]interface{}, len(cols))
-				for i := range vals {
-					ptrs[i] = &vals[i]
-				}
-				rows.Scan(ptrs...)
-			}
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows.Err: %v", err)
-			}
-			if rowCount != tt.wantRows {
-				t.Errorf("got %d rows, want %d", rowCount, tt.wantRows)
+			if gotRows != tt.wantRows {
+				t.Errorf("got %d rows, want %d", gotRows, tt.wantRows)
 			}
 		})
 	}
+}
+
+// queryColAndRowCount runs a query and returns the number of columns and rows.
+func queryColAndRowCount(t *testing.T, db interface{ Query(string, ...interface{}) (*sql.Rows, error) }, query string) (int, int) {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("columns: %v", err)
+	}
+	var rowCount int
+	for rows.Next() {
+		rowCount++
+		vals := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		rows.Scan(ptrs...)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return len(cols), rowCount
 }
 
 // ============================================================================
@@ -1751,34 +1731,48 @@ func TestMCDC_CompilePragmaTVFForeignKeyList_FkManagerGuard(t *testing.T) {
 			for _, s := range splitSemicolon(tt.setup) {
 				mustExec(t, db, s)
 			}
-			rows, err := db.Query(tt.query)
-			if tt.wantErr && err == nil {
-				t.Fatal("expected error but got none")
-			}
-			if !tt.wantErr && err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if rows == nil {
-				return
-			}
-			defer rows.Close()
-			var count int
-			for rows.Next() {
-				count++
-				cols, _ := rows.Columns()
-				vals := make([]interface{}, len(cols))
-				ptrs := make([]interface{}, len(cols))
-				for i := range vals {
-					ptrs[i] = &vals[i]
-				}
-				rows.Scan(ptrs...)
-			}
-			if err := rows.Err(); err != nil {
-				t.Fatalf("rows.Err: %v", err)
-			}
+			count := queryDrainRowCount(t, db, tt.query, tt.wantErr)
 			if count != tt.wantRows {
 				t.Errorf("got %d rows, want %d", count, tt.wantRows)
 			}
 		})
 	}
+}
+
+// queryDrainRowCount runs a query, optionally expecting an error. If no error,
+// it drains all rows and returns the count. Returns 0 if wantErr and error occurred.
+func queryDrainRowCount(t *testing.T, db interface{ Query(string, ...interface{}) (*sql.Rows, error) }, query string, wantErr bool) int {
+	t.Helper()
+	rows, err := db.Query(query)
+	if wantErr && err == nil {
+		t.Fatal("expected error but got none")
+	}
+	if !wantErr && err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rows == nil {
+		return 0
+	}
+	defer rows.Close()
+	return drainRows(t, rows)
+}
+
+// drainRows scans and counts all remaining rows, draining every column.
+func drainRows(t *testing.T, rows *sql.Rows) int {
+	t.Helper()
+	var count int
+	for rows.Next() {
+		count++
+		cols, _ := rows.Columns()
+		vals := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		rows.Scan(ptrs...)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+	return count
 }

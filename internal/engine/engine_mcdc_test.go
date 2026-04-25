@@ -341,60 +341,33 @@ func TestMCDC_CompileDropIndex_IfExists(t *testing.T) {
 // Tx.Rollback paths which tolerate ErrNoTransaction from the pager.
 // ---------------------------------------------------------------------------
 
-func TestMCDC_IsNoTransaction(t *testing.T) {
-	tests := []struct {
-		name string
-		// fn executes the path under test and returns the error produced by
-		// the Commit/Rollback call.  We want success (nil error) for all
-		// cases that should be tolerated.
-		fn      func(db *Engine) error
-		wantErr bool
-	}{
-		{
-			// case 1 & 2 combined: no pager transaction active; pager.Commit
-			// returns ErrNoTransaction (A=true, B=true) → tolerated → nil error.
-			name: "MCDC_IsNoTxn_A_true_B_true_tolerated",
-			fn: func(db *Engine) error {
-				tx, err := db.Begin()
-				if err != nil {
-					return err
-				}
-				return tx.Commit()
-			},
-			wantErr: false,
-		},
-		{
-			// case 3: Rollback on a completed transaction (done=true) → error
-			// from the done-check, not from isNoTransaction — ensures the
-			// non-ErrNoTransaction branch is exercised separately.
-			name: "MCDC_IsNoTxn_doubleRollback_error",
-			fn: func(db *Engine) error {
-				tx, err := db.Begin()
-				if err != nil {
-					return err
-				}
-				if err := tx.Rollback(); err != nil {
-					return err
-				}
-				// second rollback: tx.done==true → "transaction already finished"
-				return tx.Rollback()
-			},
-			wantErr: true,
-		},
+func TestMCDC_IsNoTransaction_Tolerated(t *testing.T) {
+	// case 1 & 2 combined: no pager transaction active; pager.Commit
+	// returns ErrNoTransaction (A=true, B=true) → tolerated → nil error.
+	db := openTestDB(t)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
 	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
 
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			db := openTestDB(t)
-			err := tc.fn(db)
-			if tc.wantErr && err == nil {
-				t.Fatalf("expected error, got nil")
-			}
-			if !tc.wantErr && err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-		})
+func TestMCDC_IsNoTransaction_DoubleRollback(t *testing.T) {
+	// case 3: Rollback on a completed transaction (done=true) → error
+	// from the done-check, not from isNoTransaction.
+	db := openTestDB(t)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("first Rollback: %v", err)
+	}
+	// second rollback: tx.done==true → "transaction already finished"
+	if err := tx.Rollback(); err == nil {
+		t.Fatalf("expected error, got nil")
 	}
 }
 

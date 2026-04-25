@@ -218,12 +218,27 @@ func TestMergeSpilledRuns_CorruptFile(t *testing.T) {
 
 // TestMergeSpilledRuns_ThreeRuns verifies the k-way merge with exactly three
 // sorted runs produces the correct overall ordering.
+func verifyMergeSortedInts(t *testing.T, s *SorterWithSpill, n int) {
+	t.Helper()
+	for i := 1; i <= n; i++ {
+		if !s.Next() {
+			t.Fatalf("missing row %d", i)
+		}
+		if got := s.CurrentRow()[0].IntValue(); got != int64(i) {
+			t.Errorf("row %d: got %d", i, got)
+		}
+	}
+	if s.Next() {
+		t.Error("unexpected extra row after merge")
+	}
+}
+
 func TestMergeSpilledRuns_ThreeRuns(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
 	config := &SorterConfig{
-		MaxMemoryBytes: 200, // very tight to guarantee 3+ runs
+		MaxMemoryBytes: 200,
 		TempDir:        tempDir,
 		EnableSpill:    true,
 	}
@@ -245,17 +260,7 @@ func TestMergeSpilledRuns_ThreeRuns(t *testing.T) {
 		t.Fatalf("Sort: %v", err)
 	}
 
-	for i := 1; i <= n; i++ {
-		if !s.Next() {
-			t.Fatalf("missing row %d", i)
-		}
-		if got := s.CurrentRow()[0].IntValue(); got != int64(i) {
-			t.Errorf("row %d: got %d", i, got)
-		}
-	}
-	if s.Next() {
-		t.Error("unexpected extra row after merge")
-	}
+	verifyMergeSortedInts(t, s, n)
 }
 
 // ---------------------------------------------------------------------------

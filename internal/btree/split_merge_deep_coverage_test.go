@@ -924,6 +924,36 @@ func TestSplitMergeDeep_MixedWorkload(t *testing.T) {
 }
 
 // TestSplitMergeDeep_IndexMixedWorkload runs a mixed workload on an index
+// insertIndexKeys inserts n index keys and returns them.
+func insertIndexKeys(t *testing.T, idxCur *btree.IndexCursor, n int) [][]byte {
+	t.Helper()
+	keys := make([][]byte, n)
+	for i := 0; i < n; i++ {
+		keys[i] = []byte(fmt.Sprintf("idx%05d", i))
+		if err := idxCur.InsertIndex(keys[i], int64(i)); err != nil {
+			t.Fatalf("InsertIndex(%d): %v", i, err)
+		}
+	}
+	return keys
+}
+
+// seekAllIndexKeys seeks every key and returns the number of hits.
+func seekAllIndexKeys(t *testing.T, bt *btree.Btree, root uint32, keys [][]byte) int {
+	t.Helper()
+	seeker := btree.NewIndexCursor(bt, root)
+	hits := 0
+	for _, k := range keys {
+		found, err := seeker.SeekIndex(k)
+		if err != nil {
+			t.Fatalf("SeekIndex(%s): %v", k, err)
+		}
+		if found {
+			hits++
+		}
+	}
+	return hits
+}
+
 // tree: insert, forward/backward scan, partial delete, then seek all keys.
 // This exercises index_cursor.go:resolveChildPage, prevInPage, and prevViaParent.
 func TestSplitMergeDeep_IndexMixedWorkload(t *testing.T) {
@@ -933,14 +963,7 @@ func TestSplitMergeDeep_IndexMixedWorkload(t *testing.T) {
 	bt, idxCur := newIndexCursor(t, pageSize)
 
 	const n = 200
-	keys := make([][]byte, n)
-	for i := 0; i < n; i++ {
-		keys[i] = []byte(fmt.Sprintf("idx%05d", i))
-		if err := idxCur.InsertIndex(keys[i], int64(i)); err != nil {
-			t.Fatalf("InsertIndex(%d): %v", i, err)
-		}
-	}
-
+	keys := insertIndexKeys(t, idxCur, n)
 	root := idxCur.RootPage
 
 	fwd := idxFwdCount(t, bt, root)
@@ -953,18 +976,7 @@ func TestSplitMergeDeep_IndexMixedWorkload(t *testing.T) {
 		t.Errorf("bwd count: got %d, want %d", bwd, n)
 	}
 
-	// Seek every key to exercise resolveChildPage on every interior level.
-	seeker := btree.NewIndexCursor(bt, root)
-	hits := 0
-	for _, k := range keys {
-		found, err := seeker.SeekIndex(k)
-		if err != nil {
-			t.Fatalf("SeekIndex(%s): %v", k, err)
-		}
-		if found {
-			hits++
-		}
-	}
+	hits := seekAllIndexKeys(t, bt, root, keys)
 	if hits != n {
 		t.Errorf("seek hits: got %d, want %d", hits, n)
 	}

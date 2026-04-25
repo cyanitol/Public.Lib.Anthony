@@ -725,6 +725,14 @@ func countWalkSubqueries(exprs ...parser.Expression) int {
 	return n
 }
 
+// expectSubqueryCount is a helper that asserts countWalkSubqueries returns want.
+func expectSubqueryCount(t *testing.T, expr parser.Expression, want int) {
+	t.Helper()
+	if n := countWalkSubqueries(expr); n != want {
+		t.Errorf("expected %d subquery node(s), got %d", want, n)
+	}
+}
+
 func TestCTEExplain_WalkExprForSubqueries(t *testing.T) {
 	t.Parallel()
 
@@ -734,54 +742,42 @@ func TestCTEExplain_WalkExprForSubqueries(t *testing.T) {
 
 	t.Run("SubqueryExpr", func(t *testing.T) {
 		t.Parallel()
-		if n := countWalkSubqueries(&parser.SubqueryExpr{Select: innerSel}); n != 1 {
-			t.Errorf("expected 1 subquery node, got %d", n)
-		}
+		expectSubqueryCount(t, &parser.SubqueryExpr{Select: innerSel}, 1)
 	})
 
 	t.Run("ExistsExpr", func(t *testing.T) {
 		t.Parallel()
-		if n := countWalkSubqueries(&parser.ExistsExpr{Select: innerSel}); n != 1 {
-			t.Errorf("expected 1 subquery node, got %d", n)
-		}
+		expectSubqueryCount(t, &parser.ExistsExpr{Select: innerSel}, 1)
 	})
 
 	t.Run("InExpr_with_select", func(t *testing.T) {
 		t.Parallel()
-		if n := countWalkSubqueries(&parser.InExpr{Expr: &parser.IdentExpr{Name: "id"}, Select: innerSel}); n != 1 {
-			t.Errorf("expected 1 subquery node, got %d", n)
-		}
+		expectSubqueryCount(t, &parser.InExpr{Expr: &parser.IdentExpr{Name: "id"}, Select: innerSel}, 1)
 	})
 
 	t.Run("InExpr_no_select", func(t *testing.T) {
 		t.Parallel()
-		if n := countWalkSubqueries(&parser.InExpr{Expr: &parser.IdentExpr{Name: "id"}, Values: []parser.Expression{&parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"}}}); n != 0 {
-			t.Errorf("expected 0 subquery nodes, got %d", n)
-		}
+		expectSubqueryCount(t, &parser.InExpr{Expr: &parser.IdentExpr{Name: "id"}, Values: []parser.Expression{&parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"}}}, 0)
 	})
 
 	t.Run("BinaryExpr_with_subquery_child", func(t *testing.T) {
 		t.Parallel()
-		if n := countWalkSubqueries(&parser.BinaryExpr{Op: parser.OpEq, Left: &parser.SubqueryExpr{Select: innerSel}, Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"}}); n != 1 {
-			t.Errorf("expected 1 subquery node, got %d", n)
-		}
+		expectSubqueryCount(t, &parser.BinaryExpr{Op: parser.OpEq, Left: &parser.SubqueryExpr{Select: innerSel}, Right: &parser.LiteralExpr{Type: parser.LiteralInteger, Value: "1"}}, 1)
 	})
 
-	t.Run("UnaryAndParenExpr_with_subquery", func(t *testing.T) {
+	t.Run("UnaryExpr_with_subquery", func(t *testing.T) {
 		t.Parallel()
-		if n := countWalkSubqueries(&parser.UnaryExpr{Op: parser.OpNot, Expr: &parser.SubqueryExpr{Select: innerSel}}); n != 1 {
-			t.Errorf("UnaryExpr: expected 1 subquery node, got %d", n)
-		}
-		if n := countWalkSubqueries(&parser.ParenExpr{Expr: &parser.SubqueryExpr{Select: innerSel}}); n != 1 {
-			t.Errorf("ParenExpr: expected 1 subquery node, got %d", n)
-		}
+		expectSubqueryCount(t, &parser.UnaryExpr{Op: parser.OpNot, Expr: &parser.SubqueryExpr{Select: innerSel}}, 1)
+	})
+
+	t.Run("ParenExpr_with_subquery", func(t *testing.T) {
+		t.Parallel()
+		expectSubqueryCount(t, &parser.ParenExpr{Expr: &parser.SubqueryExpr{Select: innerSel}}, 1)
 	})
 
 	t.Run("nil_expr", func(t *testing.T) {
 		t.Parallel()
-		if n := countWalkSubqueries(nil); n != 0 {
-			t.Errorf("expected 0 for nil, got %d", n)
-		}
+		expectSubqueryCount(t, nil, 0)
 	})
 }
 

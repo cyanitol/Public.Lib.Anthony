@@ -313,53 +313,27 @@ func TestAttachWithAlias(t *testing.T) {
 	defer os.Remove(mainDB)
 	defer os.Remove(attachDB)
 
-	// Create attached database
-	otherDB, err := sql.Open(DriverName, attachDB)
-	if err != nil {
-		t.Fatalf("failed to create other database: %v", err)
-	}
-
-	_, err = otherDB.Exec("CREATE TABLE data (val INTEGER)")
-	if err != nil {
-		otherDB.Close()
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	_, err = otherDB.Exec("INSERT INTO data VALUES (42)")
-	if err != nil {
-		otherDB.Close()
-		t.Fatalf("INSERT failed: %v", err)
-	}
+	otherDB := cteOpenDB(t, attachDB)
+	cteExecMulti(t, otherDB, "CREATE TABLE data (val INTEGER)", "INSERT INTO data VALUES (42)")
 	otherDB.Close()
 
-	// Open main and attach
-	db, err := sql.Open(DriverName, mainDB)
-	if err != nil {
-		t.Fatalf("failed to open main database: %v", err)
-	}
+	db := cteOpenDB(t, mainDB)
 	defer db.Close()
 
-	// Attach with custom alias
-	_, err = db.Exec("ATTACH DATABASE '" + attachDB + "' AS mydb")
-	if err != nil {
+	if _, err := db.Exec("ATTACH DATABASE '" + attachDB + "' AS mydb"); err != nil {
 		t.Logf("ATTACH with alias: %v", err)
 		return
 	}
 
-	// Query using alias
 	var val int
-	err = db.QueryRow("SELECT val FROM mydb.data").Scan(&val)
-	if err != nil {
+	if err := db.QueryRow("SELECT val FROM mydb.data").Scan(&val); err != nil {
 		t.Fatalf("SELECT with alias failed: %v", err)
 	}
-
 	if val != 42 {
 		t.Errorf("val = %d, want 42", val)
 	}
 
-	// Detach using alias
-	_, err = db.Exec("DETACH DATABASE mydb")
-	if err != nil {
+	if _, err := db.Exec("DETACH DATABASE mydb"); err != nil {
 		t.Errorf("DETACH with alias failed: %v", err)
 	}
 }
@@ -456,33 +430,16 @@ func TestRecursiveCTEComplexTermination(t *testing.T) {
 
 // TestCTEInSubquery tests CTE used in subquery
 func TestCTEInSubquery(t *testing.T) {
-	dbFile := t.TempDir() + "/test_cte_subquery.db"
-
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := cteOpenDB(t, t.TempDir()+"/test_cte_subquery.db")
 	defer db.Close()
 
-	_, err = db.Exec("CREATE TABLE products (id INTEGER, category TEXT, price INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
+	cteExecMulti(t, db,
+		"CREATE TABLE products (id INTEGER, category TEXT, price INTEGER)",
+		"INSERT INTO products VALUES (1, 'A', 100)",
+		"INSERT INTO products VALUES (2, 'A', 200)",
+		"INSERT INTO products VALUES (3, 'B', 150)",
+	)
 
-	_, err = db.Exec("INSERT INTO products VALUES (1, 'A', 100)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-	_, err = db.Exec("INSERT INTO products VALUES (2, 'A', 200)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-	_, err = db.Exec("INSERT INTO products VALUES (3, 'B', 150)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-
-	// CTE in subquery context
 	query := `
 		WITH category_avg AS (
 			SELECT category, AVG(price) as avg_price
@@ -500,16 +457,14 @@ func TestCTEInSubquery(t *testing.T) {
 	}
 	defer rows.Close()
 
-	ids := []int{}
+	var ids []int
 	for rows.Next() {
 		var id int
-		err = rows.Scan(&id)
-		if err != nil {
+		if err := rows.Scan(&id); err != nil {
 			t.Errorf("Scan failed: %v", err)
 		}
 		ids = append(ids, id)
 	}
-
 	t.Logf("IDs above category average: %v", ids)
 }
 
@@ -555,35 +510,16 @@ func TestCTEMaterialization(t *testing.T) {
 
 // TestCTEWithJoin tests CTE combined with joins
 func TestCTEWithJoin(t *testing.T) {
-	dbFile := t.TempDir() + "/test_cte_join.db"
-
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
+	db := cteOpenDB(t, t.TempDir()+"/test_cte_join.db")
 	defer db.Close()
 
-	_, err = db.Exec("CREATE TABLE users (id INTEGER, name TEXT)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE users failed: %v", err)
-	}
+	cteExecMulti(t, db,
+		"CREATE TABLE users (id INTEGER, name TEXT)",
+		"CREATE TABLE orders (id INTEGER, user_id INTEGER, amount INTEGER)",
+		"INSERT INTO users VALUES (1, 'Alice')",
+		"INSERT INTO orders VALUES (1, 1, 100)",
+	)
 
-	_, err = db.Exec("CREATE TABLE orders (id INTEGER, user_id INTEGER, amount INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE orders failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO users VALUES (1, 'Alice')")
-	if err != nil {
-		t.Fatalf("INSERT users failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO orders VALUES (1, 1, 100)")
-	if err != nil {
-		t.Fatalf("INSERT orders failed: %v", err)
-	}
-
-	// CTE with join
 	query := `
 		WITH user_totals AS (
 			SELECT user_id, SUM(amount) as total
@@ -597,12 +533,10 @@ func TestCTEWithJoin(t *testing.T) {
 
 	var name string
 	var total int
-	err = db.QueryRow(query).Scan(&name, &total)
-	if err != nil {
+	if err := db.QueryRow(query).Scan(&name, &total); err != nil {
 		t.Logf("CTE with join: %v", err)
 		return
 	}
-
 	if name != "Alice" || total != 100 {
 		t.Errorf("Got (%s, %d), want (Alice, 100)", name, total)
 	}
@@ -747,6 +681,14 @@ func TestCTERegisterAdjustment(t *testing.T) {
 }
 
 // TestMultipleAttachDetach tests multiple ATTACH/DETACH operations
+// cteCreateSimpleDB creates a database with a single "data" table.
+func cteCreateSimpleDB(t *testing.T, dbFile string) {
+	t.Helper()
+	tmpDB := cteOpenDB(t, dbFile)
+	cteExecMulti(t, tmpDB, "CREATE TABLE data (id INTEGER)")
+	tmpDB.Close()
+}
+
 func TestMultipleAttachDetach(t *testing.T) {
 	mainDB := "test_multi_attach_main.db"
 	db1 := "test_multi_attach_1.db"
@@ -755,50 +697,24 @@ func TestMultipleAttachDetach(t *testing.T) {
 	defer os.Remove(db1)
 	defer os.Remove(db2)
 
-	// Create databases
-	for _, dbFile := range []string{db1, db2} {
-		tmpDB, err := sql.Open(DriverName, dbFile)
-		if err != nil {
-			t.Fatalf("failed to create %s: %v", dbFile, err)
-		}
-		_, err = tmpDB.Exec("CREATE TABLE data (id INTEGER)")
-		if err != nil {
-			tmpDB.Close()
-			t.Fatalf("CREATE TABLE in %s failed: %v", dbFile, err)
-		}
-		tmpDB.Close()
-	}
+	cteCreateSimpleDB(t, db1)
+	cteCreateSimpleDB(t, db2)
 
-	// Open main and attach multiple
-	db, err := sql.Open(DriverName, mainDB)
-	if err != nil {
-		t.Fatalf("failed to open main database: %v", err)
-	}
+	db := cteOpenDB(t, mainDB)
 	defer db.Close()
 
-	// Attach first database
-	_, err = db.Exec("ATTACH DATABASE '" + db1 + "' AS db1")
-	if err != nil {
+	if _, err := db.Exec("ATTACH DATABASE '" + db1 + "' AS db1"); err != nil {
 		t.Logf("ATTACH db1: %v", err)
 		return
 	}
-
-	// Attach second database
-	_, err = db.Exec("ATTACH DATABASE '" + db2 + "' AS db2")
-	if err != nil {
+	if _, err := db.Exec("ATTACH DATABASE '" + db2 + "' AS db2"); err != nil {
 		t.Logf("ATTACH db2: %v", err)
 		return
 	}
-
-	// Detach first
-	_, err = db.Exec("DETACH DATABASE db1")
-	if err != nil {
+	if _, err := db.Exec("DETACH DATABASE db1"); err != nil {
 		t.Errorf("DETACH db1 failed: %v", err)
 	}
-
-	// Detach second
-	_, err = db.Exec("DETACH DATABASE db2")
-	if err != nil {
+	if _, err := db.Exec("DETACH DATABASE db2"); err != nil {
 		t.Errorf("DETACH db2 failed: %v", err)
 	}
 }

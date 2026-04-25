@@ -236,6 +236,17 @@ func TestParseUpsert(t *testing.T) {
 	testParseUpsertErrors(t)
 }
 
+// assertConflictColumn checks a single conflict target column's name and order.
+func assertConflictColumn(t *testing.T, col IndexedColumn, wantName string, wantOrder SortOrder) {
+	t.Helper()
+	if col.Column != wantName {
+		t.Errorf("expected column %q, got %q", wantName, col.Column)
+	}
+	if col.Order != wantOrder {
+		t.Errorf("expected order %v for column %q, got %v", wantOrder, wantName, col.Order)
+	}
+}
+
 func TestParseUpsertColumnOrder(t *testing.T) {
 	t.Parallel()
 	sql := "INSERT INTO users (id, name) VALUES (1, 'John') ON CONFLICT (id ASC, email DESC) DO NOTHING"
@@ -254,20 +265,10 @@ func TestParseUpsertColumnOrder(t *testing.T) {
 		t.Fatal("expected conflict target")
 	}
 	if len(stmt.Upsert.Target.Columns) != 2 {
-		t.Errorf("expected 2 columns, got %d", len(stmt.Upsert.Target.Columns))
+		t.Fatalf("expected 2 columns, got %d", len(stmt.Upsert.Target.Columns))
 	}
-	if stmt.Upsert.Target.Columns[0].Column != "id" {
-		t.Errorf("expected first column 'id', got %s", stmt.Upsert.Target.Columns[0].Column)
-	}
-	if stmt.Upsert.Target.Columns[0].Order != SortAsc {
-		t.Errorf("expected first column ASC order")
-	}
-	if stmt.Upsert.Target.Columns[1].Column != "email" {
-		t.Errorf("expected second column 'email', got %s", stmt.Upsert.Target.Columns[1].Column)
-	}
-	if stmt.Upsert.Target.Columns[1].Order != SortDesc {
-		t.Errorf("expected second column DESC order")
-	}
+	assertConflictColumn(t, stmt.Upsert.Target.Columns[0], "id", SortAsc)
+	assertConflictColumn(t, stmt.Upsert.Target.Columns[1], "email", SortDesc)
 }
 
 func TestParseInsertWithoutUpsert(t *testing.T) {

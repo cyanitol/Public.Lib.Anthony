@@ -239,33 +239,31 @@ func TestBalanceDefragLoadPageForBalanceParseError(t *testing.T) {
 //
 // We use createBalanceTestPage with cell sizes that put the page in balanced
 // territory (>33% fill, not overfull), then set FragmentedBytes manually.
+// buildBalancedPage creates a balanced page suitable for defrag testing,
+// or calls t.Skip if no balanced page can be constructed.
+func buildBalancedPage(t *testing.T) *BtreePage {
+	t.Helper()
+	// Try 25 cells of 60 bytes first; fallback to 40 cells of 40 bytes.
+	configs := [][2]int{{25, 60}, {40, 40}}
+	for _, cfg := range configs {
+		numCells, cellSize := cfg[0], cfg[1]
+		cellSizes := make([]int, numCells)
+		for i := range cellSizes {
+			cellSizes[i] = cellSize
+		}
+		page := createBalanceTestPage(4096, PageTypeLeafTable, numCells, cellSizes)
+		if !isOverfull(page) && !isUnderfull(page) {
+			return page
+		}
+	}
+	t.Skip("cannot construct a balanced page with these parameters; skipping")
+	return nil
+}
+
 func TestBalanceDefragExecuteBalanceDefragPath(t *testing.T) {
 	t.Parallel()
 
-	// 20 cells of 60 bytes each: usedSpace ~ 20*60 = 1200 bytes on a 4096 page.
-	// minUsedSpace = 0.33 * 4096 ~ 1351, so we need slightly more.
-	// Use 25 cells of 60 bytes = 1500 bytes used, well above 33% threshold.
-	numCells := 25
-	cellSizes := make([]int, numCells)
-	for i := range cellSizes {
-		cellSizes[i] = 60
-	}
-
-	page := createBalanceTestPage(4096, PageTypeLeafTable, numCells, cellSizes)
-
-	if isOverfull(page) || isUnderfull(page) {
-		// Try a different count if the page happens to be under/overfull
-		// due to cell encoding overhead.  Double the cells.
-		numCells = 40
-		cellSizes = make([]int, numCells)
-		for i := range cellSizes {
-			cellSizes[i] = 40
-		}
-		page = createBalanceTestPage(4096, PageTypeLeafTable, numCells, cellSizes)
-		if isOverfull(page) || isUnderfull(page) {
-			t.Skip("cannot construct a balanced page with these parameters; skipping")
-		}
-	}
+	page := buildBalancedPage(t)
 
 	// Inject fragmented bytes so defragmentIfNeeded's body runs.
 	page.Header.FragmentedBytes = 12

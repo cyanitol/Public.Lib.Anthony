@@ -133,68 +133,73 @@ func TestFKAdapterValidateContext(t *testing.T) {
 // getTable
 // ---------------------------------------------------------------------------
 
+func testFKAdapterGetTableFound(t *testing.T) {
+	t.Parallel()
+	tbl := makeSimpleTable(5)
+	schema := &fkaCovSchema{tables: map[string]interface{}{"users": tbl}}
+	r := newReaderWithSchema(schema)
+	info, err := r.getTable("users")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected non-nil tableInfo")
+	}
+	if len(info.Columns) != 2 {
+		t.Errorf("expected 2 columns, got %d", len(info.Columns))
+	}
+}
+
+func testFKAdapterGetTableNotFound(t *testing.T) {
+	t.Parallel()
+	schema := &fkaCovSchema{tables: map[string]interface{}{}}
+	r := newReaderWithSchema(schema)
+	_, err := r.getTable("missing")
+	if err == nil {
+		t.Error("expected error for missing table")
+	}
+}
+
+func testFKAdapterGetTableFallbackFound(t *testing.T) {
+	t.Parallel()
+	tbl := makeSimpleTable(3)
+	schema := &fkaCovGetTableSchema{tables: map[string]interface{}{"orders": tbl}}
+	r := newReaderWithSchema(schema)
+	info, err := r.getTable("orders")
+	if err != nil {
+		t.Fatalf("unexpected error via reflection fallback: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected non-nil tableInfo via reflection fallback")
+	}
+}
+
+func testFKAdapterGetTableFallbackNotFound(t *testing.T) {
+	t.Parallel()
+	schema := &fkaCovGetTableSchema{tables: map[string]interface{}{}}
+	r := newReaderWithSchema(schema)
+	_, err := r.getTable("missing")
+	if err == nil {
+		t.Error("expected error for missing table via reflection fallback")
+	}
+}
+
+func testFKAdapterGetTableNoSchemaMethod(t *testing.T) {
+	t.Parallel()
+	r := newReaderWithSchema(&fkaCovNoMethodSchema{})
+	_, err := r.getTable("any")
+	if err == nil {
+		t.Error("expected error when schema has no table method")
+	}
+}
+
 func TestFKAdapterGetTable(t *testing.T) {
 	t.Parallel()
-
-	t.Run("TableFound_GetTableByName", func(t *testing.T) {
-		t.Parallel()
-		tbl := makeSimpleTable(5)
-		schema := &fkaCovSchema{tables: map[string]interface{}{"users": tbl}}
-		r := newReaderWithSchema(schema)
-		info, err := r.getTable("users")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if info == nil {
-			t.Fatal("expected non-nil tableInfo")
-		}
-		if len(info.Columns) != 2 {
-			t.Errorf("expected 2 columns, got %d", len(info.Columns))
-		}
-	})
-
-	t.Run("TableNotFound_GetTableByName", func(t *testing.T) {
-		t.Parallel()
-		schema := &fkaCovSchema{tables: map[string]interface{}{}}
-		r := newReaderWithSchema(schema)
-		_, err := r.getTable("missing")
-		if err == nil {
-			t.Error("expected error for missing table")
-		}
-	})
-
-	t.Run("FallbackGetTable_Found", func(t *testing.T) {
-		t.Parallel()
-		tbl := makeSimpleTable(3)
-		schema := &fkaCovGetTableSchema{tables: map[string]interface{}{"orders": tbl}}
-		r := newReaderWithSchema(schema)
-		info, err := r.getTable("orders")
-		if err != nil {
-			t.Fatalf("unexpected error via reflection fallback: %v", err)
-		}
-		if info == nil {
-			t.Fatal("expected non-nil tableInfo via reflection fallback")
-		}
-	})
-
-	t.Run("FallbackGetTable_NotFound", func(t *testing.T) {
-		t.Parallel()
-		schema := &fkaCovGetTableSchema{tables: map[string]interface{}{}}
-		r := newReaderWithSchema(schema)
-		_, err := r.getTable("missing")
-		if err == nil {
-			t.Error("expected error for missing table via reflection fallback")
-		}
-	})
-
-	t.Run("NoSchemaMethod_ReturnsError", func(t *testing.T) {
-		t.Parallel()
-		r := newReaderWithSchema(&fkaCovNoMethodSchema{})
-		_, err := r.getTable("any")
-		if err == nil {
-			t.Error("expected error when schema has no table method")
-		}
-	})
+	t.Run("TableFound_GetTableByName", testFKAdapterGetTableFound)
+	t.Run("TableNotFound_GetTableByName", testFKAdapterGetTableNotFound)
+	t.Run("FallbackGetTable_Found", testFKAdapterGetTableFallbackFound)
+	t.Run("FallbackGetTable_NotFound", testFKAdapterGetTableFallbackNotFound)
+	t.Run("NoSchemaMethod_ReturnsError", testFKAdapterGetTableNoSchemaMethod)
 }
 
 // ---------------------------------------------------------------------------
@@ -241,50 +246,58 @@ func TestGetCollationForColumn(t *testing.T) {
 // getParentColumnTypeAndCollation
 // ---------------------------------------------------------------------------
 
-func TestGetParentColumnTypeAndCollation(t *testing.T) {
-	t.Parallel()
-
-	r := &VDBERowReader{}
-
-	parentTable := makeTableInfo([]columnInfo{
+func fkaParentTable() *tableInfo {
+	return makeTableInfo([]columnInfo{
 		{Name: "pid", Type: "INTEGER", Collation: ""},
 		{Name: "label", Type: "TEXT", Collation: "NOCASE"},
 	})
+}
 
-	t.Run("ValidIdx", func(t *testing.T) {
-		t.Parallel()
-		colType, coll := r.getParentColumnTypeAndCollation(parentTable, []string{"pid", "label"}, 1)
-		if colType != "TEXT" {
-			t.Errorf("expected TEXT, got %s", colType)
-		}
-		if coll != "NOCASE" {
-			t.Errorf("expected NOCASE, got %s", coll)
-		}
-	})
+func testGetParentColTypeValid(t *testing.T) {
+	t.Parallel()
+	r := &VDBERowReader{}
+	colType, coll := r.getParentColumnTypeAndCollation(fkaParentTable(), []string{"pid", "label"}, 1)
+	if colType != "TEXT" {
+		t.Errorf("expected TEXT, got %s", colType)
+	}
+	if coll != "NOCASE" {
+		t.Errorf("expected NOCASE, got %s", coll)
+	}
+}
 
-	t.Run("IdxBeyondParentColumns", func(t *testing.T) {
-		t.Parallel()
-		colType, coll := r.getParentColumnTypeAndCollation(parentTable, []string{"pid"}, 5)
-		if colType != "" || coll != "" {
-			t.Errorf("expected empty strings for out-of-bounds idx, got %q %q", colType, coll)
-		}
-	})
+func testGetParentColTypeBeyondBounds(t *testing.T) {
+	t.Parallel()
+	r := &VDBERowReader{}
+	colType, coll := r.getParentColumnTypeAndCollation(fkaParentTable(), []string{"pid"}, 5)
+	if colType != "" || coll != "" {
+		t.Errorf("expected empty strings for out-of-bounds idx, got %q %q", colType, coll)
+	}
+}
 
-	t.Run("NilParentTable", func(t *testing.T) {
-		t.Parallel()
-		colType, coll := r.getParentColumnTypeAndCollation(nil, []string{"pid"}, 0)
-		if colType != "" || coll != "" {
-			t.Errorf("expected empty strings for nil parent table, got %q %q", colType, coll)
-		}
-	})
+func testGetParentColTypeNilTable(t *testing.T) {
+	t.Parallel()
+	r := &VDBERowReader{}
+	colType, coll := r.getParentColumnTypeAndCollation(nil, []string{"pid"}, 0)
+	if colType != "" || coll != "" {
+		t.Errorf("expected empty strings for nil parent table, got %q %q", colType, coll)
+	}
+}
 
-	t.Run("ColumnNotFoundInParent", func(t *testing.T) {
-		t.Parallel()
-		colType, coll := r.getParentColumnTypeAndCollation(parentTable, []string{"nonexistent"}, 0)
-		if colType != "" || coll != "" {
-			t.Errorf("expected empty strings for missing column, got %q %q", colType, coll)
-		}
-	})
+func testGetParentColTypeNotFound(t *testing.T) {
+	t.Parallel()
+	r := &VDBERowReader{}
+	colType, coll := r.getParentColumnTypeAndCollation(fkaParentTable(), []string{"nonexistent"}, 0)
+	if colType != "" || coll != "" {
+		t.Errorf("expected empty strings for missing column, got %q %q", colType, coll)
+	}
+}
+
+func TestGetParentColumnTypeAndCollation(t *testing.T) {
+	t.Parallel()
+	t.Run("ValidIdx", testGetParentColTypeValid)
+	t.Run("IdxBeyondParentColumns", testGetParentColTypeBeyondBounds)
+	t.Run("NilParentTable", testGetParentColTypeNilTable)
+	t.Run("ColumnNotFoundInParent", testGetParentColTypeNotFound)
 }
 
 // ---------------------------------------------------------------------------
@@ -332,75 +345,54 @@ func TestValuesEqualDirect_Numeric(t *testing.T) {
 
 func TestValuesEqualWithAffinityAndCollation(t *testing.T) {
 	t.Parallel()
+	t.Run("NullCases", testValuesEqualAffinityNull)
+	t.Run("IntegerAffinity", testValuesEqualAffinityInteger)
+	t.Run("TextAffinity", testValuesEqualAffinityText)
+	t.Run("NoAffinity_FallbackDirect", testValuesEqualAffinityFallback)
+}
 
+func testValuesEqualAffinityNull(t *testing.T) {
+	t.Parallel()
 	r := &VDBERowReader{}
+	if !r.valuesEqualWithAffinityAndCollation(NewMemNull(), nil, "TEXT", "BINARY") {
+		t.Error("NULL mem vs nil should be equal")
+	}
+	if r.valuesEqualWithAffinityAndCollation(NewMemNull(), "hello", "TEXT", "BINARY") {
+		t.Error("NULL mem vs non-nil should not be equal")
+	}
+}
 
-	t.Run("NullMem_NilValue", func(t *testing.T) {
-		t.Parallel()
-		mem := NewMemNull()
-		if !r.valuesEqualWithAffinityAndCollation(mem, nil, "TEXT", "BINARY") {
-			t.Error("NULL mem vs nil should be equal")
-		}
-	})
+func testValuesEqualAffinityInteger(t *testing.T) {
+	t.Parallel()
+	r := &VDBERowReader{}
+	if !r.valuesEqualWithAffinityAndCollation(NewMemInt(42), int64(42), "INTEGER", "BINARY") {
+		t.Error("integer affinity: same value should be equal")
+	}
+	if r.valuesEqualWithAffinityAndCollation(NewMemInt(1), int64(2), "INTEGER", "BINARY") {
+		t.Error("integer affinity: different values should not be equal")
+	}
+}
 
-	t.Run("NullMem_NonNilValue", func(t *testing.T) {
-		t.Parallel()
-		mem := NewMemNull()
-		if r.valuesEqualWithAffinityAndCollation(mem, "hello", "TEXT", "BINARY") {
-			t.Error("NULL mem vs non-nil should not be equal")
-		}
-	})
+func testValuesEqualAffinityText(t *testing.T) {
+	t.Parallel()
+	r := &VDBERowReader{}
+	if !r.valuesEqualWithAffinityAndCollation(NewMemStr("Hello"), "hello", "TEXT", "NOCASE") {
+		t.Error("TEXT+NOCASE: Hello vs hello should be equal")
+	}
+	if r.valuesEqualWithAffinityAndCollation(NewMemStr("Hello"), "hello", "TEXT", "BINARY") {
+		t.Error("TEXT+BINARY: Hello vs hello should not be equal")
+	}
+	if !r.valuesEqualWithAffinityAndCollation(NewMemStr("exact"), "exact", "TEXT", "BINARY") {
+		t.Error("TEXT+BINARY: same string should be equal")
+	}
+}
 
-	t.Run("IntegerAffinity_EqualInts", func(t *testing.T) {
-		t.Parallel()
-		mem := NewMemInt(42)
-		if !r.valuesEqualWithAffinityAndCollation(mem, int64(42), "INTEGER", "BINARY") {
-			t.Error("integer affinity: same value should be equal")
-		}
-	})
-
-	t.Run("IntegerAffinity_NotEqual", func(t *testing.T) {
-		t.Parallel()
-		mem := NewMemInt(1)
-		if r.valuesEqualWithAffinityAndCollation(mem, int64(2), "INTEGER", "BINARY") {
-			t.Error("integer affinity: different values should not be equal")
-		}
-	})
-
-	t.Run("TextAffinity_NocaseEqual", func(t *testing.T) {
-		t.Parallel()
-		mem := NewMemStr("Hello")
-		if !r.valuesEqualWithAffinityAndCollation(mem, "hello", "TEXT", "NOCASE") {
-			t.Error("TEXT+NOCASE: Hello vs hello should be equal")
-		}
-	})
-
-	t.Run("TextAffinity_BinaryNotEqual", func(t *testing.T) {
-		t.Parallel()
-		mem := NewMemStr("Hello")
-		if r.valuesEqualWithAffinityAndCollation(mem, "hello", "TEXT", "BINARY") {
-			t.Error("TEXT+BINARY: Hello vs hello should not be equal")
-		}
-	})
-
-	t.Run("TextAffinity_BinaryEqual", func(t *testing.T) {
-		t.Parallel()
-		mem := NewMemStr("exact")
-		if !r.valuesEqualWithAffinityAndCollation(mem, "exact", "TEXT", "BINARY") {
-			t.Error("TEXT+BINARY: same string should be equal")
-		}
-	})
-
-	t.Run("NoAffinity_FallbackDirect", func(t *testing.T) {
-		t.Parallel()
-		// Empty columnType means no affinity conversion – falls to valuesEqualDirect
-		mem := NewMemInt(99)
-		// memToInterface(mem) returns int64(99); applyColumnAffinity with "" is identity
-		// toInt64 will succeed for both, so should match
-		if !r.valuesEqualWithAffinityAndCollation(mem, int64(99), "", "BINARY") {
-			t.Error("empty type, equal int values should match")
-		}
-	})
+func testValuesEqualAffinityFallback(t *testing.T) {
+	t.Parallel()
+	r := &VDBERowReader{}
+	if !r.valuesEqualWithAffinityAndCollation(NewMemInt(99), int64(99), "", "BINARY") {
+		t.Error("empty type, equal int values should match")
+	}
 }
 
 // ---------------------------------------------------------------------------

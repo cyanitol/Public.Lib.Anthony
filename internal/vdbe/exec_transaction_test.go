@@ -393,6 +393,13 @@ func txnFlowExecSavepoint(t *testing.T, v *VDBE, op int, name string) {
 	}
 }
 
+func txnFlowExpectSavepoints(t *testing.T, pager *MockPager, want int) {
+	t.Helper()
+	if len(pager.savepoints) != want {
+		t.Errorf("expected %d savepoint(s), got %d", want, len(pager.savepoints))
+	}
+}
+
 // Test transaction flow with multiple opcodes
 func TestTransactionFlow(t *testing.T) {
 	t.Parallel()
@@ -408,19 +415,13 @@ func TestTransactionFlow(t *testing.T) {
 	}
 
 	txnFlowExecSavepoint(t, v, 0, "sp1")
-	if len(pager.savepoints) != 1 {
-		t.Errorf("expected 1 savepoint, got %d", len(pager.savepoints))
-	}
+	txnFlowExpectSavepoints(t, pager, 1)
 
 	txnFlowExecSavepoint(t, v, 0, "sp2")
-	if len(pager.savepoints) != 2 {
-		t.Errorf("expected 2 savepoints, got %d", len(pager.savepoints))
-	}
+	txnFlowExpectSavepoints(t, pager, 2)
 
 	txnFlowExecSavepoint(t, v, 2, "sp1")
-	if len(pager.savepoints) != 1 {
-		t.Errorf("expected 1 savepoint after rollback, got %d", len(pager.savepoints))
-	}
+	txnFlowExpectSavepoints(t, pager, 1)
 
 	if err := v.execCommit(&Instruction{Opcode: OpCommit}); err != nil {
 		t.Fatalf("failed to commit: %v", err)
@@ -428,9 +429,7 @@ func TestTransactionFlow(t *testing.T) {
 	if pager.InTransaction() {
 		t.Error("transaction should not be active after commit")
 	}
-	if len(pager.savepoints) != 0 {
-		t.Errorf("savepoints should be cleared after commit, got %d", len(pager.savepoints))
-	}
+	txnFlowExpectSavepoints(t, pager, 0)
 }
 
 // Test schema cookie verification

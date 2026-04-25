@@ -216,62 +216,35 @@ func TestMCDC_GetPage_ZeroPageNum(t *testing.T) {
 //   Row 3: A=F, B=F → proceeds with reading
 // ---------------------------------------------------------------------------
 
-func TestMCDC_ReadOverflowChain_EarlyReturn(t *testing.T) {
+func TestMCDC_ReadOverflowChain_EarlyReturn_FirstPageZero(t *testing.T) {
 	t.Parallel()
-
-	tests := []struct {
-		name      string
-		firstPage uint32
-		dataSize  int
-		wantNil   bool // true = returns (nil, nil)
-	}{
-		{
-			// A=T: firstPage==0 → early nil
-			name:      "A=T B=F firstPage=0: nil",
-			firstPage: 0,
-			dataSize:  100,
-			wantNil:   true,
-		},
-		{
-			// A=F, B=T: dataSize<=0 → early nil
-			name:      "A=F B=T dataSize=0: nil",
-			firstPage: 1,
-			dataSize:  0,
-			wantNil:   true,
-		},
-		{
-			// A=F, B=F: valid → proceeds (will error since no page data available)
-			name:      "A=F B=F valid inputs: proceeds (error expected)",
-			firstPage: 1,
-			dataSize:  10,
-			wantNil:   false,
-		},
+	// A=T: firstPage==0 → early nil
+	bt := NewBtree(4096)
+	got, err := readOverflowChain(bt, 0, 100, bt.UsableSize)
+	if got != nil || err != nil {
+		t.Errorf("readOverflowChain() = (%v, %v), want (nil, nil)", got, err)
 	}
+}
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			bt := NewBtree(4096)
-			// For the valid case, seed a minimal overflow page so the chain reader proceeds
-			if tt.firstPage != 0 && tt.dataSize > 0 {
-				pg := make([]byte, 4096)
-				// next page = 0, rest is data
-				bt.Pages[tt.firstPage] = pg
-			}
-			got, err := readOverflowChain(bt, tt.firstPage, tt.dataSize, bt.UsableSize)
-			if tt.wantNil {
-				if got != nil || err != nil {
-					t.Errorf("readOverflowChain() = (%v, %v), want (nil, nil)", got, err)
-				}
-			} else {
-				// For the valid/proceed case: either a result or an error is fine;
-				// the important thing is it did NOT return (nil, nil) via early exit.
-				if got == nil && err == nil {
-					t.Error("readOverflowChain() returned (nil, nil) unexpectedly for valid inputs")
-				}
-			}
-		})
+func TestMCDC_ReadOverflowChain_EarlyReturn_DataSizeZero(t *testing.T) {
+	t.Parallel()
+	// A=F, B=T: dataSize<=0 → early nil
+	bt := NewBtree(4096)
+	got, err := readOverflowChain(bt, 1, 0, bt.UsableSize)
+	if got != nil || err != nil {
+		t.Errorf("readOverflowChain() = (%v, %v), want (nil, nil)", got, err)
+	}
+}
+
+func TestMCDC_ReadOverflowChain_EarlyReturn_ValidInputs(t *testing.T) {
+	t.Parallel()
+	// A=F, B=F: valid → proceeds (will error since no page data available)
+	bt := NewBtree(4096)
+	pg := make([]byte, 4096)
+	bt.Pages[1] = pg
+	got, err := readOverflowChain(bt, 1, 10, bt.UsableSize)
+	if got == nil && err == nil {
+		t.Error("readOverflowChain() returned (nil, nil) unexpectedly for valid inputs")
 	}
 }
 

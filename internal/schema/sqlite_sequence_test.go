@@ -59,45 +59,37 @@ func TestInitSequence(t *testing.T) {
 	}
 }
 
+// assertNextSequence calls NextSequence and checks the returned value.
+func assertNextSequence(t *testing.T, sm *SequenceManager, table string, currentMax int64, want int64) {
+	t.Helper()
+	next, err := sm.NextSequence(table, currentMax)
+	if err != nil {
+		t.Fatalf("NextSequence() error = %v", err)
+	}
+	if next != want {
+		t.Errorf("NextSequence(%q, %d) = %d, want %d", table, currentMax, next, want)
+	}
+}
+
 func TestNextSequence(t *testing.T) {
 	t.Parallel()
 	sm := NewSequenceManager()
 
 	// First call with no existing sequence
-	next, err := sm.NextSequence("users", 0)
-	if err != nil {
-		t.Fatalf("NextSequence() error = %v", err)
-	}
-	if next != 1 {
-		t.Errorf("NextSequence() = %d, want 1", next)
-	}
+	assertNextSequence(t, sm, "users", 0, 1)
 
 	// Sequence should be updated
-	val := sm.GetSequence("users")
-	if val != 1 {
+	if val := sm.GetSequence("users"); val != 1 {
 		t.Errorf("Sequence value = %d, want 1", val)
 	}
 
 	// Second call
-	next, err = sm.NextSequence("users", 1)
-	if err != nil {
-		t.Fatalf("NextSequence() error = %v", err)
-	}
-	if next != 2 {
-		t.Errorf("NextSequence() = %d, want 2", next)
-	}
+	assertNextSequence(t, sm, "users", 1, 2)
 
 	// With explicit higher rowid
-	next, err = sm.NextSequence("users", 10)
-	if err != nil {
-		t.Fatalf("NextSequence() error = %v", err)
-	}
-	if next != 11 {
-		t.Errorf("NextSequence() with higher currentMaxRowid = %d, want 11", next)
-	}
+	assertNextSequence(t, sm, "users", 10, 11)
 
-	val = sm.GetSequence("users")
-	if val != 11 {
+	if val := sm.GetSequence("users"); val != 11 {
 		t.Errorf("Sequence value = %d, want 11", val)
 	}
 }

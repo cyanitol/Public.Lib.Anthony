@@ -74,28 +74,30 @@ func TestEmitNonIdentifierColumnComprehensive(t *testing.T) {
 	compCovQueryOneInt(t, db, "SELECT 10 + 20 FROM t1, t2", 30)
 }
 
-// TestEmitUnqualifiedColumn tests emitUnqualifiedColumn (0% coverage)
-func TestEmitUnqualifiedColumn(t *testing.T) {
-	dbFile := t.TempDir() + "/test_unqual.db"
-
+// compCovOpenAndExec opens a database and executes setup statements.
+func compCovOpenAndExec(t *testing.T, stmts ...string) *sql.DB {
+	t.Helper()
+	dbFile := t.TempDir() + "/test.db"
 	db, err := sql.Open(DriverName, dbFile)
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("exec %q: %v", s, err)
+		}
+	}
+	return db
+}
+
+// TestEmitUnqualifiedColumn tests emitUnqualifiedColumn (0% coverage)
+func TestEmitUnqualifiedColumn(t *testing.T) {
+	db := compCovOpenAndExec(t,
+		"CREATE TABLE single (id INTEGER, name TEXT)",
+		"INSERT INTO single VALUES (1, 'test')",
+	)
 	defer db.Close()
 
-	// Create single table
-	_, err = db.Exec("CREATE TABLE single (id INTEGER, name TEXT)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO single VALUES (1, 'test')")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-
-	// Test SELECT with unqualified column names in single table context
 	rows, err := db.Query("SELECT id, name FROM single")
 	if err != nil {
 		t.Fatalf("SELECT failed: %v", err)
@@ -105,8 +107,7 @@ func TestEmitUnqualifiedColumn(t *testing.T) {
 	if rows.Next() {
 		var id int
 		var name string
-		err = rows.Scan(&id, &name)
-		if err != nil {
+		if err := rows.Scan(&id, &name); err != nil {
 			t.Errorf("Scan failed: %v", err)
 		}
 		if id != 1 || name != "test" {
@@ -232,57 +233,37 @@ func TestBeginTxCoverage(t *testing.T) {
 
 // TestTransactionRollback tests transaction rollback paths
 func TestTransactionRollback(t *testing.T) {
-	dbFile := t.TempDir() + "/test_rollback.db"
-
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
-	}
+	db := compCovOpenAndExec(t, "CREATE TABLE rollback_test (id INTEGER)")
 	defer db.Close()
 
-	_, err = db.Exec("CREATE TABLE rollback_test (id INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
+	t.Run("rollback_undoes_insert", func(t *testing.T) {
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatalf("Begin failed: %v", err)
+		}
+		if _, err := tx.Exec("INSERT INTO rollback_test VALUES (1)"); err != nil {
+			t.Errorf("INSERT in transaction failed: %v", err)
+		}
+		if err := tx.Rollback(); err != nil {
+			t.Errorf("Rollback failed: %v", err)
+		}
+		var count int
+		if err := db.QueryRow("SELECT COUNT(*) FROM rollback_test").Scan(&count); err != nil {
+			t.Errorf("COUNT query failed: %v", err)
+		}
+		if count != 0 {
+			t.Errorf("Expected count = 0 after rollback, got %d", count)
+		}
+	})
 
-	// Start transaction
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("Begin failed: %v", err)
-	}
-
-	// Insert in transaction
-	_, err = tx.Exec("INSERT INTO rollback_test VALUES (1)")
-	if err != nil {
-		t.Errorf("INSERT in transaction failed: %v", err)
-	}
-
-	// Rollback
-	err = tx.Rollback()
-	if err != nil {
-		t.Errorf("Rollback failed: %v", err)
-	}
-
-	// Verify no data exists
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM rollback_test").Scan(&count)
-	if err != nil {
-		t.Errorf("COUNT query failed: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("Expected count = 0 after rollback, got %d", count)
-	}
-
-	// Test double rollback
-	tx2, err := db.Begin()
-	if err != nil {
-		t.Fatalf("Second Begin failed: %v", err)
-	}
-	tx2.Rollback()
-	// Rollback again should be safe
-	err = tx2.Rollback()
-	// Error may or may not occur depending on implementation
-	_ = err
+	t.Run("double_rollback", func(t *testing.T) {
+		tx2, err := db.Begin()
+		if err != nil {
+			t.Fatalf("Second Begin failed: %v", err)
+		}
+		tx2.Rollback()
+		_ = tx2.Rollback()
+	})
 }
 
 // TestExecContextWithParameters tests ExecContext code paths
@@ -414,37 +395,14 @@ func TestSelectFromTableNameCoverage(t *testing.T) {
 
 // TestSelectWithoutFromCoverage tests SELECT without FROM clause
 func TestSelectWithoutFromCoverage(t *testing.T) {
-	dbFile := t.TempDir() + "/test_no_from.db"
-
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
-	}
+	db := compCovOpenAndExec(t)
 	defer db.Close()
 
-	// SELECT literal
-	var val int
-	err = db.QueryRow("SELECT 42").Scan(&val)
-	if err != nil {
-		t.Errorf("SELECT literal failed: %v", err)
-	}
-	if val != 42 {
-		t.Errorf("Expected 42, got %d", val)
-	}
+	compCovQueryOneInt(t, db, "SELECT 42", 42)
+	compCovQueryOneInt(t, db, "SELECT 10 + 32", 42)
 
-	// SELECT expression
-	err = db.QueryRow("SELECT 10 + 32").Scan(&val)
-	if err != nil {
-		t.Errorf("SELECT expression failed: %v", err)
-	}
-	if val != 42 {
-		t.Errorf("Expected 42, got %d", val)
-	}
-
-	// SELECT multiple values
 	var a, b int
-	err = db.QueryRow("SELECT 1, 2").Scan(&a, &b)
-	if err != nil {
+	if err := db.QueryRow("SELECT 1, 2").Scan(&a, &b); err != nil {
 		t.Errorf("SELECT multiple values failed: %v", err)
 	}
 	if a != 1 || b != 2 {

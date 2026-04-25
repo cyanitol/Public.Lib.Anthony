@@ -239,77 +239,63 @@ func buildVDBEWithIndexCursor(t *testing.T) (*VDBE, *btree.IndexCursor) {
 	return v, idxCursor
 }
 
+func testSeekGEFoundKey(t *testing.T) {
+	t.Parallel()
+	v, _ := buildVDBEWithIndexCursor(t)
+	v.Mem[3].SetBlob([]byte("banana"))
+	if err := v.execSeekGE(&Instruction{Opcode: OpSeekGE, P1: 0, P2: 5, P3: 3}); err != nil {
+		t.Fatalf("execSeekGE found: %v", err)
+	}
+	if v.Cursors[0].EOF {
+		t.Error("expected cursor not EOF when key found")
+	}
+}
+
+func testSeekGENotFoundValid(t *testing.T) {
+	t.Parallel()
+	v, _ := buildVDBEWithIndexCursor(t)
+	v.Mem[3].SetBlob([]byte("zzz"))
+	v.PC = 0
+	if err := v.execSeekGE(&Instruction{Opcode: OpSeekGE, P1: 0, P2: 5, P3: 3}); err != nil {
+		t.Fatalf("execSeekGE not-found: %v", err)
+	}
+	if v.Cursors[0].EOF {
+		t.Error("expected cursor EOF to be false when seek positions past last key but cursor is valid")
+	}
+}
+
+func testSeekGEKeyAtStart(t *testing.T) {
+	t.Parallel()
+	v, _ := buildVDBEWithIndexCursor(t)
+	v.Mem[3].SetBlob([]byte("apple"))
+	if err := v.execSeekGE(&Instruction{Opcode: OpSeekGE, P1: 0, P2: 5, P3: 3}); err != nil {
+		t.Fatalf("execSeekGE first key: %v", err)
+	}
+	if v.Cursors[0].EOF {
+		t.Error("expected cursor not EOF when first key found")
+	}
+}
+
+func testSeekGETableCursor(t *testing.T) {
+	t.Parallel()
+	v := New()
+	v.AllocMemory(5)
+	v.AllocCursors(2)
+	v.Cursors[0] = &Cursor{CurType: CursorBTree, IsTable: true, BtreeCursor: nil}
+	v.Mem[3].SetInt(42)
+	if err := v.execSeekGE(&Instruction{Opcode: OpSeekGE, P1: 0, P2: 5, P3: 3}); err != nil {
+		t.Fatalf("execSeekGE table cursor: %v", err)
+	}
+	if v.Cursors[0].EOF {
+		t.Error("expected cursor not EOF for table cursor seek")
+	}
+}
+
 // TestDebugHandleIndexSeekGE tests handleIndexSeekGE via execSeekGE.
 func TestDebugHandleIndexSeekGE(t *testing.T) {
 	t.Parallel()
-
-	t.Run("FoundKey", func(t *testing.T) {
-		t.Parallel()
-		v, _ := buildVDBEWithIndexCursor(t)
-		v.Mem[3].SetBlob([]byte("banana"))
-		instr := &Instruction{Opcode: OpSeekGE, P1: 0, P2: 5, P3: 3}
-		err := v.execSeekGE(instr)
-		if err != nil {
-			t.Fatalf("execSeekGE found: %v", err)
-		}
-		if v.Cursors[0].EOF {
-			t.Error("expected cursor not EOF when key found")
-		}
-	})
-
-	t.Run("NotFound_CursorValid", func(t *testing.T) {
-		t.Parallel()
-		v, _ := buildVDBEWithIndexCursor(t)
-		// "zzz" is beyond all keys; SeekIndex positions cursor at valid state
-		// but !found. handleIndexSeekGE only sets EOF when !found && !IsValid().
-		// When positioned past last key, cursor state remains valid, so EOF is false.
-		v.Mem[3].SetBlob([]byte("zzz"))
-		v.PC = 0
-		instr := &Instruction{Opcode: OpSeekGE, P1: 0, P2: 5, P3: 3}
-		err := v.execSeekGE(instr)
-		if err != nil {
-			t.Fatalf("execSeekGE not-found: %v", err)
-		}
-		// cursor.EOF is false because IsValid() returned true
-		if v.Cursors[0].EOF {
-			t.Error("expected cursor EOF to be false when seek positions past last key but cursor is valid")
-		}
-	})
-
-	t.Run("KeyAtStart", func(t *testing.T) {
-		t.Parallel()
-		v, _ := buildVDBEWithIndexCursor(t)
-		v.Mem[3].SetBlob([]byte("apple"))
-		instr := &Instruction{Opcode: OpSeekGE, P1: 0, P2: 5, P3: 3}
-		err := v.execSeekGE(instr)
-		if err != nil {
-			t.Fatalf("execSeekGE first key: %v", err)
-		}
-		if v.Cursors[0].EOF {
-			t.Error("expected cursor not EOF when first key found")
-		}
-	})
-
-	t.Run("TableCursor_NoIndex", func(t *testing.T) {
-		t.Parallel()
-		// When cursor.BtreeCursor is not an IndexCursor, execSeekGE falls through
-		// to the table cursor path and sets EOF=false directly.
-		v := New()
-		v.AllocMemory(5)
-		v.AllocCursors(2)
-		v.Cursors[0] = &Cursor{
-			CurType:     CursorBTree,
-			IsTable:     true,
-			BtreeCursor: nil,
-		}
-		v.Mem[3].SetInt(42)
-		instr := &Instruction{Opcode: OpSeekGE, P1: 0, P2: 5, P3: 3}
-		err := v.execSeekGE(instr)
-		if err != nil {
-			t.Fatalf("execSeekGE table cursor: %v", err)
-		}
-		if v.Cursors[0].EOF {
-			t.Error("expected cursor not EOF for table cursor seek")
-		}
-	})
+	t.Run("FoundKey", testSeekGEFoundKey)
+	t.Run("NotFound_CursorValid", testSeekGENotFoundValid)
+	t.Run("KeyAtStart", testSeekGEKeyAtStart)
+	t.Run("TableCursor_NoIndex", testSeekGETableCursor)
 }

@@ -261,37 +261,36 @@ func TestExecUpdateFKIsWithoutRowidTable(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestExecUpdateFKGetTablePrimaryKeyOrder covers every early-return.
+func fkPKOrderExpectNil(t *testing.T, v *VDBE, table string) {
+	t.Helper()
+	if got := v.getTablePrimaryKeyOrder(table); got != nil {
+		t.Errorf("expected nil, got %v", got)
+	}
+}
+
 func TestExecUpdateFKGetTablePrimaryKeyOrder(t *testing.T) {
 	t.Run("NilCtx", func(t *testing.T) {
 		v := New()
 		v.Ctx = nil
-		if got := v.getTablePrimaryKeyOrder("t"); got != nil {
-			t.Errorf("expected nil, got %v", got)
-		}
+		fkPKOrderExpectNil(t, v, "t")
 	})
 
 	t.Run("NilSchema", func(t *testing.T) {
 		v := New()
 		v.Ctx = &VDBEContext{Schema: nil}
-		if got := v.getTablePrimaryKeyOrder("t"); got != nil {
-			t.Errorf("expected nil, got %v", got)
-		}
+		fkPKOrderExpectNil(t, v, "t")
 	})
 
 	t.Run("SchemaNotImplemented", func(t *testing.T) {
 		v := New()
 		v.Ctx = &VDBEContext{Schema: struct{}{}}
-		if got := v.getTablePrimaryKeyOrder("t"); got != nil {
-			t.Errorf("expected nil, got %v", got)
-		}
+		fkPKOrderExpectNil(t, v, "t")
 	})
 
 	t.Run("TableNotFound", func(t *testing.T) {
 		v := New()
 		v.Ctx = &VDBEContext{Schema: &fkMockSchema{tables: map[string]interface{}{}}}
-		if got := v.getTablePrimaryKeyOrder("missing"); got != nil {
-			t.Errorf("expected nil, got %v", got)
-		}
+		fkPKOrderExpectNil(t, v, "missing")
 	})
 
 	t.Run("TableNoPKMethod", func(t *testing.T) {
@@ -299,9 +298,7 @@ func TestExecUpdateFKGetTablePrimaryKeyOrder(t *testing.T) {
 		v.Ctx = &VDBEContext{
 			Schema: &fkMockSchema{tables: map[string]interface{}{"t": struct{}{}}},
 		}
-		if got := v.getTablePrimaryKeyOrder("t"); got != nil {
-			t.Errorf("expected nil for table without GetPrimaryKey, got %v", got)
-		}
+		fkPKOrderExpectNil(t, v, "t")
 	})
 
 	t.Run("WithPK", func(t *testing.T) {

@@ -203,6 +203,28 @@ func TestCreateTableIfNotExists(t *testing.T) {
 	}
 }
 
+// assertIndexFields checks common fields on an Index.
+func assertIndexFields(t *testing.T, index *Index, wantName, wantTable string, wantUnique bool, wantCols []string) {
+	t.Helper()
+	if index.Name != wantName {
+		t.Errorf("index.Name = %q, want %q", index.Name, wantName)
+	}
+	if index.Table != wantTable {
+		t.Errorf("index.Table = %q, want %q", index.Table, wantTable)
+	}
+	if index.Unique != wantUnique {
+		t.Errorf("index.Unique = %v, want %v", index.Unique, wantUnique)
+	}
+	if len(index.Columns) != len(wantCols) {
+		t.Fatalf("index has %d columns, want %d", len(index.Columns), len(wantCols))
+	}
+	for i, col := range wantCols {
+		if index.Columns[i] != col {
+			t.Errorf("index column[%d] = %q, want %q", i, index.Columns[i], col)
+		}
+	}
+}
+
 func TestCreateIndex(t *testing.T) {
 	t.Parallel()
 	s := NewSchema()
@@ -235,21 +257,7 @@ func TestCreateIndex(t *testing.T) {
 		t.Fatalf("CreateIndex() error = %v", err)
 	}
 
-	if index.Name != "idx_email" {
-		t.Errorf("index.Name = %q, want %q", index.Name, "idx_email")
-	}
-	if index.Table != "users" {
-		t.Errorf("index.Table = %q, want %q", index.Table, "users")
-	}
-	if !index.Unique {
-		t.Error("index should be unique")
-	}
-	if len(index.Columns) != 1 {
-		t.Fatalf("index has %d columns, want 1", len(index.Columns))
-	}
-	if index.Columns[0] != "email" {
-		t.Errorf("index column = %q, want %q", index.Columns[0], "email")
-	}
+	assertIndexFields(t, index, "idx_email", "users", true, []string{"email"})
 
 	// Verify index is in schema
 	if _, ok := s.GetIndex("idx_email"); !ok {

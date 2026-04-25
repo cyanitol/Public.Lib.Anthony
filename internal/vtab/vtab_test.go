@@ -199,54 +199,47 @@ func TestConstraintOp(t *testing.T) {
 	}
 }
 
-// TestBaseVirtualTable tests the base virtual table implementation.
-func TestBaseVirtualTable(t *testing.T) {
+// TestBaseVirtualTable_BestIndex tests BestIndex on the base implementation.
+func TestBaseVirtualTable_BestIndex(t *testing.T) {
+	t.Parallel()
+	base := &BaseVirtualTable{}
+	if err := base.BestIndex(NewIndexInfo(0)); err != nil {
+		t.Errorf("BestIndex failed: %v", err)
+	}
+}
+
+// TestBaseVirtualTable_ErrorMethods tests methods that should return errors.
+func TestBaseVirtualTable_ErrorMethods(t *testing.T) {
 	t.Parallel()
 	base := &BaseVirtualTable{}
 
-	t.Run("best_index", func(t *testing.T) {
-		if err := base.BestIndex(NewIndexInfo(0)); err != nil {
-			t.Errorf("BestIndex failed: %v", err)
-		}
-	})
+	if _, err := base.Open(); err == nil {
+		t.Error("Expected Open to return error")
+	}
+	if err := base.Destroy(); err == nil {
+		t.Error("Expected Destroy to return error")
+	}
+	if _, err := base.Update(1, []interface{}{}); err == nil {
+		t.Error("Expected Update to return error")
+	}
+	if err := base.Rename("new_name"); err == nil {
+		t.Error("Expected Rename to return error")
+	}
+}
 
-	t.Run("open_not_implemented", func(t *testing.T) {
-		if _, err := base.Open(); err == nil {
-			t.Error("Expected Open to return error")
-		}
-	})
+// TestBaseVirtualTable_NoopMethods tests methods that should succeed as no-ops.
+func TestBaseVirtualTable_NoopMethods(t *testing.T) {
+	t.Parallel()
+	base := &BaseVirtualTable{}
 
-	t.Run("disconnect_noop", func(t *testing.T) {
-		if err := base.Disconnect(); err != nil {
-			t.Errorf("Disconnect failed: %v", err)
+	if err := base.Disconnect(); err != nil {
+		t.Errorf("Disconnect failed: %v", err)
+	}
+	for _, fn := range []func() error{base.Begin, base.Sync, base.Commit, base.Rollback} {
+		if err := fn(); err != nil {
+			t.Errorf("Transaction method failed: %v", err)
 		}
-	})
-
-	t.Run("destroy_not_supported", func(t *testing.T) {
-		if err := base.Destroy(); err == nil {
-			t.Error("Expected Destroy to return error")
-		}
-	})
-
-	t.Run("update_readonly", func(t *testing.T) {
-		if _, err := base.Update(1, []interface{}{}); err == nil {
-			t.Error("Expected Update to return error")
-		}
-	})
-
-	t.Run("transaction_noops", func(t *testing.T) {
-		for _, fn := range []func() error{base.Begin, base.Sync, base.Commit, base.Rollback} {
-			if err := fn(); err != nil {
-				t.Errorf("Transaction method failed: %v", err)
-			}
-		}
-	})
-
-	t.Run("rename_not_supported", func(t *testing.T) {
-		if err := base.Rename("new_name"); err == nil {
-			t.Error("Expected Rename to return error")
-		}
-	})
+	}
 }
 
 // TestBaseCursor tests the base cursor implementation.

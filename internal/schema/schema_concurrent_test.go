@@ -457,6 +457,33 @@ func TestIsReservedName(t *testing.T) {
 	}
 }
 
+// concurrentMixedOp performs one of five mixed operations on the schema based on opIndex.
+func concurrentMixedOp(s *Schema, id, j, opIndex int) {
+	switch opIndex {
+	case 0:
+		stmt := &parser.CreateTableStmt{
+			Name:    fmt.Sprintf("dynamic_table_%d_%d", id, j),
+			Columns: []parser.ColumnDef{{Name: "id", Type: "INTEGER"}},
+		}
+		s.CreateTable(stmt)
+	case 1:
+		_ = s.ListTables()
+		_ = s.TableCount()
+	case 2:
+		indexStmt := &parser.CreateIndexStmt{
+			Name:    fmt.Sprintf("dynamic_idx_%d_%d", id, j),
+			Table:   fmt.Sprintf("base_table_%d", id%5),
+			Columns: []parser.IndexedColumn{{Column: "id"}},
+		}
+		s.CreateIndex(indexStmt)
+	case 3:
+		_ = s.ListIndexes()
+		_ = s.GetTableIndexes(fmt.Sprintf("base_table_%d", id%5))
+	case 4:
+		_ = s.DropTable(fmt.Sprintf("dynamic_table_%d_%d", id, j-4))
+	}
+}
+
 // TestConcurrentMixedOperations tests a realistic mix of operations happening concurrently.
 func TestConcurrentMixedOperations(t *testing.T) {
 	t.Parallel()
@@ -482,44 +509,8 @@ func TestConcurrentMixedOperations(t *testing.T) {
 	for i := 0; i < numWorkers; i++ {
 		go func(id int) {
 			defer wg.Done()
-
 			for j := 0; j < 50; j++ {
-				switch j % 5 {
-				case 0:
-					// Create table
-					stmt := &parser.CreateTableStmt{
-						Name: fmt.Sprintf("dynamic_table_%d_%d", id, j),
-						Columns: []parser.ColumnDef{
-							{Name: "id", Type: "INTEGER"},
-						},
-					}
-					s.CreateTable(stmt)
-
-				case 1:
-					// Read tables
-					_ = s.ListTables()
-					_ = s.TableCount()
-
-				case 2:
-					// Create index
-					indexStmt := &parser.CreateIndexStmt{
-						Name:  fmt.Sprintf("dynamic_idx_%d_%d", id, j),
-						Table: fmt.Sprintf("base_table_%d", id%5),
-						Columns: []parser.IndexedColumn{
-							{Column: "id"},
-						},
-					}
-					s.CreateIndex(indexStmt)
-
-				case 3:
-					// Read indexes
-					_ = s.ListIndexes()
-					_ = s.GetTableIndexes(fmt.Sprintf("base_table_%d", id%5))
-
-				case 4:
-					// Drop table
-					_ = s.DropTable(fmt.Sprintf("dynamic_table_%d_%d", id, j-4))
-				}
+				concurrentMixedOp(s, id, j, j%5)
 			}
 		}(i)
 	}

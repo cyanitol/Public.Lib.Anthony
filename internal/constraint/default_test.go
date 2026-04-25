@@ -412,13 +412,34 @@ func TestApplyDefaults(t *testing.T) {
 }
 
 // TestIntegrationDefaultConstraint tests a more realistic scenario.
+// verifyDefaultResult checks individual result values by name.
+func verifyDefaultResult(t *testing.T, result []interface{}, idx int, name string, want interface{}) {
+	t.Helper()
+	if result[idx] != want {
+		t.Errorf("%s: expected %v, got %v", name, want, result[idx])
+	}
+}
+
+// verifyTimestampResult checks that the value at idx is a valid timestamp string.
+func verifyTimestampResult(t *testing.T, result []interface{}, idx int, name string) {
+	t.Helper()
+	ts, ok := result[idx].(string)
+	if !ok {
+		t.Errorf("%s: expected string timestamp, got %T", name, result[idx])
+		return
+	}
+	if !strings.Contains(ts, "-") || !strings.Contains(ts, ":") {
+		t.Errorf("%s: invalid timestamp format: %s", name, ts)
+	}
+}
+
 func TestIntegrationDefaultConstraint(t *testing.T) {
 	// Simulate a table with multiple columns and various default types
 	tableCols := []*ColumnInfo{
 		{
 			Name:              "id",
 			AllowsNull:        false,
-			DefaultConstraint: nil, // Will be auto-generated (not tested here)
+			DefaultConstraint: nil,
 		},
 		{
 			Name:       "username",
@@ -462,27 +483,9 @@ func TestIntegrationDefaultConstraint(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify results
-	if result[0] != int64(123) {
-		t.Errorf("id: expected 123, got %v", result[0])
-	}
-
-	if result[1] != "guest" {
-		t.Errorf("username: expected 'guest', got %v", result[1])
-	}
-
-	if result[2] != "user@example.com" {
-		t.Errorf("email: expected 'user@example.com', got %v", result[2])
-	}
-
-	if result[3] != int64(1) {
-		t.Errorf("active: expected 1, got %v", result[3])
-	}
-
-	// Check timestamp format
-	if ts, ok := result[4].(string); !ok {
-		t.Errorf("created_at: expected string timestamp, got %T", result[4])
-	} else if !strings.Contains(ts, "-") || !strings.Contains(ts, ":") {
-		t.Errorf("created_at: invalid timestamp format: %s", ts)
-	}
+	verifyDefaultResult(t, result, 0, "id", int64(123))
+	verifyDefaultResult(t, result, 1, "username", "guest")
+	verifyDefaultResult(t, result, 2, "email", "user@example.com")
+	verifyDefaultResult(t, result, 3, "active", int64(1))
+	verifyTimestampResult(t, result, 4, "created_at")
 }

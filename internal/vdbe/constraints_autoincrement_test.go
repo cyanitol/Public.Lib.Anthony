@@ -30,57 +30,42 @@ func (m *mockTableWithAutoincrement) GetAutoincrementColumnIndex() int {
 type mockTableNoAutoincrement struct{}
 
 // TestIsAutoincrementTable covers all branches of isAutoincrementTable.
+func autoincExpectFalse(t *testing.T, ctx *VDBEContext, table, msg string) {
+	t.Helper()
+	v := New()
+	v.Ctx = ctx
+	if v.isAutoincrementTable(table) {
+		t.Error(msg)
+	}
+}
+
 func TestIsAutoincrementTable(t *testing.T) {
 	t.Run("NilCtx", func(t *testing.T) {
-		v := New()
-		v.Ctx = nil
-		if v.isAutoincrementTable("t") {
-			t.Error("expected false for nil ctx")
-		}
+		autoincExpectFalse(t, nil, "t", "expected false for nil ctx")
 	})
 
 	t.Run("NilSchema", func(t *testing.T) {
-		v := New()
-		v.Ctx = &VDBEContext{Schema: nil}
-		if v.isAutoincrementTable("t") {
-			t.Error("expected false for nil schema")
-		}
+		autoincExpectFalse(t, &VDBEContext{Schema: nil}, "t", "expected false for nil schema")
 	})
 
 	t.Run("SchemaNotTableGetter", func(t *testing.T) {
-		v := New()
-		v.Ctx = &VDBEContext{Schema: struct{}{}}
-		if v.isAutoincrementTable("t") {
-			t.Error("expected false when schema does not implement GetTableByName")
-		}
+		autoincExpectFalse(t, &VDBEContext{Schema: struct{}{}}, "t", "expected false when schema does not implement GetTableByName")
 	})
 
 	t.Run("TableNotFound", func(t *testing.T) {
-		v := New()
-		v.Ctx = &VDBEContext{Schema: &mockSchemaForAutoincrement{table: nil}}
-		if v.isAutoincrementTable("missing") {
-			t.Error("expected false when table not found")
-		}
+		autoincExpectFalse(t, &VDBEContext{Schema: &mockSchemaForAutoincrement{table: nil}}, "missing", "expected false when table not found")
 	})
 
 	t.Run("TableNotAutoincrementChecker", func(t *testing.T) {
-		v := New()
-		v.Ctx = &VDBEContext{Schema: &mockSchemaForAutoincrement{
+		autoincExpectFalse(t, &VDBEContext{Schema: &mockSchemaForAutoincrement{
 			table: &mockTableNoAutoincrement{},
-		}}
-		if v.isAutoincrementTable("t") {
-			t.Error("expected false when table does not implement GetAutoincrementColumnIndex")
-		}
+		}}, "t", "expected false when table does not implement GetAutoincrementColumnIndex")
 	})
 
 	t.Run("AutoincrementIndexNegative", func(t *testing.T) {
-		v := New()
-		v.Ctx = &VDBEContext{Schema: &mockSchemaForAutoincrement{
+		autoincExpectFalse(t, &VDBEContext{Schema: &mockSchemaForAutoincrement{
 			table: &mockTableWithAutoincrement{idx: -1},
-		}}
-		if v.isAutoincrementTable("t") {
-			t.Error("expected false when autoincrement index is -1")
-		}
+		}}, "t", "expected false when autoincrement index is -1")
 	})
 
 	t.Run("AutoincrementIndexZero", func(t *testing.T) {

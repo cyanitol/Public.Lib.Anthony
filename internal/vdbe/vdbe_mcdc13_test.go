@@ -404,14 +404,32 @@ func TestMCDC13_Agg_SumExpression(t *testing.T) {
 
 // TestMCDC13_Agg_AvgExpression exercises AVG with an expression argument grouped
 // by a third column, covering createAggregateInstance for the AVG function type.
+type mcdc13AvgResult struct {
+	z   string
+	avg float64
+}
+
+func mcdc13ScanAvgResults(t *testing.T, rows *sql.Rows) []mcdc13AvgResult {
+	t.Helper()
+	var got []mcdc13AvgResult
+	for rows.Next() {
+		var r mcdc13AvgResult
+		if err := rows.Scan(&r.z, &r.avg); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got = append(got, r)
+	}
+	return got
+}
+
 func TestMCDC13_Agg_AvgExpression(t *testing.T) {
 	t.Parallel()
 	db := mcdc13Open(t)
 
 	mcdc13Exec(t, db, `CREATE TABLE t(x INT, y INT, z TEXT)`)
 	data := [][]interface{}{
-		{1, 3, "A"}, {3, 7, "A"}, // group A: x+y = 4, 10 → avg = 7.0
-		{2, 8, "B"}, {4, 6, "B"}, // group B: x+y = 10, 10 → avg = 10.0
+		{1, 3, "A"}, {3, 7, "A"},
+		{2, 8, "B"}, {4, 6, "B"},
 	}
 	for _, row := range data {
 		mcdc13Exec(t, db, `INSERT INTO t VALUES(?,?,?)`, row[0], row[1], row[2])
@@ -423,19 +441,8 @@ func TestMCDC13_Agg_AvgExpression(t *testing.T) {
 	}
 	defer rows.Close()
 
-	type result struct {
-		z   string
-		avg float64
-	}
-	want := []result{{"A", 7.0}, {"B", 10.0}}
-	var got []result
-	for rows.Next() {
-		var r result
-		if err := rows.Scan(&r.z, &r.avg); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		got = append(got, r)
-	}
+	got := mcdc13ScanAvgResults(t, rows)
+	want := []mcdc13AvgResult{{"A", 7.0}, {"B", 10.0}}
 	if len(got) != len(want) {
 		t.Fatalf("got %d groups, want %d", len(got), len(want))
 	}

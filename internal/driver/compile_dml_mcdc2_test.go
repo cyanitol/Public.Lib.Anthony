@@ -1321,35 +1321,51 @@ func TestMCDC_DefaultExprForColumn_NilAndNonStringDefault(t *testing.T) {
 			}
 			mustExec(t, db, tt.stmt)
 			row := db.QueryRow(tt.query)
-			if tt.want == nil {
-				var got sql.NullString
-				if err := row.Scan(&got); err != nil {
-					t.Fatalf("scan: %v", err)
-				}
-				if got.Valid {
-					t.Errorf("expected NULL but got %q", got.String)
-				}
-			} else {
-				switch want := tt.want.(type) {
-				case string:
-					var got string
-					if err := row.Scan(&got); err != nil {
-						t.Fatalf("scan: %v", err)
-					}
-					if got != want {
-						t.Errorf("got %q, want %q", got, want)
-					}
-				case int64:
-					var got int64
-					if err := row.Scan(&got); err != nil {
-						t.Fatalf("scan: %v", err)
-					}
-					if got != want {
-						t.Errorf("got %d, want %d", got, want)
-					}
-				}
-			}
+			assertScannedValue(t, row, tt.want)
 		})
+	}
+}
+
+// assertScannedValue scans a single-column row and checks against want (nil, string, or int64).
+func assertScannedValue(t *testing.T, row *sql.Row, want interface{}) {
+	t.Helper()
+	if want == nil {
+		assertScannedNull(t, row)
+		return
+	}
+	switch w := want.(type) {
+	case string:
+		var got string
+		scanRowFatal(t, row, &got)
+		if got != w {
+			t.Errorf("got %q, want %q", got, w)
+		}
+	case int64:
+		var got int64
+		scanRowFatal(t, row, &got)
+		if got != w {
+			t.Errorf("got %d, want %d", got, w)
+		}
+	}
+}
+
+// assertScannedNull scans a row expecting a NULL value.
+func assertScannedNull(t *testing.T, row *sql.Row) {
+	t.Helper()
+	var got sql.NullString
+	if err := row.Scan(&got); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if got.Valid {
+		t.Errorf("expected NULL but got %q", got.String)
+	}
+}
+
+// scanRowFatal scans a single value from a Row, calling t.Fatalf on error.
+func scanRowFatal(t *testing.T, row *sql.Row, dest interface{}) {
+	t.Helper()
+	if err := row.Scan(dest); err != nil {
+		t.Fatalf("scan: %v", err)
 	}
 }
 

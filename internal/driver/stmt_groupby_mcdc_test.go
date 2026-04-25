@@ -2,6 +2,7 @@
 package driver
 
 import (
+	"database/sql"
 	"testing"
 )
 
@@ -1659,35 +1660,45 @@ func TestMCDC_MinMaxWithNulls(t *testing.T) {
 			for _, s := range splitSemicolon(tt.setup) {
 				mustExec(t, db, s)
 			}
-			rows := mustQuery(t, db, tt.query)
-			defer rows.Close()
-			if !rows.Next() {
-				t.Fatal("expected one row")
-			}
-			var gotMin, gotMax interface{}
-			if err := rows.Scan(&gotMin, &gotMax); err != nil {
-				t.Fatalf("scan: %v", err)
-			}
-			checkNullableInt := func(label string, got, want interface{}) {
-				if want == nil {
-					if got != nil {
-						t.Errorf("%s: got %v, want NULL", label, got)
-					}
-				} else {
-					wantInt := want.(int64)
-					gotInt, ok := got.(int64)
-					if !ok {
-						t.Errorf("%s: got %T(%v), want int64(%d)", label, got, got, wantInt)
-						return
-					}
-					if gotInt != wantInt {
-						t.Errorf("%s: got %d, want %d", label, gotInt, wantInt)
-					}
-				}
-			}
-			checkNullableInt("MIN", gotMin, tt.wantMin)
-			checkNullableInt("MAX", gotMax, tt.wantMax)
+			gotMin, gotMax := scanMinMax(t, db, tt.query)
+			checkNullableInt(t, "MIN", gotMin, tt.wantMin)
+			checkNullableInt(t, "MAX", gotMax, tt.wantMax)
 		})
+	}
+}
+
+// scanMinMax runs a query and scans the first row's two columns as interface{} values.
+func scanMinMax(t *testing.T, db *sql.DB, query string) (interface{}, interface{}) {
+	t.Helper()
+	rows := mustQuery(t, db, query)
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("expected one row")
+	}
+	var a, b interface{}
+	if err := rows.Scan(&a, &b); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	return a, b
+}
+
+// checkNullableInt compares an interface{} value to a nil or int64 expected value.
+func checkNullableInt(t *testing.T, label string, got, want interface{}) {
+	t.Helper()
+	if want == nil {
+		if got != nil {
+			t.Errorf("%s: got %v, want NULL", label, got)
+		}
+	} else {
+		wantInt := want.(int64)
+		gotInt, ok := got.(int64)
+		if !ok {
+			t.Errorf("%s: got %T(%v), want int64(%d)", label, got, got, wantInt)
+			return
+		}
+		if gotInt != wantInt {
+			t.Errorf("%s: got %d, want %d", label, gotInt, wantInt)
+		}
 	}
 }
 
@@ -1728,30 +1739,43 @@ func TestMCDC_SumTotalWithNulls(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			rows := mustQuery(t, db, tt.query)
-			defer rows.Close()
-			if !rows.Next() {
-				t.Fatal("expected at least one row")
-			}
-			var cat string
-			var val interface{}
-			if err := rows.Scan(&cat, &val); err != nil {
-				t.Fatalf("scan: %v", err)
-			}
+			cat, val := scanCatAndVal(t, db, tt.query)
 			if cat != tt.wantCat {
 				t.Errorf("cat: got %q, want %q", cat, tt.wantCat)
 			}
-			switch want := tt.wantSum.(type) {
-			case int64:
-				if got, ok := val.(int64); !ok || got != want {
-					t.Errorf("sum: got %T(%v), want int64(%d)", val, val, want)
-				}
-			case float64:
-				if got, ok := val.(float64); !ok || got != want {
-					t.Errorf("total: got %T(%v), want float64(%g)", val, val, want)
-				}
-			}
+			assertAggValue(t, val, tt.wantSum)
 		})
+	}
+}
+
+// scanCatAndVal queries for a (string, interface{}) pair from the first row.
+func scanCatAndVal(t *testing.T, db *sql.DB, query string) (string, interface{}) {
+	t.Helper()
+	rows := mustQuery(t, db, query)
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("expected at least one row")
+	}
+	var cat string
+	var val interface{}
+	if err := rows.Scan(&cat, &val); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	return cat, val
+}
+
+// assertAggValue checks that val matches want, supporting int64 and float64 types.
+func assertAggValue(t *testing.T, val, want interface{}) {
+	t.Helper()
+	switch w := want.(type) {
+	case int64:
+		if got, ok := val.(int64); !ok || got != w {
+			t.Errorf("sum: got %T(%v), want int64(%d)", val, val, w)
+		}
+	case float64:
+		if got, ok := val.(float64); !ok || got != w {
+			t.Errorf("total: got %T(%v), want float64(%g)", val, val, w)
+		}
 	}
 }
 
@@ -2246,6 +2270,21 @@ func TestMCDC_HavingDefaultPath(t *testing.T) {
 // that call emitJSONWrap to add [ ] or { } brackets.
 // ============================================================================
 
+// scanCatAndStr queries for two string columns, returns the second column value.
+func scanCatAndStr(t *testing.T, db *sql.DB, query string) string {
+	t.Helper()
+	rows := mustQuery(t, db, query)
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("expected one row")
+	}
+	var cat, val string
+	if err := rows.Scan(&cat, &val); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	return val
+}
+
 func TestMCDC_CopyAggregateResult_JSONWrap(t *testing.T) {
 	t.Parallel()
 
@@ -2254,30 +2293,14 @@ func TestMCDC_CopyAggregateResult_JSONWrap(t *testing.T) {
 	mustExec(t, db, "INSERT INTO tjw VALUES('g','a',1),('g','b',2)")
 
 	t.Run("JSON_GROUP_ARRAY wrapped in []", func(t *testing.T) {
-		rows := mustQuery(t, db, "SELECT cat, JSON_GROUP_ARRAY(v) FROM tjw GROUP BY cat")
-		defer rows.Close()
-		if !rows.Next() {
-			t.Fatal("expected one row")
-		}
-		var cat, arr string
-		if err := rows.Scan(&cat, &arr); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
+		arr := scanCatAndStr(t, db, "SELECT cat, JSON_GROUP_ARRAY(v) FROM tjw GROUP BY cat")
 		if len(arr) < 2 || arr[0] != '[' || arr[len(arr)-1] != ']' {
 			t.Errorf("JSON_GROUP_ARRAY: got %q, expected [...] form", arr)
 		}
 	})
 
 	t.Run("JSON_GROUP_OBJECT wrapped in {}", func(t *testing.T) {
-		rows := mustQuery(t, db, "SELECT cat, JSON_GROUP_OBJECT(k, v) FROM tjw GROUP BY cat")
-		defer rows.Close()
-		if !rows.Next() {
-			t.Fatal("expected one row")
-		}
-		var cat, obj string
-		if err := rows.Scan(&cat, &obj); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
+		obj := scanCatAndStr(t, db, "SELECT cat, JSON_GROUP_OBJECT(k, v) FROM tjw GROUP BY cat")
 		if len(obj) < 2 || obj[0] != '{' || obj[len(obj)-1] != '}' {
 			t.Errorf("JSON_GROUP_OBJECT: got %q, expected {...} form", obj)
 		}

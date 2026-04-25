@@ -99,6 +99,13 @@ func corruptRunVerify(t *testing.T, db *sql.DB, tt corruptTestCase) {
 		corruptVerifySingle(t, db, tt.verifyQuery)
 	case corruptVerifyRowCount:
 		corruptVerifyRows(t, db, tt.verifyQuery, tt.expectedCount)
+	default:
+		corruptRunVerifyExtended(t, db, tt)
+	}
+}
+
+func corruptRunVerifyExtended(t *testing.T, db *sql.DB, tt corruptTestCase) {
+	switch tt.verifyType {
 	case corruptVerifyNoError:
 		corruptVerifyExec(t, db, tt.verifyQuery)
 	case corruptVerifyPragmaValid:

@@ -268,6 +268,44 @@ func TestTriggerRuntime3Coverage_CreateMemoryConnection_WithConfig(t *testing.T)
 // driver.go:MarkDirty on memoryPagerProvider (line 378)
 // ============================================================================
 
+// markDirtyExecSQL prepares and executes a SQL statement on the given Conn,
+// closing the prepared statement afterward.
+func markDirtyExecSQL(t *testing.T, c *Conn, sql string, args []driver.Value) {
+	t.Helper()
+	stmt, err := c.Prepare(sql)
+	if err != nil {
+		t.Fatalf("MarkDirty: Prepare %q: %v", sql, err)
+	}
+	if _, err := stmt.(*Stmt).Exec(args); err != nil {
+		t.Fatalf("MarkDirty: Exec %q: %v", sql, err)
+	}
+	stmt.Close()
+}
+
+// markDirtyQueryInt64 prepares, queries, and returns a single int64 value.
+func markDirtyQueryInt64(t *testing.T, c *Conn, sql string) int64 {
+	t.Helper()
+	q, err := c.Prepare(sql)
+	if err != nil {
+		t.Fatalf("MarkDirty: Prepare %q: %v", sql, err)
+	}
+	rows, err := q.(*Stmt).Query(nil)
+	if err != nil {
+		t.Fatalf("MarkDirty: Query %q: %v", sql, err)
+	}
+	vals := make([]driver.Value, 1)
+	if err := rows.Next(vals); err != nil {
+		t.Fatalf("MarkDirty: Next: %v", err)
+	}
+	rows.Close()
+	q.Close()
+	v, ok := vals[0].(int64)
+	if !ok {
+		t.Fatalf("MarkDirty: expected int64, got %T", vals[0])
+	}
+	return v
+}
+
 // TestTriggerRuntime3_MarkDirty exercises memoryPagerProvider.MarkDirty by
 // performing a sequence of INSERT + UPDATE + DELETE operations on an in-memory
 // database, which force pages to be dirtied/journaled through MarkDirty.
@@ -277,67 +315,21 @@ func TestTriggerRuntime3Coverage_MarkDirty(t *testing.T) {
 	_ = s
 
 	// Setup table.
-	setup, err := c.Prepare("CREATE TABLE items(id INTEGER PRIMARY KEY, val INTEGER)")
-	if err != nil {
-		t.Fatalf("MarkDirty: Prepare CREATE: %v", err)
-	}
-	if _, err := setup.(*Stmt).Exec(nil); err != nil {
-		t.Fatalf("MarkDirty: Exec CREATE: %v", err)
-	}
-	setup.Close()
+	markDirtyExecSQL(t, c, "CREATE TABLE items(id INTEGER PRIMARY KEY, val INTEGER)", nil)
 
 	// INSERT rows to allocate pages and trigger MarkDirty.
 	for i := 1; i <= 30; i++ {
-		ins, err := c.Prepare("INSERT INTO items VALUES (?, ?)")
-		if err != nil {
-			t.Fatalf("MarkDirty: Prepare INSERT %d: %v", i, err)
-		}
-		if _, err := ins.(*Stmt).Exec([]driver.Value{int64(i), int64(i * 10)}); err != nil {
-			t.Fatalf("MarkDirty: Exec INSERT %d: %v", i, err)
-		}
-		ins.Close()
+		markDirtyExecSQL(t, c, "INSERT INTO items VALUES (?, ?)", []driver.Value{int64(i), int64(i * 10)})
 	}
 
 	// UPDATE to dirty existing pages.
-	upd, err := c.Prepare("UPDATE items SET val = val + 1 WHERE id <= 15")
-	if err != nil {
-		t.Fatalf("MarkDirty: Prepare UPDATE: %v", err)
-	}
-	if _, err := upd.(*Stmt).Exec(nil); err != nil {
-		t.Fatalf("MarkDirty: Exec UPDATE: %v", err)
-	}
-	upd.Close()
+	markDirtyExecSQL(t, c, "UPDATE items SET val = val + 1 WHERE id <= 15", nil)
 
 	// DELETE to dirty pages further.
-	del, err := c.Prepare("DELETE FROM items WHERE id > 20")
-	if err != nil {
-		t.Fatalf("MarkDirty: Prepare DELETE: %v", err)
-	}
-	if _, err := del.(*Stmt).Exec(nil); err != nil {
-		t.Fatalf("MarkDirty: Exec DELETE: %v", err)
-	}
-	del.Close()
+	markDirtyExecSQL(t, c, "DELETE FROM items WHERE id > 20", nil)
 
 	// Verify final state.
-	q, err := c.Prepare("SELECT COUNT(*) FROM items")
-	if err != nil {
-		t.Fatalf("MarkDirty: Prepare COUNT: %v", err)
-	}
-	rows, err := q.(*Stmt).Query(nil)
-	if err != nil {
-		t.Fatalf("MarkDirty: Query COUNT: %v", err)
-	}
-	vals := make([]driver.Value, 1)
-	if err := rows.Next(vals); err != nil {
-		t.Fatalf("MarkDirty: Next: %v", err)
-	}
-	rows.Close()
-	q.Close()
-
-	count, ok := vals[0].(int64)
-	if !ok {
-		t.Fatalf("MarkDirty: expected int64 count, got %T", vals[0])
-	}
+	count := markDirtyQueryInt64(t, c, "SELECT COUNT(*) FROM items")
 	if count != 20 {
 		t.Errorf("MarkDirty: expected 20 remaining rows, got %d", count)
 	}

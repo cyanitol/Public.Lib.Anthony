@@ -121,6 +121,18 @@ func setupEmployeesTable(t *testing.T, db *sql.DB) {
 // initializeGroupAccumulators, updateGroupAccumulatorsFromSorter, updateSingleAccumulator,
 // emitAccumAdd, emitAccumMinMax, populateSorterData, processSortedDataWithGrouping,
 // emitFinalGroupOutput, emitGroupOutput, copyColumnsToResults, copyAggregateResult.
+// toStringGBW converts an interface{} column value to string.
+func toStringGBW(v interface{}) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case []byte:
+		return string(x)
+	default:
+		return ""
+	}
+}
+
 func TestGroupByCountSumAvgMinMax(t *testing.T) {
 	db := openGBWDB(t)
 	setupEmployeesTable(t, db)
@@ -133,17 +145,16 @@ func TestGroupByCountSumAvgMinMax(t *testing.T) {
 		t.Fatalf("expected 3 departments, got %d", len(rows))
 	}
 
-	// Verify eng row (sorted first)
 	engRow := rows[0]
-	dept, ok := engRow[0].(string)
-	if !ok {
-		if b, ok2 := engRow[0].([]byte); ok2 {
-			dept = string(b)
-		}
-	}
+	dept := toStringGBW(engRow[0])
 	if dept != "eng" {
 		t.Fatalf("expected dept=eng in first row, got %v", engRow[0])
 	}
+	gbwCheckEngAggregates(t, engRow)
+}
+
+func gbwCheckEngAggregates(t *testing.T, engRow []interface{}) {
+	t.Helper()
 	count := toInt64GBW(t, engRow[1], "COUNT(*)")
 	if count != 4 {
 		t.Errorf("eng COUNT(*) = %d, want 4", count)

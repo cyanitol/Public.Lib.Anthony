@@ -288,6 +288,19 @@ func TestGetBtreeCursorPayloadRowAccess(t *testing.T) {
 // parseColumnIntoMem
 // ---------------------------------------------------------------------------
 
+func checkParseColumnResult(t *testing.T, err error, wantErr, wantNull bool, dst *Mem) {
+	t.Helper()
+	if wantErr && err == nil {
+		t.Fatal("expected error")
+	}
+	if !wantErr && err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !wantErr && wantNull && !dst.IsNull() {
+		t.Fatal("expected NULL mem")
+	}
+}
+
 func TestParseColumnIntoMemRowAccess(t *testing.T) {
 	t.Parallel()
 
@@ -314,15 +327,7 @@ func TestParseColumnIntoMemRowAccess(t *testing.T) {
 			v := NewTestVDBE(5)
 			dst := NewMem()
 			err := v.parseColumnIntoMem(c.payload, c.col, dst, nil)
-			if c.wantErr && err == nil {
-				t.Fatal("expected error")
-			}
-			if !c.wantErr && err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if !c.wantErr && c.wantNull && !dst.IsNull() {
-				t.Fatal("expected NULL mem")
-			}
+			checkParseColumnResult(t, err, c.wantErr, c.wantNull, dst)
 		})
 	}
 }
@@ -330,6 +335,33 @@ func TestParseColumnIntoMemRowAccess(t *testing.T) {
 // ---------------------------------------------------------------------------
 // parseRecordColumnHeader
 // ---------------------------------------------------------------------------
+
+func testParseRecordColumnHeaderNull(t *testing.T) {
+	t.Parallel()
+	dst := NewMem()
+	sts, bodyOff, err := parseRecordColumnHeader(nullRecord(), dst)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sts) != 1 || sts[0] != 0 {
+		t.Fatalf("expected [0] serial types, got %v", sts)
+	}
+	if bodyOff < 1 {
+		t.Fatalf("body offset should be >= 1, got %d", bodyOff)
+	}
+}
+
+func testParseRecordColumnHeaderInt(t *testing.T) {
+	t.Parallel()
+	dst := NewMem()
+	sts, _, err := parseRecordColumnHeader(int8Record(5), dst)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sts) != 1 || sts[0] != 1 {
+		t.Fatalf("expected serial type 1, got %v", sts)
+	}
+}
 
 func TestParseRecordColumnHeader(t *testing.T) {
 	t.Parallel()
@@ -343,32 +375,8 @@ func TestParseRecordColumnHeader(t *testing.T) {
 		}
 	})
 
-	t.Run("ValidNullRecord", func(t *testing.T) {
-		t.Parallel()
-		dst := NewMem()
-		sts, bodyOff, err := parseRecordColumnHeader(nullRecord(), dst)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(sts) != 1 || sts[0] != 0 {
-			t.Fatalf("expected [0] serial types, got %v", sts)
-		}
-		if bodyOff < 1 {
-			t.Fatalf("body offset should be >= 1, got %d", bodyOff)
-		}
-	})
-
-	t.Run("ValidIntRecord", func(t *testing.T) {
-		t.Parallel()
-		dst := NewMem()
-		sts, _, err := parseRecordColumnHeader(int8Record(5), dst)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(sts) != 1 || sts[0] != 1 {
-			t.Fatalf("expected serial type 1, got %v", sts)
-		}
-	})
+	t.Run("ValidNullRecord", testParseRecordColumnHeaderNull)
+	t.Run("ValidIntRecord", testParseRecordColumnHeaderInt)
 }
 
 // ---------------------------------------------------------------------------

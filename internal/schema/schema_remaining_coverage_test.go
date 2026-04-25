@@ -7,40 +7,35 @@ import (
 
 // --- Table/Index/View/Trigger count accessors ---
 
-func TestCountAccessors(t *testing.T) {
+// assertSchemaCount checks a single count accessor on a Schema.
+func assertSchemaCount(t *testing.T, label string, got, want int) {
+	t.Helper()
+	if got != want {
+		t.Errorf("%s = %d, want %d", label, got, want)
+	}
+}
+
+func TestCountAccessors_Empty(t *testing.T) {
 	t.Parallel()
 	s := NewSchema()
+	assertSchemaCount(t, "TableCount()", s.TableCount(), 0)
+	assertSchemaCount(t, "IndexCount()", s.IndexCount(), 0)
+	assertSchemaCount(t, "ViewCount()", s.ViewCount(), 0)
+	assertSchemaCount(t, "TriggerCount()", s.TriggerCount(), 0)
+}
 
-	if s.TableCount() != 0 {
-		t.Errorf("TableCount() = %d, want 0", s.TableCount())
-	}
-	if s.IndexCount() != 0 {
-		t.Errorf("IndexCount() = %d, want 0", s.IndexCount())
-	}
-	if s.ViewCount() != 0 {
-		t.Errorf("ViewCount() = %d, want 0", s.ViewCount())
-	}
-	if s.TriggerCount() != 0 {
-		t.Errorf("TriggerCount() = %d, want 0", s.TriggerCount())
-	}
-
+func TestCountAccessors_Populated(t *testing.T) {
+	t.Parallel()
+	s := NewSchema()
 	s.Tables["t"] = &Table{Name: "t"}
 	s.Indexes["i"] = &Index{Name: "i"}
 	s.Views["v"] = &View{Name: "v"}
 	s.Triggers["tr"] = &Trigger{Name: "tr"}
 
-	if s.TableCount() != 1 {
-		t.Errorf("TableCount() = %d, want 1", s.TableCount())
-	}
-	if s.IndexCount() != 1 {
-		t.Errorf("IndexCount() = %d, want 1", s.IndexCount())
-	}
-	if s.ViewCount() != 1 {
-		t.Errorf("ViewCount() = %d, want 1", s.ViewCount())
-	}
-	if s.TriggerCount() != 1 {
-		t.Errorf("TriggerCount() = %d, want 1", s.TriggerCount())
-	}
+	assertSchemaCount(t, "TableCount()", s.TableCount(), 1)
+	assertSchemaCount(t, "IndexCount()", s.IndexCount(), 1)
+	assertSchemaCount(t, "ViewCount()", s.ViewCount(), 1)
+	assertSchemaCount(t, "TriggerCount()", s.TriggerCount(), 1)
 }
 
 // --- IsView ---
@@ -365,7 +360,7 @@ func TestTableGetColumnsAndNames(t *testing.T) {
 
 // --- Column interface accessors ---
 
-func TestColumnAccessors(t *testing.T) {
+func TestColumnAccessors_NameAndType(t *testing.T) {
 	t.Parallel()
 	defaultVal := "42"
 	col := &Column{
@@ -384,6 +379,24 @@ func TestColumnAccessors(t *testing.T) {
 	if col.GetType() != "INTEGER" {
 		t.Errorf("GetType() = %q, want 'INTEGER'", col.GetType())
 	}
+	if col.GetCheck() != "score > 0" {
+		t.Errorf("GetCheck() = %q, want 'score > 0'", col.GetCheck())
+	}
+	if col.GetDefault() == nil {
+		t.Error("GetDefault() should not be nil")
+	}
+}
+
+func TestColumnAccessors_Flags(t *testing.T) {
+	t.Parallel()
+	col := &Column{
+		Name:       "score",
+		Type:       "INTEGER",
+		NotNull:    true,
+		PrimaryKey: true,
+		Unique:     true,
+	}
+
 	if !col.IsNotNull() {
 		t.Error("IsNotNull() should be true")
 	}
@@ -395,12 +408,6 @@ func TestColumnAccessors(t *testing.T) {
 	}
 	if !col.IsUniqueColumn() {
 		t.Error("IsUniqueColumn() should be true")
-	}
-	if col.GetCheck() != "score > 0" {
-		t.Errorf("GetCheck() = %q, want 'score > 0'", col.GetCheck())
-	}
-	if col.GetDefault() == nil {
-		t.Error("GetDefault() should not be nil")
 	}
 	if !col.IsIntegerPrimaryKey() {
 		t.Error("IsIntegerPrimaryKey() should be true for INTEGER PK")

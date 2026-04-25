@@ -67,14 +67,17 @@ type triggerTestCase struct {
 	wantBodyLen     int
 }
 
+func trig_checkStringField(t *testing.T, label, got, want string) {
+	t.Helper()
+	if want != "" && got != want {
+		t.Errorf("expected %s %q, got %q", label, want, got)
+	}
+}
+
 func trig_checkBasicFields(t *testing.T, stmt *CreateTriggerStmt, tc triggerTestCase) {
 	t.Helper()
-	if tc.wantName != "" && stmt.Name != tc.wantName {
-		t.Errorf("expected name %q, got %q", tc.wantName, stmt.Name)
-	}
-	if tc.wantTable != "" && stmt.Table != tc.wantTable {
-		t.Errorf("expected table %q, got %q", tc.wantTable, stmt.Table)
-	}
+	trig_checkStringField(t, "name", stmt.Name, tc.wantName)
+	trig_checkStringField(t, "table", stmt.Table, tc.wantTable)
 	if tc.wantTiming != 0 && stmt.Timing != tc.wantTiming {
 		t.Errorf("expected timing %v, got %v", tc.wantTiming, stmt.Timing)
 	}
@@ -83,17 +86,18 @@ func trig_checkBasicFields(t *testing.T, stmt *CreateTriggerStmt, tc triggerTest
 	}
 }
 
+func trig_checkBoolFlag(t *testing.T, label string, want, got bool) {
+	t.Helper()
+	if want && !got {
+		t.Errorf("expected %s to be true", label)
+	}
+}
+
 func trig_checkFlags(t *testing.T, stmt *CreateTriggerStmt, tc triggerTestCase) {
 	t.Helper()
-	if tc.wantTemp && !stmt.Temp {
-		t.Error("expected Temp to be true")
-	}
-	if tc.wantIfNotExists && !stmt.IfNotExists {
-		t.Error("expected IfNotExists to be true")
-	}
-	if tc.wantForEachRow && !stmt.ForEachRow {
-		t.Error("expected ForEachRow to be true")
-	}
+	trig_checkBoolFlag(t, "Temp", tc.wantTemp, stmt.Temp)
+	trig_checkBoolFlag(t, "IfNotExists", tc.wantIfNotExists, stmt.IfNotExists)
+	trig_checkBoolFlag(t, "ForEachRow", tc.wantForEachRow, stmt.ForEachRow)
 	if tc.wantHasWhen && stmt.When == nil {
 		t.Error("expected When clause to be present")
 	}

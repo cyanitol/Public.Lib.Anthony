@@ -275,37 +275,18 @@ func TestComplexSubquery(t *testing.T) {
 
 // TestSubqueryWithJoin tests subqueries combined with joins
 func TestSubqueryWithJoin(t *testing.T) {
-	dbFile := t.TempDir() + "/test_subquery_join.db"
+	db, cleanup := subqueryOpenDB(t, t.TempDir()+"/test_subquery_join.db")
+	defer cleanup()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	subqueryExecMany(t, db, []string{
+		"CREATE TABLE t1 (id INTEGER, value INTEGER)",
+		"CREATE TABLE t2 (id INTEGER, ref_id INTEGER)",
+		"INSERT INTO t1 VALUES (1, 100)",
+		"INSERT INTO t2 VALUES (1, 1)",
+	})
 
-	_, err = db.Exec("CREATE TABLE t1 (id INTEGER, value INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE t1 failed: %v", err)
-	}
-
-	_, err = db.Exec("CREATE TABLE t2 (id INTEGER, ref_id INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE t2 failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO t1 VALUES (1, 100)")
-	if err != nil {
-		t.Fatalf("INSERT t1 failed: %v", err)
-	}
-	_, err = db.Exec("INSERT INTO t2 VALUES (1, 1)")
-	if err != nil {
-		t.Fatalf("INSERT t2 failed: %v", err)
-	}
-
-	// Test subquery with join
 	rows, err := db.Query("SELECT t1.id FROM t1, t2 WHERE t1.id = t2.ref_id AND t1.value IN (SELECT 100)")
 	if err != nil {
-		// This may fail in current implementation, which is expected
 		t.Logf("Subquery with join not fully supported: %v", err)
 		return
 	}
@@ -315,7 +296,6 @@ func TestSubqueryWithJoin(t *testing.T) {
 	for rows.Next() {
 		hasRows = true
 	}
-
 	if !hasRows {
 		t.Log("No rows returned from subquery with join")
 	}
@@ -323,36 +303,16 @@ func TestSubqueryWithJoin(t *testing.T) {
 
 // TestUnqualifiedColumnInMultiTable tests error handling for unqualified columns
 func TestUnqualifiedColumnInMultiTable(t *testing.T) {
-	dbFile := t.TempDir() + "/test_unqualified.db"
+	db, cleanup := subqueryOpenDB(t, t.TempDir()+"/test_unqualified.db")
+	defer cleanup()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	subqueryExecMany(t, db, []string{
+		"CREATE TABLE t1 (id INTEGER, value INTEGER)",
+		"CREATE TABLE t2 (id INTEGER, amount INTEGER)",
+		"INSERT INTO t1 VALUES (1, 100)",
+		"INSERT INTO t2 VALUES (1, 200)",
+	})
 
-	_, err = db.Exec("CREATE TABLE t1 (id INTEGER, value INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE t1 failed: %v", err)
-	}
-
-	_, err = db.Exec("CREATE TABLE t2 (id INTEGER, amount INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE t2 failed: %v", err)
-	}
-
-	// Insert data
-	_, err = db.Exec("INSERT INTO t1 VALUES (1, 100)")
-	if err != nil {
-		t.Fatalf("INSERT t1 failed: %v", err)
-	}
-	_, err = db.Exec("INSERT INTO t2 VALUES (1, 200)")
-	if err != nil {
-		t.Fatalf("INSERT t2 failed: %v", err)
-	}
-
-	// Test selecting unqualified column from multi-table query
-	// This should work if only one table has the column
 	rows, err := db.Query("SELECT value FROM t1, t2")
 	if err != nil {
 		t.Fatalf("Unqualified column query failed: %v", err)
@@ -365,7 +325,6 @@ func TestUnqualifiedColumnInMultiTable(t *testing.T) {
 		var value int
 		rows.Scan(&value)
 	}
-
 	if !hasRows {
 		t.Error("Expected rows from unqualified column query")
 	}
@@ -373,25 +332,14 @@ func TestUnqualifiedColumnInMultiTable(t *testing.T) {
 
 // TestNonIdentifierColumn tests non-identifier columns in multi-table context
 func TestNonIdentifierColumn(t *testing.T) {
-	dbFile := t.TempDir() + "/test_non_ident.db"
+	db, cleanup := subqueryOpenDB(t, t.TempDir()+"/test_non_ident.db")
+	defer cleanup()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	subqueryExecMany(t, db, []string{
+		"CREATE TABLE nums (id INTEGER, value INTEGER)",
+		"INSERT INTO nums VALUES (1, 10)",
+	})
 
-	_, err = db.Exec("CREATE TABLE nums (id INTEGER, value INTEGER)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	_, err = db.Exec("INSERT INTO nums VALUES (1, 10)")
-	if err != nil {
-		t.Fatalf("INSERT failed: %v", err)
-	}
-
-	// Test selecting literal/expression in multi-table context
 	rows, err := db.Query("SELECT 42, nums.value FROM nums")
 	if err != nil {
 		t.Fatalf("Non-identifier column query failed: %v", err)
@@ -400,8 +348,7 @@ func TestNonIdentifierColumn(t *testing.T) {
 
 	for rows.Next() {
 		var literal, value int
-		err = rows.Scan(&literal, &value)
-		if err != nil {
+		if err := rows.Scan(&literal, &value); err != nil {
 			t.Fatalf("Scan failed: %v", err)
 		}
 		if literal != 42 {
@@ -960,38 +907,27 @@ func TestHasFromSubqueriesDetection(t *testing.T) {
 
 // TestCompileValueTypes tests different value type compilation
 func TestCompileValueTypes(t *testing.T) {
-	dbFile := t.TempDir() + "/test_value_types.db"
+	db, cleanup := subqueryOpenDB(t, t.TempDir()+"/test_value_types.db")
+	defer cleanup()
 
-	db, err := sql.Open(DriverName, dbFile)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	subqueryExecMany(t, db, []string{
+		"CREATE TABLE types_test (id INTEGER, int_val INTEGER, text_val TEXT, blob_val BLOB)",
+	})
 
-	_, err = db.Exec("CREATE TABLE types_test (id INTEGER, int_val INTEGER, text_val TEXT, blob_val BLOB)")
-	if err != nil {
-		t.Fatalf("CREATE TABLE failed: %v", err)
-	}
-
-	// Insert different value types
-	_, err = db.Exec("INSERT INTO types_test VALUES (1, 42, 'hello', X'DEADBEEF')")
+	_, err := db.Exec("INSERT INTO types_test VALUES (1, 42, 'hello', X'DEADBEEF')")
 	if err != nil {
 		t.Logf("INSERT with different types: %v", err)
-		// Try simpler version
-		_, err = db.Exec("INSERT INTO types_test (id, int_val, text_val) VALUES (1, 42, 'hello')")
-		if err != nil {
-			t.Fatalf("Simplified INSERT failed: %v", err)
-		}
+		subqueryExecMany(t, db, []string{
+			"INSERT INTO types_test (id, int_val, text_val) VALUES (1, 42, 'hello')",
+		})
 	}
 
-	// Verify
 	var id, intVal int
 	var textVal string
 	err = db.QueryRow("SELECT id, int_val, text_val FROM types_test WHERE id = 1").Scan(&id, &intVal, &textVal)
 	if err != nil {
 		t.Fatalf("SELECT failed: %v", err)
 	}
-
 	if id != 1 || intVal != 42 || textVal != "hello" {
 		t.Errorf("Values incorrect: id=%d, int_val=%d, text_val=%s", id, intVal, textVal)
 	}

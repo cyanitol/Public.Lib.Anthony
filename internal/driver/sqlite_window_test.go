@@ -215,21 +215,26 @@ func TestSQLiteWindow(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // Capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.wantErr {
-				rows, err := db.Query(tt.query)
-				if rows != nil {
-					rows.Close()
-				}
-				if err == nil {
-					t.Errorf("expected error, got none")
-				}
-				return
-			}
-			got := windowQueryResult(t, db, tt.query)
-			if got != tt.want {
-				t.Errorf("got %q, want %q", got, tt.want)
-			}
+			windowRunTestCase(t, db, tt.query, tt.want, tt.wantErr)
 		})
+	}
+}
+
+func windowRunTestCase(t *testing.T, db *sql.DB, query, want string, wantErr bool) {
+	t.Helper()
+	if wantErr {
+		rows, err := db.Query(query)
+		if rows != nil {
+			rows.Close()
+		}
+		if err == nil {
+			t.Errorf("expected error, got none")
+		}
+		return
+	}
+	got := windowQueryResult(t, db, query)
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
@@ -474,16 +479,18 @@ func formatFloat64(f float64) string {
 	if f == float64(int64(f)) {
 		return formatInt64(int64(f)) + ".0"
 	}
-	// For more complex floats, we need a basic formatter
 	if f < 0 {
 		return "-" + formatFloat64(-f)
 	}
+	return formatPositiveFloat(f)
+}
+
+func formatPositiveFloat(f float64) string {
 	intPart := int64(f)
 	fracPart := f - float64(intPart)
 
 	// Round to 2 decimal places
-	fracPart = fracPart * 100
-	fracInt := int64(fracPart + 0.5)
+	fracInt := int64(fracPart*100 + 0.5)
 
 	if fracInt >= 100 {
 		intPart++
@@ -500,10 +507,12 @@ func formatFloat64(f float64) string {
 	}
 	result += formatInt64(fracInt)
 
-	// Trim trailing zeros
-	for len(result) > 0 && result[len(result)-1] == '0' && result[len(result)-2] != '.' {
-		result = result[:len(result)-1]
-	}
+	return trimTrailingZeros(result)
+}
 
-	return result
+func trimTrailingZeros(s string) string {
+	for len(s) > 0 && s[len(s)-1] == '0' && s[len(s)-2] != '.' {
+		s = s[:len(s)-1]
+	}
+	return s
 }

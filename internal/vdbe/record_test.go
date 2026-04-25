@@ -28,11 +28,9 @@ func compareDecodedNonNil(t *testing.T, i int, original, result interface{}) {
 func decodedValuesMatch(original, result interface{}) bool {
 	switch orig := original.(type) {
 	case int64:
-		res, ok := result.(int64)
-		return ok && res == orig
+		return decodedInt64Match(orig, result)
 	case float64:
-		res, ok := result.(float64)
-		return ok && res == orig
+		return decodedFloat64Match(orig, result)
 	case string:
 		res, ok := result.(string)
 		return ok && res == orig
@@ -41,6 +39,16 @@ func decodedValuesMatch(original, result interface{}) bool {
 		return ok && bytes.Equal(res, orig)
 	}
 	return false
+}
+
+func decodedInt64Match(orig int64, result interface{}) bool {
+	res, ok := result.(int64)
+	return ok && res == orig
+}
+
+func decodedFloat64Match(orig float64, result interface{}) bool {
+	res, ok := result.(float64)
+	return ok && res == orig
 }
 
 func TestEncodeDecodeRecord(t *testing.T) {

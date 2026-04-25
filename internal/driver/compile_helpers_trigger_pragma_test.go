@@ -2,6 +2,7 @@
 package driver
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
 )
@@ -396,26 +397,9 @@ func testEmitNonIdentifierColumn(t *testing.T) {
 // EXPLAIN output exercises emitExplainRow → formatP4 for all P4Type branches.
 // ---------------------------------------------------------------------------
 
-func testFormatP4(t *testing.T) {
-	t.Parallel()
-	db := setupMemoryDB(t)
-	defer db.Close()
-
-	// Create a table so that the compiled program contains P4Static (OpString8)
-	// as well as plain integer opcodes and other variants.
-	if _, err := db.Exec("CREATE TABLE fp1(id INTEGER, name TEXT)"); err != nil {
-		t.Fatalf("create table: %v", err)
-	}
-
-	// EXPLAIN SELECT emits a program containing OpString8 (P4Static/P4Dynamic),
-	// OpInteger, and other opcodes.  Scanning all rows exercises formatP4 for
-	// each instruction in the program.
-	rows, err := db.Query("EXPLAIN SELECT id, name FROM fp1")
-	if err != nil {
-		t.Fatalf("EXPLAIN query: %v", err)
-	}
-	defer rows.Close()
-
+// scanExplainRows scans all rows from an EXPLAIN query, returning the count.
+func scanExplainRows(t *testing.T, rows interface{ Next() bool; Scan(...interface{}) error; Err() error }) int {
+	t.Helper()
 	var count int
 	for rows.Next() {
 		var addr, p1, p2, p3, p5 int
@@ -424,22 +408,21 @@ func testFormatP4(t *testing.T) {
 			t.Fatalf("scan explain row: %v", err)
 		}
 		count++
-		_ = p4 // formatP4 result — just ensure no panic
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows.Err: %v", err)
 	}
-	if count == 0 {
-		t.Fatal("expected at least one EXPLAIN row")
-	}
+	return count
+}
 
-	// Also EXPLAIN an INSERT with a string literal so P4Static/string path is hit.
+// testFormatP4ExplainInsert checks that EXPLAIN INSERT contains a String opcode with non-empty P4.
+func testFormatP4ExplainInsert(t *testing.T, db *sql.DB) {
+	t.Helper()
 	rows2, err := db.Query("EXPLAIN INSERT INTO fp1 VALUES(1,'alice')")
 	if err != nil {
 		t.Fatalf("EXPLAIN INSERT query: %v", err)
 	}
 	defer rows2.Close()
-
 	var hasP4String bool
 	for rows2.Next() {
 		var addr, p1, p2, p3, p5 int
@@ -455,7 +438,31 @@ func testFormatP4(t *testing.T) {
 		t.Fatalf("rows2.Err: %v", err)
 	}
 	if !hasP4String {
-		// Not a hard failure: some engines may encode strings differently.
 		t.Log("note: no String opcode with non-empty P4 found in EXPLAIN INSERT")
 	}
+}
+
+func testFormatP4(t *testing.T) {
+	t.Parallel()
+	db := setupMemoryDB(t)
+	defer db.Close()
+
+	if _, err := db.Exec("CREATE TABLE fp1(id INTEGER, name TEXT)"); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	t.Run("explain_select", func(t *testing.T) {
+		rows, err := db.Query("EXPLAIN SELECT id, name FROM fp1")
+		if err != nil {
+			t.Fatalf("EXPLAIN query: %v", err)
+		}
+		defer rows.Close()
+		if scanExplainRows(t, rows) == 0 {
+			t.Fatal("expected at least one EXPLAIN row")
+		}
+	})
+
+	t.Run("explain_insert", func(t *testing.T) {
+		testFormatP4ExplainInsert(t, db)
+	})
 }
