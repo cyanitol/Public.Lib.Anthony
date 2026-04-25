@@ -1085,7 +1085,11 @@ func TestIndexCursorDeleteIndex(t *testing.T) {
 	keys := [][]byte{
 		[]byte("alpha"), []byte("beta"), []byte("gamma"), []byte("delta"),
 	}
-	insertIndexEntries(cursor, keys)
+	for i, k := range keys {
+		if err := cursor.InsertIndex(k, int64(i+1)); err != nil {
+			t.Fatalf("InsertIndex(%q): %v", k, err)
+		}
+	}
 
 	if err := cursor.DeleteIndex([]byte("beta"), 2); err != nil {
 		t.Fatalf("DeleteIndex(beta,2): %v", err)
