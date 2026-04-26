@@ -33,6 +33,11 @@ type dbState struct {
 	// writeVersion is incremented atomically on each successful commit.
 	// Used for Optimistic Concurrency Control (OCC) conflict detection.
 	writeVersion uint64
+
+	// schemaVersion tracks committed schema-generation changes separately from
+	// general write activity. This is groundwork for future extended-mode
+	// visibility rules.
+	schemaVersion uint64
 }
 
 // Driver implements database/sql/driver.Driver for SQLite.
@@ -228,6 +233,7 @@ func (d *Driver) buildConnection(filename string, state *dbState, secCfg *securi
 		stmtCache:      NewStmtCache(100),
 		writeMu:        &state.writeMu,
 		writeVersion:   &state.writeVersion,
+		schemaVersion:  &state.schemaVersion,
 		securityConfig: secCfg,
 		compatMode:     compatMode,
 	}

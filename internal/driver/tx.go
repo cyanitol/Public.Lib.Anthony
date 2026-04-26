@@ -34,6 +34,7 @@ func (tx *Tx) Commit() error {
 		if err := tx.endReadTransaction(); err != nil {
 			return err
 		}
+		tx.conn.discardSchemaChange()
 		tx.finish()
 		return nil
 	}
@@ -76,6 +77,8 @@ func (tx *Tx) Rollback() error {
 		tx.conn.btree.ClearCache()
 	}
 
+	tx.conn.discardSchemaChange()
+
 	tx.finish()
 
 	return nil
@@ -95,6 +98,7 @@ func (tx *Tx) commitWriteTransaction() error {
 	if tx.conn.writeVersion != nil {
 		atomic.AddUint64(tx.conn.writeVersion, 1)
 	}
+	tx.conn.commitSchemaChange()
 	tx.conn.clearDeferredFKViolations()
 	tx.finish()
 	return nil
@@ -115,6 +119,7 @@ func (tx *Tx) hasWriteConflict() bool {
 func (tx *Tx) abortWriteConflict() {
 	_ = tx.conn.pager.Rollback()
 	tx.conn.btree.ClearCache()
+	tx.conn.discardSchemaChange()
 	tx.finish()
 }
 

@@ -30,25 +30,28 @@ var ErrWriteConflict = errors.New("write conflict: concurrent modification detec
 
 // Conn implements database/sql/driver.Conn for SQLite.
 type Conn struct {
-	driver       *Driver
-	filename     string
-	pager        pager.PagerInterface
-	btree        *btree.Btree
-	schema       *schema.Schema
-	funcReg      *functions.Registry
-	dbRegistry   *schema.DatabaseRegistry
-	stmts        map[*Stmt]struct{}
-	stmtCache    *StmtCache
-	mu           sync.Mutex
-	writeMu      *sync.Mutex // Shared across all connections to the same database
-	writeVersion *uint64     // Points to dbState.writeVersion; shared across connections
-	closed       bool
+	driver        *Driver
+	filename      string
+	pager         pager.PagerInterface
+	btree         *btree.Btree
+	schema        *schema.Schema
+	funcReg       *functions.Registry
+	dbRegistry    *schema.DatabaseRegistry
+	stmts         map[*Stmt]struct{}
+	stmtCache     *StmtCache
+	mu            sync.Mutex
+	writeMu       *sync.Mutex // Shared across all connections to the same database
+	writeVersion  *uint64     // Points to dbState.writeVersion; shared across connections
+	schemaVersion *uint64     // Points to dbState.schemaVersion; shared across connections
+	closed        bool
 
 	// Transaction state
-	inTx          bool
-	sqlTx         bool   // true when transaction was started via SQL (BEGIN/SAVEPOINT)
-	savepointOnly bool   // true when transaction was started implicitly by SAVEPOINT
-	startVersion  uint64 // writeVersion snapshot at write transaction start (OCC)
+	inTx                bool
+	sqlTx               bool   // true when transaction was started via SQL (BEGIN/SAVEPOINT)
+	savepointOnly       bool   // true when transaction was started implicitly by SAVEPOINT
+	startVersion        uint64 // writeVersion snapshot at write transaction start (OCC)
+	startSchemaVersion  uint64
+	pendingSchemaChange bool
 
 	// PRAGMA settings
 	foreignKeysEnabled bool
@@ -306,10 +309,7 @@ func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 		return nil, fmt.Errorf("failed to begin write transaction: %w", err)
 	}
 
-	// Snapshot the current write version for OCC conflict detection at commit time.
-	if c.writeVersion != nil {
-		c.startVersion = atomic.LoadUint64(c.writeVersion)
-	}
+	c.snapshotVersions()
 
 	c.inTx = true
 	c.setFKTransactionState(true)
@@ -337,6 +337,15 @@ func (c *Conn) lockQueryCompatibility() func() {
 	}
 	c.writeMu.Lock()
 	return func() { c.writeMu.Unlock() }
+}
+
+func (c *Conn) snapshotVersions() {
+	if c.writeVersion != nil {
+		c.startVersion = atomic.LoadUint64(c.writeVersion)
+	}
+	if c.schemaVersion != nil {
+		c.startSchemaVersion = atomic.LoadUint64(c.schemaVersion)
+	}
 }
 
 // setFKTransactionState sets the transaction state in the foreign key manager.
@@ -427,6 +436,28 @@ func (c *Conn) clearTxState() {
 	c.inTx = false
 	c.sqlTx = false
 	c.savepointOnly = false
+}
+
+func (c *Conn) recordSchemaChange() {
+	if c.inTx {
+		c.pendingSchemaChange = true
+		return
+	}
+	c.commitSchemaChange()
+}
+
+func (c *Conn) commitSchemaChange() {
+	if !c.pendingSchemaChange && c.inTx {
+		return
+	}
+	if c.schemaVersion != nil {
+		atomic.AddUint64(c.schemaVersion, 1)
+	}
+	c.pendingSchemaChange = false
+}
+
+func (c *Conn) discardSchemaChange() {
+	c.pendingSchemaChange = false
 }
 
 // reloadSchemaAfterRollback reloads the in-memory schema from the btree

@@ -121,12 +121,7 @@ func (s *Stmt) executeAndCommit(args []driver.NamedValue, inTx bool) (driver.Res
 	if err := s.runVMWithRollback(vm, inTx); err != nil {
 		return nil, err
 	}
-
-	// Check if schema changed during execution (e.g., root page split)
-	// If so, invalidate the statement cache
-	if vm.SchemaChanged && s.conn.stmtCache != nil {
-		s.conn.stmtCache.InvalidateAll()
-	}
+	s.afterSuccessfulRun(vm)
 
 	// Transaction control statements manage transaction boundaries themselves.
 	if err := s.applyTxnControl(); err != nil {
@@ -143,6 +138,18 @@ func (s *Stmt) executeAndCommit(args []driver.NamedValue, inTx bool) (driver.Res
 	return s.buildResult(vm), nil
 }
 
+func (s *Stmt) afterSuccessfulRun(vm *vdbe.VDBE) {
+	if s.isSchemaMutationStatement() {
+		s.conn.recordSchemaChange()
+	}
+
+	// Check if schema changed during execution (e.g., root page split)
+	// If so, invalidate the statement cache.
+	if vm.SchemaChanged && s.conn.stmtCache != nil {
+		s.conn.stmtCache.InvalidateAll()
+	}
+}
+
 // applyTxnControl updates connection state after transaction control statements.
 func (s *Stmt) applyTxnControl() error {
 	switch s.txnControlType() {
@@ -150,9 +157,12 @@ func (s *Stmt) applyTxnControl() error {
 		s.conn.inTx = true
 		s.conn.sqlTx = true
 		s.conn.savepointOnly = false
+		s.conn.snapshotVersions()
 	case txnCommit:
+		s.conn.commitSchemaChange()
 		s.conn.clearTxState()
 	case txnRollback:
+		s.conn.discardSchemaChange()
 		s.conn.clearTxState()
 		s.conn.reloadSchemaAfterRollback()
 	case txnSavepoint:
@@ -181,6 +191,7 @@ func (s *Stmt) commitSavepointTransaction() error {
 			return fmt.Errorf("auto-commit after release: %w", err)
 		}
 	}
+	s.conn.commitSchemaChange()
 	s.conn.clearTxState()
 	return nil
 }
@@ -191,9 +202,30 @@ func (s *Stmt) runVMWithRollback(vm *vdbe.VDBE, inTx bool) error {
 		if !inTx {
 			s.conn.pager.Rollback()
 		}
+		s.conn.discardSchemaChange()
 		return fmt.Errorf("execution error: %w", err)
 	}
 	return nil
+}
+
+func (s *Stmt) isSchemaMutationStatement() bool {
+	switch s.ast.(type) {
+	case *parser.CreateTableStmt,
+		*parser.CreateVirtualTableStmt,
+		*parser.DropTableStmt,
+		*parser.CreateIndexStmt,
+		*parser.DropIndexStmt,
+		*parser.CreateViewStmt,
+		*parser.DropViewStmt,
+		*parser.CreateTriggerStmt,
+		*parser.DropTriggerStmt,
+		*parser.AlterTableStmt,
+		*parser.AttachStmt,
+		*parser.DetachStmt:
+		return true
+	default:
+		return false
+	}
 }
 
 // txnControlType classifies the statement as a transaction control statement.
